@@ -73,6 +73,10 @@ public:
     bool takeDamage(Rect& out) { if (!m_hasDamage) return false; out = m_damage; m_hasDamage = false; return true; }
 
     void setEventHandler(UiEventFn fn, void* context) { m_eventFn = fn; m_eventContext = context; }
+    /// Debug aid: render spaces as a middle dot and tabs as a right arrow in editable fields.
+    /// Caret and selection geometry follow the substituted glyphs so positions stay aligned.
+    void setWhitespaceVisible(bool visible) { m_showWhitespace = visible; }
+    bool whitespaceVisible() const { return m_showWhitespace; }
     /// Supplies the renderer used to create Image widget textures (lazily, at paint time).
     /// May be nullptr for headless clients; Image widgets then paint their placeholder frame.
     void setRenderer(Renderer* renderer) { m_renderer = renderer; }
@@ -156,6 +160,7 @@ private:
     Rect searchClearRect(const Node& node) const;
     void applyNumberStep(Node& node, f32 direction);
     bool commitNumberText(Node& node);
+    void resetCaretBlink();
     void refreshTooltipTarget(std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
     void addDamage(Rect rect);
     Node* findNode(NodeId layoutNode);
@@ -188,6 +193,9 @@ private:
     void* m_eventContext = nullptr;
     Renderer* m_renderer = nullptr;
     std::chrono::steady_clock::time_point m_spinnerDeadline{};
+    std::chrono::steady_clock::time_point m_caretBlinkDeadline{};
+    bool m_caretVisible = true;
+    bool m_showWhitespace = false;
     NodeId m_dragSplit;
     SplitDrag m_splitDrag;
     f32 m_dragStart = 0;

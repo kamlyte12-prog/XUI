@@ -2,6 +2,37 @@
 
 This file records project changes, design decisions, trade-offs, current status, and next steps. It is updated as implementation work lands.
 
+## Caret blink, whitespace visualization, demo polish — 2026-10-14
+
+### Audit and diagnosis
+
+- The caret was drawn every frame while an editable field was focused: no blink existed, and the timer system had no caret state. Text input itself already handled spaces (printable codepoints) and TextArea newlines correctly; Tab already moved focus and never inserted into fields — but none of this was documented, and the demo offered no way to see whitespace/control characters.
+- Caret-prefix measurement used the raw stored text while display could differ (password bullets); the new whitespace substitution would have widened that mismatch, so prefix measurement had to share the substitution.
+
+### Changes and decisions
+
+- **Blinking caret**: `UiRuntime` now blinks the caret of focused, enabled, writable `TextBox`/`TextArea` fields on a 530 ms tick driven by the existing idle timer (`updateTimers`/`nextTimerDelay`), so an idle app with a focused field wakes at most ~2x/second and no other frame is touched. Blink resets to solid on typing, caret movement, deletion, paste, and focus gain (`resetCaretBlink()`); it is suppressed for read-only/disabled fields and stopped entirely when no editable field is focused. Picker popup editors blink through the same mechanism. Only the focused fields' rectangles get damage per blink.
+- **Whitespace visualization**: new `setWhitespaceVisible(bool)` debug API renders spaces as a middle dot (·, U+00B7) and tabs as a right arrow (→, U+2192) inside editable fields. Substitution is one-codepoint-to-one-codepoint and caret/selection prefixes are measured through the same `visualizeWhitespace()` mapping, so caret and selection stay aligned with the drawn glyphs. Password fields are excluded. The showcase demo exposes it as an "Show whitespace marks" checkbox.
+- **Tab decision (documented)**: Tab always moves keyboard focus; it never inserts a tab character. Textual tabs can still be pasted. This avoids conflicting keyboard semantics and matches the existing focus system; `doc/widgets.md` now states it.
+- **Demo polish**: added the whitespace-mark toggle to the Input tab with a tooltip. The existing stylesheet already provided a token-driven hierarchy with consistent radii/pads and full hover/focus/pressed/checked/readonly/disabled coverage; a larger visual redesign was deliberately not attempted in the same change as two runtime behavior features (verification is serialized, and the visual baseline is already cohesive).
+
+### Trade-offs and limitations
+
+- Password-field caret position is measured against the raw text while the display shows bullets; this mismatch predates this change (bullets are one codepoint per source codepoint only for ASCII) and is still open.
+- Blink uses the global idle timer rather than per-field timing; with a focused field the process wakes twice per second in an otherwise idle state — same trade-off as the FPS counter, kept for consistency.
+- The whitespace substitution covers space and tab; newlines render as real line breaks in `TextArea` and cannot occur in `TextBox`.
+
+### Verification and current status
+
+- **Not compiled.** The caret/whitespace runtime changes and the demo additions were made without build or test execution in this session (owner directive). The previously delivered Phase 1 runtime compiled clean under MSVC `/W4 /WX` before these edits; everything since — including these edits and the earlier showcase changes — awaits one compile + suite run + visible smoke pass.
+- Automated coverage is missing for blink timing and whitespace substitution; both are runtime-observable behaviors that deserve unit tests in the next suite run.
+
+### Next steps
+
+1. Compile `xui_tests` + `xui_glfw_demo`; fix any compile errors (highest-risk edits: the caret-prefix lambda and blink block in `paint()`).
+2. Run the suite, then the demo: verify caret blinks when focused and goes solid while typing, whitespace marks toggle renders and keeps caret alignment, Tab moves focus between all controls, and no text overlap or freezes during resize.
+3. Add tests: caret blink scheduling (`updateTimers`/`nextTimerDelay` around a focused field), `visualizeWhitespace` round-trip with caret prefixes, and Tab focus behavior.
+
 ## Showcase demo extended to the full widget set — 2026-10-14
 
 ### What was added

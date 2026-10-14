@@ -140,7 +140,9 @@ RadioGroup.radio { resting: { size: 240px 108px, fg: #60a5fa, font-size: 14px, p
 
 ### `TextBox`
 
-A single-line editable UTF-8 field. It supports initial `value`, `placeholder`, `maxLength` (Unicode code points), `readOnly`, `password`, `disabled`, `tooltip`, and `change`. Clicking focuses it; text input inserts UTF-8 text. Backspace/Delete erase the previous/next code point, Shift+Left/Right/Home/End select text, and Ctrl+A/C/X/V select all, copy, cut, and paste through the platform clipboard interface. Typing or deleting while a selection exists replaces/removes that selection. An empty field activates the `.xss` `placeholder` state. Its authored `id` reads/writes a `std::string` through `value(id)` / `setValue(id, value)`.
+A single-line editable UTF-8 field. It supports initial `value`, `placeholder`, `maxLength` (Unicode code points), `readOnly`, `password`, `disabled`, `tooltip`, and `change`. Clicking focuses it; text input inserts UTF-8 text, including spaces. Backspace/Delete erase the previous/next code point, Shift+Left/Right/Home/End select text, and Ctrl+A/C/X/V select all, copy, cut, and paste through the platform clipboard interface. Typing or deleting while a selection exists replaces/removes that selection. Tab always moves keyboard focus and never inserts a tab character into a field; multi-line entry belongs in `TextArea`. A focused editable field shows a blinking caret: it blinks while the field is idle, stays solid while typing or moving the caret, and is hidden for read-only or disabled fields. An empty field activates the `.xss` `placeholder` state. Its authored `id` reads/writes a `std::string` through `value(id)` / `setValue(id, value)`.
+
+For debugging text layout, `UiRuntime::setWhitespaceVisible(true)` renders spaces as a middle dot (·) and tabs as a right arrow (→) inside editable fields; caret and selection geometry are measured through the same substitution, so positions stay aligned with the drawn glyphs. The showcase demo exposes this as a checkbox.
 
 ```xui
 TextBox[id: "email", value: "", placeholder: "name@example.com", maxLength: 120,

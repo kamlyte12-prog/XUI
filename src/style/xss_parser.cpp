@@ -1,6 +1,7 @@
 #include "xss_ast.hpp"
 #include <xui/core/color.hpp>
 #include <charconv>
+#include <cstdlib>
 #include <string>
 namespace xui::xss {
 namespace {
@@ -83,7 +84,8 @@ private:
         while (m_i < m_s.size() && isDigit(m_s[m_i])) ++m_i;
         if (m_i + 1 < m_s.size() && m_s[m_i] == '.' && isDigit(m_s[m_i + 1])) { ++m_i; while (m_i < m_s.size() && isDigit(m_s[m_i])) ++m_i; }
         f32 v = 0;
-        std::from_chars(m_s.data() + b, m_s.data() + m_i, v);
+        // was: std::from_chars(m_s.data() + b, m_s.data() + m_i, v);
+        { const std::string tmp(m_s.data() + b, m_s.data() + m_i); v = std::strtof(tmp.c_str(), nullptr); }
         Unit u = Unit::None;
         if (m_i < m_s.size() && m_s[m_i] == '%') { u = Unit::Percent; ++m_i; }
         else if (m_i < m_s.size() && isAlpha(m_s[m_i])) {

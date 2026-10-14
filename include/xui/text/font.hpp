@@ -8,6 +8,7 @@
 #include <xui/core/math.hpp>
 #include <xui/core/types.hpp>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <string_view>
 #include <vector>

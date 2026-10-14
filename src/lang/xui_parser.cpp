@@ -1,5 +1,7 @@
 #include <xui/core/color.hpp>
 #include <xui/lang/xui.hpp>
+#include <cstdlib>
+#include <string>
 #include <charconv>
 namespace xui {
 namespace {
@@ -76,7 +78,9 @@ private:
         std::size_t b = m_i;
         while (m_i < m_end && isDigit(m_s[m_i])) ++m_i;
         if (m_i + 1 < m_end && m_s[m_i] == '.' && isDigit(m_s[m_i + 1])) { ++m_i; while (m_i < m_end && isDigit(m_s[m_i])) ++m_i; }
-        f32 v = 0; std::from_chars(m_s.data() + b, m_s.data() + m_i, v); return v;
+        // was: f32 v = 0; std::from_chars(m_s.data() + b, m_s.data() + m_i, v); return v;
+        const std::string tmp(m_s.data() + b, m_s.data() + m_i);
+        f32 v = std::strtof(tmp.c_str(), nullptr); return v;
     }
     void number(std::vector<Token>& out) {
         u32 st = u32(m_i);

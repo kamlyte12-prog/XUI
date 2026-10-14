@@ -9,6 +9,7 @@
 namespace xui {
 namespace {
 constexpr auto kFpsRefreshInterval = std::chrono::milliseconds(250);
+constexpr auto kCaretBlinkInterval = std::chrono::milliseconds(530);
 std::string_view literal(const Document& document, const StringInterner& strings, u32 expression) {
     if (expression >= document.exprs.size()) return {};
     const XExpr& e = document.exprs[expression];
@@ -200,6 +201,20 @@ std::string formatNumberText(f32 value, u32 precision) {
     if (precision) std::snprintf(text, sizeof(text), "%.*f", static_cast<int>(std::min<u32>(precision, 6)), double(value));
     else std::snprintf(text, sizeof(text), "%.6g", double(value));
     return text;
+}
+
+/// Debug substitution: space -> U+00B7 middle dot, tab -> U+2192 right arrow. Both map one
+/// codepoint to one codepoint, so byte offsets into the original text stay codepoint-aligned
+/// when caret prefixes are measured through the same substitution.
+std::string visualizeWhitespace(std::string_view text) {
+    std::string out;
+    out.reserve(text.size());
+    for (std::size_t i = 0; i < text.size();) {
+        if (text[i] == ' ') { out += "\xC2\xB7"; ++i; }
+        else if (text[i] == '\t') { out += "\xE2\x86\x92"; ++i; }
+        else { out += text[i]; ++i; }
+    }
+    return out;
 }
 
 bool loadUiAssets(std::string_view xuiSource, std::string_view xssSource, StringInterner& strings,
@@ -818,6 +833,29 @@ void UiRuntime::paint(Painter& painter, f32 dpiScale) {
                 addDamage(m_layout.absRect(m_nodes[i].layout));
             }
     } else if (!spinnerActive) m_spinnerDeadline = {};
+    // Caret blink: only tick while an editable field holds focus; other frames are untouched.
+    bool editableFocused = false;
+    for (u32 i = 0; i < m_nodes.size(); ++i) {
+        const Node& node = m_nodes[i];
+        if ((node.textBox || node.textArea) && node.focused && !node.disabled && !node.readOnly && isNodeVisible(i)) { editableFocused = true; break; }
+    }
+    if (editableFocused) {
+        if (m_caretBlinkDeadline.time_since_epoch().count() == 0) {
+            m_caretBlinkDeadline = now + kCaretBlinkInterval;
+            m_caretVisible = true;
+        } else if (now >= m_caretBlinkDeadline) {
+            m_caretVisible = !m_caretVisible;
+            m_caretBlinkDeadline = now + kCaretBlinkInterval;
+            for (u32 i = 0; i < m_nodes.size(); ++i) {
+                const Node& node = m_nodes[i];
+                if ((node.textBox || node.textArea) && node.focused && !node.disabled && !node.readOnly && isNodeVisible(i))
+                    addDamage(node.pickerEditor ? pickerEditorRect(node) : m_layout.absRect(node.layout));
+            }
+        }
+    } else if (m_caretBlinkDeadline.time_since_epoch().count() != 0) {
+        m_caretBlinkDeadline = {};
+        m_caretVisible = true;
+    }
     m_dpiScale = std::max(0.25f, dpiScale);
     for (u32 nodeIndex = 0; nodeIndex < m_nodes.size(); ++nodeIndex) {
         Node& node = m_nodes[nodeIndex];
@@ -1056,6 +1094,17 @@ void UiRuntime::paint(Painter& painter, f32 dpiScale) {
             for (std::size_t i = 0; i < node.text.size(); i = nextUtf8(node.text, i)) appendUtf8(passwordMask, 0x2022u);
             displayText = passwordMask;
         }
+        std::string visualText;
+        if (m_showWhitespace && (node.textBox || node.textArea) && !placeholderText && !node.password) {
+            visualText = visualizeWhitespace(node.text);
+            displayText = visualText;
+        }
+        // Caret and selection prefixes must be measured through the same substitution as the
+        // displayed glyphs, or the caret would drift from the drawn characters.
+        auto caretPrefixText = [&](std::size_t byteOffset) {
+            const std::string raw(node.text.data(), std::min(byteOffset, node.text.size()));
+            return (m_showWhitespace && (node.textBox || node.textArea) && !node.password) ? visualizeWhitespace(raw) : raw;
+        };
         if (displayText.empty()) { painter.popOpacity(); continue; }
 
         if (!node.font.valid()) { painter.popOpacity(); continue; }
@@ -1102,8 +1151,7 @@ void UiRuntime::paint(Painter& painter, f32 dpiScale) {
         else if (!node.checkItem && textAlign == Align::End) x += rect.w - runWidth - padRight;
         else x += padLeft;
         if (node.textBox && !placeholderText && node.focused) {
-            const std::string_view prefix(node.text.data(), std::min(node.caret, node.text.size()));
-            const TextLayout& caretRun = m_text->layout(node.font, prefix, rasterSize, 0.f);
+            const TextLayout& caretRun = m_text->layout(node.font, caretPrefixText(node.caret), rasterSize, 0.f);
             const f32 caretPosition = caretRun.width / m_dpiScale;
             x = rect.x + textLeft - std::clamp(caretPosition - contentWidth, 0.f, std::max(0.f, runWidth - contentWidth));
         } else if (node.textArea || node.textBox) x = rect.x + textLeft;
@@ -1113,7 +1161,8 @@ void UiRuntime::paint(Painter& painter, f32 dpiScale) {
             const std::size_t begin = std::min(node.caret, node.selectionAnchor);
             const std::size_t end = std::max(node.caret, node.selectionAnchor);
             auto caretAt = [&](std::size_t byteOffset) {
-                const TextLayout& prefix = m_text->layout(node.font, std::string_view(node.text).substr(0, byteOffset), rasterSize, node.textArea ? contentWidth * m_dpiScale : 0.f);
+                const std::string prefixText = caretPrefixText(byteOffset);
+                const TextLayout& prefix = m_text->layout(node.font, prefixText, rasterSize, node.textArea ? contentWidth * m_dpiScale : 0.f);
                 const u32 line = prefix.lineStarts.empty() ? 0u : static_cast<u32>(prefix.lineStarts.size() - 1);
                 const u32 lineFirst = prefix.lineStarts.empty() ? 0u : prefix.lineStarts.back();
                 const f32 cx = prefix.glyphs.size() > lineFirst
@@ -1138,8 +1187,8 @@ void UiRuntime::paint(Painter& painter, f32 dpiScale) {
             painter.line({clearRect.x + inset, clearRect.y + inset}, {clearRect.right() - inset, clearRect.bottom() - inset}, 1.2f, mark);
             painter.line({clearRect.right() - inset, clearRect.y + inset}, {clearRect.x + inset, clearRect.bottom() - inset}, 1.2f, mark);
         }
-        if ((node.textBox || node.textArea) && node.focused && !node.disabled && !node.readOnly && !placeholderText) {
-            const std::string_view prefix(node.text.data(), std::min(node.caret, node.text.size()));
+        if ((node.textBox || node.textArea) && node.focused && !node.disabled && !node.readOnly && !placeholderText && m_caretVisible) {
+            const std::string prefix = caretPrefixText(node.caret);
             const TextLayout& caretRun = m_text->layout(node.font, prefix, rasterSize, node.textArea ? contentWidth * m_dpiScale : 0.f);
             f32 caretX = 0.f, caretY = 0.f;
             if (!caretRun.glyphs.empty()) {
@@ -1285,7 +1334,7 @@ void UiRuntime::paint(Painter& painter, f32 dpiScale) {
             painter.fillRect({rect.x+5.f+x1,rect.y+3.f,std::max(1.f,x2-x1),rect.h-6.f},Color::fromRGBA8(0x4F7DE088u));
         }
         drawLabel(editor.text, rect, editor.font, editor.style, foreground, 5.f, false);
-        if (editor.focused && !editor.disabled && !editor.readOnly && m_text && editor.font.valid()) {
+        if (editor.focused && !editor.disabled && !editor.readOnly && m_caretVisible && m_text && editor.font.valid()) {
             const f32 caretX = m_text->layout(editor.font, std::string_view(editor.text).substr(0, std::min(editor.caret, editor.text.size())), fontSize*m_dpiScale).width/m_dpiScale;
             painter.line({rect.x+5.f+caretX,rect.y+5.f},{rect.x+5.f+caretX,rect.bottom()-5.f},1.f,foreground);
         }
@@ -1526,6 +1575,7 @@ bool UiRuntime::pointerDown(Vec2 point) {
         if (node.focused != focus) addDamage(m_layout.absRect(node.layout));
         if (!focus && node.focused && node.numberField && !node.disabled) commitNumberText(node);
         node.focused = focus;
+        if (focus && (node.textBox || node.textArea)) resetCaretBlink();
         if (!node.hovered && !node.focused) node.tooltipDismissed = false;
         if ((node.textBox || node.textArea) && focus) node.caret = node.text.size();
         if ((node.textBox || node.textArea) && focus) node.selectionAnchor = node.caret;
@@ -1713,7 +1763,7 @@ bool UiRuntime::keyDown(Key key, u8 mods, Platform* platform) {
             else if (field.numberField) commitNumberText(field);
             else if (field.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(field.pressHandler));
         }
-        if (edited || oldCaret != field.caret) { addDamage(field.pickerEditor ? pickerEditorRect(field) : m_layout.absRect(field.layout)); return true; }
+        if (edited || oldCaret != field.caret) { resetCaretBlink(); addDamage(field.pickerEditor ? pickerEditorRect(field) : m_layout.absRect(field.layout)); return true; }
         if (key == Key::Backspace || key == Key::Delete) return false;
         break;
     }
@@ -1832,6 +1882,7 @@ bool UiRuntime::textInput(u32 codepoint) {
         if (end > begin) field.text.erase(begin, end - begin);
         field.text.insert(begin, encoded);
         field.caret = field.selectionAnchor = begin + encoded.size();
+        resetCaretBlink();
         m_layout.markContentChanged(field.layout); addDamage(field.pickerEditor ? pickerEditorRect(field) : m_layout.absRect(field.layout));
         if (field.pickerEditor) updatePickerFromEditor(field);
         else if (field.numberField) commitNumberText(field);
@@ -1982,6 +2033,11 @@ bool UiRuntime::updatePickerFromEditor(Node& editor) {
     addDamage(popupBounds(anchor, false, 0, m_lastLayoutHeight, owner.pickerWidth, owner.pickerHeight));
     if (owner.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(owner.pressHandler));
     return true;
+}
+
+void UiRuntime::resetCaretBlink() {
+    m_caretVisible = true;
+    m_caretBlinkDeadline = std::chrono::steady_clock::now() + kCaretBlinkInterval;
 }
 
 Rect UiRuntime::searchClearRect(const Node& node) const {
@@ -2164,6 +2220,14 @@ bool UiRuntime::updateTimers(std::chrono::steady_clock::time_point now) {
     } else if (!spinnerVisible && m_spinnerDeadline.time_since_epoch().count() != 0) {
         m_spinnerDeadline = {};
     }
+    if (m_caretBlinkDeadline.time_since_epoch().count() != 0 && now >= m_caretBlinkDeadline) {
+        for (u32 i = 0; i < m_nodes.size(); ++i) {
+            const Node& node = m_nodes[i];
+            if ((node.textBox || node.textArea) && node.focused && !node.disabled && !node.readOnly && isNodeVisible(i))
+                addDamage(node.pickerEditor ? pickerEditorRect(node) : m_layout.absRect(node.layout));
+        }
+        redraw = true;
+    }
     return redraw;
 }
 
@@ -2182,6 +2246,10 @@ f64 UiRuntime::nextTimerDelay(std::chrono::steady_clock::time_point now) const {
     if (m_spinnerDeadline.time_since_epoch().count() != 0) {
         const f64 spinnerDelay = std::max(0.0, std::chrono::duration<f64>(m_spinnerDeadline - now).count());
         delay = delay < 0.0 ? spinnerDelay : std::min(delay, spinnerDelay);
+    }
+    if (m_caretBlinkDeadline.time_since_epoch().count() != 0) {
+        const f64 caretDelay = std::max(0.0, std::chrono::duration<f64>(m_caretBlinkDeadline - now).count());
+        delay = delay < 0.0 ? caretDelay : std::min(delay, caretDelay);
     }
     return delay;
 }

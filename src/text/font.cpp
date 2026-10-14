@@ -178,9 +178,9 @@ void Font::parseName(u32 off) {
                     j += 2;
                 }
                 if (cp < 0x80) out += char(cp);
-                else if (cp < 0x800) { out += char(0xC0 | cp >> 6); out += char(0x80 | cp & 63); }
-                else if (cp < 0x10000) { out += char(0xE0 | cp >> 12); out += char(0x80 | cp >> 6 & 63); out += char(0x80 | cp & 63); }
-                else { out += char(0xF0 | cp >> 18); out += char(0x80 | cp >> 12 & 63); out += char(0x80 | cp >> 6 & 63); out += char(0x80 | cp & 63); }
+                else if (cp < 0x800) { out += char(0xC0 | (cp >> 6)); out += char(0x80 | (cp & 63)); }
+                else if (cp < 0x10000) { out += char(0xE0 | (cp >> 12)); out += char(0x80 | ((cp >> 6) & 63)); out += char(0x80 | (cp & 63)); }
+                else { out += char(0xF0 | (cp >> 18)); out += char(0x80 | ((cp >> 12) & 63)); out += char(0x80 | ((cp >> 6) & 63)); out += char(0x80 | (cp & 63)); }
             }
         } else
             for (u16 j = 0; j < len; ++j) out += m_data[base + j];

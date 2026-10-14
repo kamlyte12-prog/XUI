@@ -71,6 +71,9 @@ void onUiEvent(void* context, std::string_view name) {
     } else if (name == "onRadioChange") {
         if (const auto value = valueAs<std::string>(app, "density-choice"))
             app.runtime().setValue("radio-readout", "Layout: " + *value);
+    } else if (name == "onWhitespaceToggle") {
+        // Debug aid: spaces render as a middle dot, tabs as a right arrow inside editable fields.
+        if (const auto value = valueAs<bool>(app, "whitespace-toggle")) app.runtime().setWhitespaceVisible(*value);
     }
 }
 

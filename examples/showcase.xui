@@ -45,6 +45,12 @@ Window(title: "Xui GLFW/OpenGL widget showcase", size: 1080x760) {
                    change: onNumberChange, class: "number", width: 220px, height: 40px]
             Text("Delay: 250 ms")[id: "number-readout", class: "value-readout", width: 320px, height: 24px]
           }
+
+          // Debug view for control characters: spaces render as a middle dot, tabs as a right arrow.
+          // Tab always moves keyboard focus in Xui; it never inserts a tab character into a field.
+          CheckBox(label: "Show whitespace marks")[id: "whitespace-toggle", checked: false,
+                  tooltip: "Render spaces as a middle dot and tabs as a right arrow in the fields above.",
+                  change: onWhitespaceToggle, class: "checkbox", width: 300px, height: 34px, pad: 5px]
         }
       }
 

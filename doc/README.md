@@ -18,7 +18,7 @@ Xui keeps authored structure, visual rules, and platform rendering separate:
 7. [Performance guide](performance.md) — redraw/layout guidance and measured performance context.
 8. [Troubleshooting](troubleshooting.md) — diagnosing text, layout, rendering, and responsiveness issues.
 
-The root [architecture.md](../architecture.md) contains the project's architecture notes and historical performance measurements. This documentation guide explains the current public API and runtime behavior; implementation limits are called out rather than implied by parser acceptance.
+[`tracking.md`](../tracking.md) records implementation notes, design choices, and status. This documentation guide explains the current public API and runtime behavior; implementation limits are called out rather than implied by parser acceptance.
 
 ## Current scope
 

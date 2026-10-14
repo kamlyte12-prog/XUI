@@ -2,13 +2,9 @@
 
 > An experimental C++23 GUI framework: describe your UI in `.xui`, style it in `.xss`, and plug in any rendering or windowing backend.
 
-<!-- 📍 Badge suggestions (add only the ones that apply):
-[![Build](https://img.shields.io/badge/build-TODO-lightgrey)](TODO)
-[![Version](https://img.shields.io/badge/version-TODO-lightgrey)](TODO)
-[![License](https://img.shields.io/badge/license-TODO-lightgrey)](TODO)
-[![C++23](https://img.shields.io/badge/C%2B%2B-23-blue)](TODO)
--->
-
+[![CI](https://github.com/kamlyte12-prog/XUI/actions/workflows/ci.yml/badge.svg)](https://github.com/kamlyte12-prog/XUI/actions/workflows/ci.yml)
+![C++23](https://img.shields.io/badge/C%2B%2B-23-00599C)
+![CMake](https://img.shields.io/badge/CMake-3.25%2B-064F8C)
 
 ---
 
@@ -85,11 +81,6 @@ Xui separates **what your UI is** from **how it looks** and **where it runs**:
 
 ![Screenshot](doc/showcase.png)
 
-<!-- 📍 Suggested visuals:
-  1. Screenshot of the showcase window, one per tab.
-  2. GIF of dragging a Split divider and using the dropdown/color picker.
-  3. Diagram: .xui + .xss -> Xui -> DrawList -> Renderer, with Platform feeding events in. -->
-
 The `showcase.xui` / `showcase.xss` example demonstrates editable fields, checkbox, tabs, delayed tooltips, dropdown, color picker, checklist, resizable panels, slider, progress bar, and an FPS counter.
 
 Press **F3** in either example to toggle the `.xss`-styled FPS counter. It is visible on first launch.
@@ -99,7 +90,7 @@ Press **F3** in either example to toggle the `.xss`-styled FPS counter. It is vi
 ## 📋 Prerequisites
 
 - CMake **3.25+**
-- A **C++23** compiler
+- A **C++23** compiler (CI builds with GCC 13, Clang 18, Apple Clang on macOS 14, and MSVC 2022)
 - **OpenGL 2.1** support
 - Linux/macOS: the system OpenGL development package (the GLFW source is bundled)
 
@@ -107,12 +98,21 @@ Press **F3** in either example to toggle the `.xss`-styled FPS counter. It is vi
 
 ## 📦 Installation
 
-Xui is built from source with CMake. [TODO: Document how to consume Xui from another project (e.g., `add_subdirectory`, `find_package`, or package manager), since the existing README does not specify this.]
+Xui builds from source with CMake:
 
 ```sh
 git clone https://github.com/kamlyte12-prog/XUI.git
 cd XUI
 ```
+
+To use Xui in your own CMake project, add the checkout as a subdirectory and link the application facade target `xui_widgets` (it publicly links the core, asset parser, layout, rendering, and text libraries):
+
+```cmake
+add_subdirectory(path/to/xui)
+target_link_libraries(my_app PRIVATE xui_widgets)
+```
+
+> **Note:** Xui does not yet define an install/export package target, so `find_package` and package managers are not available yet. [TODO: Update this section when install rules or a package are added.]
 
 ---
 
@@ -137,7 +137,7 @@ cmake -S . -B build/glfw -DXUI_BUILD_GLFW_EXAMPLE=ON -DXUI_BUILD_TESTS=OFF -DXUI
 cmake --build build/glfw --target xui_glfw_demo
 ```
 
-Run `xui_glfw_demo` from any working directory. It loads the copied `showcase.xui` and `showcase.xss` beside its executable. [TODO: Add the exact output path of `xui_glfw_demo` per platform.]
+Run `xui_glfw_demo` from any working directory — it loads the copied `showcase.xui` and `showcase.xss` beside its executable. With the default CMake generator the executable lands in `build/glfw/examples/` (`build\glfw\examples\Release\` with the Visual Studio generator).
 
 > 💡 If the demo can't find a font, set `XUI_DEMO_FONT` to a `.ttf` path.
 
@@ -252,7 +252,7 @@ int main() {
 | `Platform` | Owns the native window. Translates input into normalized events with top-left-origin logical coordinates. Reports logical client size, physical framebuffer size, and DPI. Waits instead of busy-polling when idle. |
 | `Renderer` | Owns the drawing device/surface and texture lifecycle. Executes the backend-neutral `DrawList`. Implements frame begin/submit/end/present. Reports truthful capabilities. |
 
-Neither interface parses `.xui` or `.xss`. `Xui` accepts both as references, so applications can provide custom implementations without OS calls in shared application code. See [`architecture.md`](architecture.md) for interface contracts and data flow.
+Neither interface parses `.xui` or `.xss`. `Xui` accepts both as references, so applications can provide custom implementations without OS calls in shared application code. See [Architecture and backend development](doc/architecture.md) for interface contracts and data flow.
 
 ### Before and after the facade
 
@@ -271,49 +271,57 @@ Neither interface parses `.xui` or `.xss`. `Xui` accepts both as references, so 
 
 ### `XuiOptions` (C++)
 
-`XuiOptions` customizes the following. [TODO: List exact field names and defaults from the header.]
+Pass `XuiOptions` to the `Xui` constructor (or `setWindowOptions()`) to customize the window and atlas:
 
-| Option | Purpose | Default |
+| Field | Purpose | Default |
 | --- | --- | --- |
-| App/window names | Application and window naming | xui-app |
-| Initial and minimum size | Starting and minimum window size | 720x440 |
-| Resizability | Whether the window can be resized | true |
-| Visibility | Whether the window is shown | true |
-| OpenGL-context request (`glContext`) | Request a GL context; set `glContext = false` for a non-GL backend | true |
-| Vsync | Vertical sync | false |
-| Glyph atlas size | Size of the glyph texture atlas | GlyphAtlas::kMinSize |
+| `appName` | Application name | `"xui-app"` |
+| `windowTitle` | Window title | `"Xui"` |
+| `width`, `height` | Initial window size | 720 × 440 |
+| `minWidth`, `minHeight` | Minimum window size | 128 × 96 |
+| `resizable` | Whether the window can be resized | `true` |
+| `visible` | Whether the window is shown | `true` |
+| `glContext` | Request a GL context; set `false` for a non-GL backend | `true` |
+| `vsync` | Vertical sync | `false` |
+| `atlasSize` | Size of the glyph texture atlas | `GlyphAtlas::kMinSize` |
+
+`Xui::run()` optionally takes `XuiRunOptions` with `maxSeconds` (`0` runs until the platform reports close) and `redrawContinuously` (default `false`). The demos use these to implement `--profile`.
 
 ### CMake options
 
 | Option | Purpose | Default |
 | --- | --- | --- |
-| `XUI_BUILD_TESTS` | Build tests | ON |
-| `XUI_BUILD_BENCHMARKS` | Build benchmarks | ON |
-| `XUI_BUILD_GLFW_EXAMPLE` | Build the cross-platform GLFW demo (`xui_glfw_demo`) | ON |
+| `XUI_BUILD_TESTS` | Build tests (`xui_tests`) | ON |
+| `XUI_BUILD_BENCHMARKS` | Build benchmarks and fuzz harnesses | ON |
+| `XUI_BUILD_EXAMPLES` | Build runnable examples | ON |
+| `XUI_BUILD_GLFW_EXAMPLE` | Build the cross-platform GLFW + OpenGL demo (`xui_glfw_demo`; also `xui_hello` on Windows) | ON |
+| `XUI_WERROR` | Treat compiler warnings as errors | ON |
+| `XUI_SANITIZE` | Enable ASan + UBSan (GCC/Clang only) | OFF |
 
 ### Environment variables and runtime flags
 
 | Name | Applies to | Purpose | Default |
 | --- | --- | --- | --- |
-| `--profile` | `xui_hello`, `xui_glfw_demo` | Run a hidden, bounded, continuously redrawn five-second profile loop | ON |
+| `--profile` (flag) | `xui_hello`, `xui_glfw_demo` | Run a hidden, bounded, continuously redrawn five-second profile loop and print frames + FPS | Off |
 | `F3` (key) | Both demos | Toggle the FPS counter | Visible on first launch |
+| `XUI_DEMO_FONT` (env var) | Both demos | Adds a `.ttf` path to the demo's font search list | unset |
 
 ---
 
 ## 🗂️ Project structure
 
-> [TODO: Verify and complete this tree against the repository; only the items below are mentioned in the existing README.]
-
 ```text
 .
-├── doc/             # Focused guides (see doc/README.md)
-│   ├── README.md    # Documentation index
-│   ├── widgets.md   # Supported widgets, options, limitations
-│   └── architecture.md  # Architecture and backend development
-├── examples/        # xui_hello and xui_glfw_demo; showcase.xui / showcase.xss
-├── architecture.md  # Project architecture notes and measurement history
-├── tracking.md      # Audit findings, design choices, status, next steps
-└── CMakeLists.txt   # [TODO: confirm]
+├── .github/workflows/   # CI: Debug build + tests on GCC, Clang, MSVC
+├── benchmarks/          # Performance benchmarks (bench_*) and fuzz harnesses (fuzz_*)
+├── doc/                 # Focused guides (see doc/README.md for the index)
+├── examples/            # xui_glfw_demo and xui_hello (Windows); showcase / controls / cross_platform assets; bundled GLFW 3.5.1
+├── include/xui/         # Public headers (<xui/xui.hpp> facade plus core, lang, layout, platform, render, style, text, ui)
+├── src/                 # Library sources mirroring the include/xui/ modules
+├── tests/               # Unit tests and golden-image baselines (tests/golden)
+├── CMakeLists.txt       # Top-level build: xui_core, xui_assets, xui_layout, xui_renderer, xui_platform, xui_text, xui_widgets
+├── CONTRIBUTING.md      # Contribution guide
+└── tracking.md          # Audit findings, design choices, status, next steps
 ```
 
 ---
@@ -325,6 +333,12 @@ cmake -S . -B build/debug -DXUI_BUILD_TESTS=ON -DXUI_BUILD_BENCHMARKS=ON
 cmake --build build/debug --config Debug
 ctest --test-dir build/debug -C Debug --output-on-failure
 ```
+
+The suite is the `xui_tests` target: unit tests for core, layout, render, text, `.xui`/`.xss` parsing, and the runtime, plus golden-image comparisons against the baselines in [`tests/golden/`](tests/golden).
+
+Benchmark and fuzz targets built with `XUI_BUILD_BENCHMARKS=ON`: `bench_style`, `bench_xui`, `bench_layout`, `bench_paint`, `fuzz_parsers`, `fuzz_layout`, `fuzz_paint`.
+
+For a sanitizer build with GCC/Clang, add `-DXUI_SANITIZE=ON` (CI runs this on Ubuntu). CI builds Debug and runs `ctest` with GCC 13, GCC 13 + ASan/UBSan, Clang 18, Apple Clang, and MSVC.
 
 ---
 
@@ -340,21 +354,19 @@ The [`doc/`](doc/README.md) folder contains focused guides on:
 - Performance
 - Troubleshooting
 
-Start with the [documentation index](doc/README.md). Renderer/platform authors can go directly to [Architecture and backend development](doc/architecture.md). The root [`architecture.md`](architecture.md) remains available as the project's architecture notes and measurement history.
+Start with the [documentation index](doc/README.md). Renderer/platform authors can go directly to [Architecture and backend development](doc/architecture.md). [`tracking.md`](tracking.md) records audit findings, design choices, and known issues.
 
 ---
 
 ## 🤝 Contributing
 
-[TODO: Add contribution guidelines (issue reporting, pull request process, code style).]
-
-Before submitting changes, please run the [build and test](#-build-and-test) commands above.
+Before submitting changes, please run the [build and test](#-build-and-test) commands above. For further info check [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ---
 
 ## 📄 License
 
-[TODO: Add license name and link to the `LICENSE` file.]
+[TODO: Add a LICENSE file and state the license here.] The bundled GLFW 3.5.1 under `examples/lib/` keeps its own license; see [`examples/lib/glfw-3.5.1/LICENSE.md`](examples/lib/glfw-3.5.1/LICENSE.md).
 
 ---
 
@@ -379,4 +391,4 @@ Set `glContext = false` in `XuiOptions` and provide your own `Renderer` and `Pla
 The `Xui` facade is one-window and one-run. Use the lower-level APIs (`UiRuntime`, `LayoutTree`, `Painter`, text APIs).
 
 **Other problems?**
-See the troubleshooting guide in [`doc/`](doc/README.md). [TODO: Link the exact troubleshooting page.]
+See the [troubleshooting guide](doc/troubleshooting.md), or [open an issue](https://github.com/kamlyte12-prog/XUI/issues).

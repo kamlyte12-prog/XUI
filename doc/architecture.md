@@ -102,4 +102,4 @@ For a host-managed loop, the lower-level order is: load/validate the `Program`, 
 
 The parser/schema has more widget names and language syntax than `UiRuntime` supports. See [UI object reference](widgets.md) for implemented controls and the schema-only list. Dynamic expression evaluation, `if`/`for`, component expansion, text editing, property-filter selector lookup, theme switching, and animation playback are not implemented by the standard runtime.
 
-The root [architecture.md](../architecture.md) includes earlier architectural notes and profiling measurements. This guide is the current interface reference.
+This guide is the current interface reference. Historical implementation notes are recorded in [`tracking.md`](../tracking.md).

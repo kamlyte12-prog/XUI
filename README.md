@@ -102,7 +102,6 @@ Press **F3** in either example to toggle the `.xss`-styled FPS counter. It is vi
 - A **C++23** compiler
 - **OpenGL 2.1** support
 - Linux/macOS: the system OpenGL development package (the GLFW source is bundled)
-- Optional: a `.ttf` font file for the cross-platform demo if it cannot find a system font (see [Configuration](#-configuration))
 
 ---
 

@@ -3,6 +3,7 @@
 #include <xui/lang/xui.hpp>
 #include <xui/layout/layout.hpp>
 #include <xui/platform/platform.hpp>
+#include <xui/render/image_io.hpp>
 #include <xui/render/painter.hpp>
 #include <xui/style/xss.hpp>
 #include <xui/text/text_layout.hpp>
@@ -72,6 +73,9 @@ public:
     bool takeDamage(Rect& out) { if (!m_hasDamage) return false; out = m_damage; m_hasDamage = false; return true; }
 
     void setEventHandler(UiEventFn fn, void* context) { m_eventFn = fn; m_eventContext = context; }
+    /// Supplies the renderer used to create Image widget textures (lazily, at paint time).
+    /// May be nullptr for headless clients; Image widgets then paint their placeholder frame.
+    void setRenderer(Renderer* renderer) { m_renderer = renderer; }
     NodeId root() const { return m_root; }
     Rect bounds(NodeId node) const { return m_layout.absRect(node); }
     f32 controlValue(NodeId node) const { const Node* n = findNode(node); return n ? n->value : 0.f; }
@@ -106,6 +110,18 @@ private:
         bool pickerShowHue = true, pickerShowSaturationValue = true;
         bool textBox = false, textArea = false, tabs = false, tab = false, readOnly = false, password = false;
         bool fpsCounter = false, showFrameTime = true, disabled = false;
+        bool radioGroup = false, switchToggle = false, toggleButton = false;
+        bool numberField = false, searchField = false, numberBounded = false;
+        bool label = false, badge = false, separator = false, spinner = false, image = false;
+        bool imageLoaded = false, imageFailed = false;
+        u8 imageFit = 1;   // 0 Fill, 1 Contain, 2 Cover
+        u32 imageW = 0, imageH = 0;
+        TextureHandle imageTexture;
+        Image imagePixels;
+        std::string imageSource, unit;
+        u32 numberPrecision = 0;   // 0 formats with %g (shortest round-trip style)
+        f32 stepValue = 1.f;
+        f32 spinnerPhase = 0.f;    // radians; advanced by the timer tick
         bool checked = false, hovered = false, pressed = false, focused = false;
         bool tooltipDisabled = false, tooltipHideOnClick = true, tooltipDismissed = false;
         u8 tooltipTrigger = 2; // 0=none, 1=hover, 2=focus, 3=both
@@ -137,6 +153,9 @@ private:
     bool updatePickerFromEditor(Node& editor);
     bool isNodeVisible(u32 index) const;
     u32 hitTestNode(Vec2 point) const;
+    Rect searchClearRect(const Node& node) const;
+    void applyNumberStep(Node& node, f32 direction);
+    bool commitNumberText(Node& node);
     void refreshTooltipTarget(std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
     void addDamage(Rect rect);
     Node* findNode(NodeId layoutNode);
@@ -167,6 +186,8 @@ private:
     u32 m_authoredNodeCount = 0;
     UiEventFn m_eventFn = nullptr;
     void* m_eventContext = nullptr;
+    Renderer* m_renderer = nullptr;
+    std::chrono::steady_clock::time_point m_spinnerDeadline{};
     NodeId m_dragSplit;
     SplitDrag m_splitDrag;
     f32 m_dragStart = 0;

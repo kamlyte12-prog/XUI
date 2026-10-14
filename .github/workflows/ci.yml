@@ -1,36 +1,58 @@
 name: ci
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+
 jobs:
   build:
+    name: ${{ matrix.name }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-24.04,  cc: gcc-13,   cxx: g++-13,     san: OFF }
-          - { os: ubuntu-24.04,  cc: gcc-13,   cxx: g++-13,     san: ON  }   # ASan + UBSan
-          - { os: ubuntu-24.04,  cc: clang-18, cxx: clang++-18, san: OFF }
-          - { os: macos-14,      cc: "",       cxx: "",        san: OFF }
-          - { os: windows-2022,  cc: "",       cxx: "",        san: OFF }   # MSVC /W4 /WX
+          - { name: linux-gcc13,     os: ubuntu-24.04, cc: gcc-13,   cxx: g++-13,     san: "OFF", werror: "ON"  }
+          - { name: linux-gcc13-san, os: ubuntu-24.04, cc: gcc-13,   cxx: g++-13,     san: "ON",  werror: "OFF" }  # ASan + UBSan
+          - { name: linux-clang18,   os: ubuntu-24.04, cc: clang-18, cxx: clang++-18, san: "OFF", werror: "ON"  }
+          - { name: macos-14,        os: macos-14,     cc: "",       cxx: "",          san: "OFF", werror: "ON"  }
+          - { name: windows-2022,    os: windows-2022, cc: "",       cxx: "",          san: "OFF", werror: "ON"  }  # MSVC /W4 /WX
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
-      # The bundled GLFW 3.5.1 builds both X11 and Wayland by default on Linux and the
-      # examples need OpenGL headers; none of these dev packages ship with the runner image.
-      - name: Install Linux GL/X11/Wayland development packages
+      - name: Install Linux GL/X11 development packages
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libgl-dev xorg-dev libwayland-dev libxkbcommon-dev
+          sudo apt-get install -y --no-install-recommends pkg-config libgl-dev xorg-dev
+
+      - name: Relax ASLR for ASan
+        if: runner.os == 'Linux' && matrix.san == 'ON'
+        run: sudo sysctl vm.mmap_rnd_bits=28
 
       - name: Configure
-        shell: bash
         run: |
           if [ -n "${{ matrix.cxx }}" ]; then
             export CC="${{ matrix.cc }}" CXX="${{ matrix.cxx }}"
           fi
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DXUI_SANITIZE=${{ matrix.san }}
+          EXTRA=""
+          # Build only GLFW's X11 backend on Linux; Wayland needs extra packages.
+          if [ "$RUNNER_OS" = "Linux" ]; then EXTRA="-DGLFW_BUILD_WAYLAND=OFF"; fi
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DXUI_BUILD_TESTS=ON \
+            -DXUI_BUILD_BENCHMARKS=OFF \
+            -DXUI_BUILD_EXAMPLES=ON \
+            -DXUI_WERROR=${{ matrix.werror }} \
+            -DXUI_SANITIZE=${{ matrix.san }} \
+            $EXTRA
+
       - name: Build
         run: cmake --build build --config Debug --parallel
+
       - name: Test
+        env:
+          UBSAN_OPTIONS: print_stacktrace=1
         run: ctest --test-dir build -C Debug --output-on-failure

@@ -24,6 +24,10 @@ if(XUI_SANITIZE AND NOT MSVC)
   target_compile_options(xui_warnings INTERFACE -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer)
   target_link_options(xui_warnings INTERFACE -fsanitize=address,undefined)
 endif()
+if(APPLE)
+  # Apple's OpenGL headers are deprecated; without this, -Werror breaks every GL call.
+  target_compile_definitions(xui_warnings INTERFACE GL_SILENCE_DEPRECATION)
+endif()
 
 # --- xui_core: handles, arenas, interner, math, colour, diagnostics. Zero third-party deps. ---
 add_library(xui_core STATIC src/core/color.cpp src/core/diagnostic.cpp)

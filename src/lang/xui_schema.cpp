@@ -43,10 +43,10 @@ XuiSchema XuiSchema::withCoreWidgets() {
     W("Switch", {}, {"checked", "label"});
     W("TextBox", {}, {"placeholder", "value", "maxLength", "password", "readOnly"});
     W("TextArea", {}, {"placeholder", "value", "maxLength", "readOnly", "rows"});
-    W("NumberField", {}, {"value", "min", "max", "step", "precision", "unit", "label"});
+    W("NumberField", {}, {"value", "min", "max", "step", "precision", "unit", "label", "readOnly"});
     W("Slider", {}, {"value", "min", "max", "step"});  W("RangeSlider", {}, {"low", "high", "min", "max", "step"});
     W("Dropdown", {}, {"value", "options", "placeholder"});  W("ComboBox", {}, {"value", "options", "placeholder"});
-    W("SearchField", {}, {"placeholder", "value"});   W("ColorPicker", {}, {"value", "alpha", "format", "formats", "precision", "popupSize", "showAlpha", "showInputs", "showFormatSwitcher", "showHue", "showSaturationValue"});
+    W("SearchField", {}, {"placeholder", "value", "maxLength", "readOnly"});   W("ColorPicker", {}, {"value", "alpha", "format", "formats", "precision", "popupSize", "showAlpha", "showInputs", "showFormatSwitcher", "showHue", "showSaturationValue"});
     W("DatePicker", {}, {"value"});       W("KeybindField", {}, {"value"});
     W("Text", {"text"}, {"wrap", "maxLines"});  W("Label", {"text"}, {});
     W("Image", {"source"}, {"fit"});      W("Icon", {"name"}, {});

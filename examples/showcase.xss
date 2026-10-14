@@ -82,3 +82,44 @@ CheckItem.check-item {
   disabled: { opacity: 0.45 }
 }
 Tooltip { resting: { bg: #202a40, fg: color.fg, font-size: 13px, pad: 7px, radius: 5px, border: 1px solid color.outline } }
+
+// Phase 1 widgets: selection, numeric/search entry, and display controls.
+Separator.rule { resting: { fg: #2a3a57, margin: 10px 0px } }
+Switch.switch {
+  resting: { fg: color.accent, font-size: 14px }
+  hover: { fg: color.accent-hover }
+  focus: { border: 1px solid color.accent }
+  disabled: { opacity: 0.45 }
+}
+ToggleButton.toggle {
+  resting: { bg: color.raised, fg: color.fg, radius: 7px, font-size: 13px }
+  hover: { bg: #293b5c }
+  pressed: { opacity: 0.78 }
+  checked: { bg: color.accent, fg: color.fg }
+  focus: { border: 1px solid color.accent }
+  disabled: { opacity: 0.45 }
+}
+RadioGroup.radio {
+  resting: { fg: color.accent, font-size: 14px }
+  hover: { fg: color.accent-hover }
+  focus: { border: 1px solid color.accent }
+  disabled: { opacity: 0.45 }
+}
+NumberField.number {
+  resting: { bg: #10192b, fg: color.fg, border: 1px solid color.outline, radius: 7px, pad: 9px, font-size: 14px }
+  hover: { border: 1px solid color.accent-hover }
+  focus: { border: 2px solid color.accent }
+  readonly: { bg: #1a2233, fg: #bac6da }
+  disabled: { opacity: 0.45 }
+}
+SearchField.search {
+  resting: { bg: #10192b, fg: color.fg, border: 1px solid color.outline, radius: 20px, pad: 9px, font-size: 14px }
+  hover: { border: 1px solid color.accent-hover }
+  focus: { border: 2px solid color.accent }
+  placeholder: { fg: color.muted }
+  disabled: { opacity: 0.45 }
+}
+Label.demo-label { resting: { fg: color.fg, font-size: 14px } }
+Badge.badge { resting: { bg: color.accent, fg: color.fg, radius: 11px, font-size: 12px, align: Center } }
+Spinner.spinner { resting: { fg: color.accent } disabled: { opacity: 0.4 } }
+Image.demo-image { resting: { radius: 8px } }

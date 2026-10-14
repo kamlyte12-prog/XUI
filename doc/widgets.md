@@ -100,6 +100,44 @@ CheckBox(label: "Enable notifications")[id: "notifications", checked: true, chan
 
 Style it through `CheckBox` selectors and the `hover`, `focus`, `checked`, and `disabled` states. It has no indeterminate state or native accessibility bridge yet.
 
+### `Switch`
+
+An on/off toggle rendered as a track with a sliding knob and an optional label to its right. `checked` sets the initial state; the authored `id` exposes a `bool` through `value()` / `setValue()`. Clicking toggles on release, Space/Enter toggle when focused, and both invoke `change`.
+
+```xui
+Switch[label: "Wi-Fi", checked: true, change: onWifi][id: "wifi", class: "switch"]
+```
+
+The on-state track takes the control's `fg`; the unchecked track and the knob are fixed colors. The label uses the normal text properties and is offset clear of the track automatically. Without an explicit size and label the widget measures 44x24; with a label the text adds to the intrinsic width. There is no indeterminate state.
+
+```xss
+Switch.switch { resting: { size: 64px 32px, fg: #2563eb, font-size: 14px } hover: { fg: #3b82f6 } focus: { border: 1px solid #70a7ff } checked: { fg: #2563eb } disabled: { opacity: 0.45 } }
+```
+
+### `ToggleButton`
+
+A push button with a persistent checked state, for on/off toolbar actions. `ToggleButton("Mute")` or `ToggleButton[label: "Mute", checked: true, change: onMute]`. Clicking toggles `checked` on release and invokes `change`; Space/Enter toggle when focused. Text is centered like `Button`, and the `pressed`, `checked`, `focus`, and `disabled` states all style it.
+
+```xss
+ToggleButton.tool { resting: { size: 40px 32px, bg: #1d293b, fg: #dce6f8, radius: 6px } hover: { bg: #2b3d58 } checked: { bg: #2563eb, fg: #ffffff } disabled: { opacity: 0.45 } }
+```
+
+The schema accepts `icon`, but the runtime does not render icons yet.
+
+### `RadioGroup`
+
+A single-select group of options rendered as radio rows inside one control. Supply pipe-separated `options`, an optional initial `value` (an option string), and `change: handler`. Clicking a row selects it; Up/Down/Left/Right move the selection when the group is focused. Hovering highlights the row under the pointer with a row-local tint, like dropdown rows. The authored `id` reads and writes the selected option string.
+
+```xui
+RadioGroup[id: "layout", options: "Compact|Comfortable|Spacious", value: "Comfortable", change: onLayout][class: "radio"]
+```
+
+Rows are painted by the control rather than authored as `.xui` children, so per-row selectors are not available. `fg` colors the ring, the selection dot, the row hover tint, and the option labels; the selected ring draws at two pixels.
+
+```xss
+RadioGroup.radio { resting: { size: 240px 108px, fg: #60a5fa, font-size: 14px, pad: 6px } hover: { fg: #93c5fd } focus: { border: 1px solid #70a7ff } disabled: { opacity: 0.45 } }
+```
+
 ### `TextBox`
 
 A single-line editable UTF-8 field. It supports initial `value`, `placeholder`, `maxLength` (Unicode code points), `readOnly`, `password`, `disabled`, `tooltip`, and `change`. Clicking focuses it; text input inserts UTF-8 text. Backspace/Delete erase the previous/next code point, Shift+Left/Right/Home/End select text, and Ctrl+A/C/X/V select all, copy, cut, and paste through the platform clipboard interface. Typing or deleting while a selection exists replaces/removes that selection. An empty field activates the `.xss` `placeholder` state. Its authored `id` reads/writes a `std::string` through `value(id)` / `setValue(id, value)`.
@@ -136,6 +174,34 @@ Style size, padding, font, foreground/background, border, radius, and shared con
 TextArea.notes { resting: { size: 420px 140px, pad: 10px, bg: #172033, fg: #f5f7ff, border: 1px solid #40506b, radius: 6px, font-size: 14px } focus: { border: 2px solid #70a7ff } placeholder: { fg: #929db1 } }
 ```
 
+### `NumberField`
+
+A single-line numeric editor built on the `TextBox` editing path (caret, selection, clipboard, `readOnly`, `disabled`) with numeric behavior. `value`, `min`, and `max` set the initial and clamped number; `step` (default 1) is the Up/Down increment; `precision` (0–6, default 0 = shortest round-trip formatting) formats stepped and programmatic values; `unit` is appended to formatted text; `change: handler` fires whenever the committed value changes.
+
+```xui
+NumberField[id: "delay", value: 250, min: 0, max: 2000, step: 50, unit: "ms", change: onDelay][class: "number"]
+```
+
+Typing is filtered to numeric characters (`0-9`, `.`, `-`, `+`, `e`, `E`, spaces). Every valid edit commits immediately and fires `change`; a partially typed value (for example a lone `-`) stays in the editor without changing the value. Up/Down step by `step` and reformat the text clamped to `min`/`max` when provided. `value(id)` returns the committed `f64`; `setValue(id, f64)` clamps, reformats with the unit, and is silent unless `notify=true`; `setValue(id, std::string)` parses and commits like typed input. Invalid entries never change the value, and the editor keeps what you typed until a step or programmatic set reformats it.
+
+```xss
+NumberField.number { resting: { size: 140px 36px, pad: 8px, bg: #172033, fg: #f5f7ff, border: 1px solid #40506b, radius: 6px, font-size: 14px } focus: { border: 2px solid #70a7ff } disabled: { opacity: 0.45 } readonly: { fg: #929db1 } }
+```
+
+### `SearchField`
+
+A single-line query field: `TextBox` semantics (placeholder, UTF-8 input, selection, clipboard, `maxLength`, `readOnly`) plus a clear affordance. When the field has text, an `×` glyph is drawn at the right edge; clicking it, or pressing Escape while focused, clears the field and fires `change`. Every edit fires `change` like `TextBox`.
+
+```xui
+SearchField[id: "query", placeholder: "Search widgets…", change: onQuery][class: "search"]
+```
+
+Style it with `SearchField` selectors; the reserved clear region (about 18 logical pixels) is carved out of the text area automatically, and the caret never runs under the glyph.
+
+```xss
+SearchField.search { resting: { size: 280px 36px, pad: 9px, bg: #172033, fg: #f5f7ff, border: 1px solid #40506b, radius: 18px, font-size: 14px } focus: { border: 2px solid #70a7ff } placeholder: { fg: #929db1 } }
+```
+
 ### `Tabs` and `Tab`
 
 `Tabs` accepts an initial zero-based `selected` index, `disabled`, `id`, and `change`; its only children are `Tab` pages. `Tab` requires a title and contains the page subtree. Headers have equal width. Click a header or focus Tabs and press Left/Right to switch pages. Use the Tabs `id` to read or set a `u32` selected index.
@@ -170,15 +236,53 @@ Tooltip { resting: { bg: #202a40, fg: #f2f6ff, font-size: 13px, pad: 7px, radius
 
 `tooltipShowDelay` and `tooltipHideDelay` are milliseconds, clamped to 0–60,000. `tooltipTrigger` accepts `"hover"`, `"focus"`, `"both"`, or `"none"`. `tooltipHideOnClick` and `tooltipDisabled` are booleans. Setting `tooltipDisabled: true` prevents this target's tooltip from showing. A click hides a visible tooltip immediately when hide-on-click is enabled; the current target stays suppressed until it loses hover and focus. Popups suppress tooltip painting so an open dropdown/color picker stays unobscured. Tooltips are backend-neutral pointer-transparent overlays whose placement is clamped to the window; they are not standalone child nodes. Rich content and per-tooltip selectors are not available yet.
 
+## Display controls
+
+### `Label`
+
+A static text leaf, equivalent to `Text` under a different semantic name: `Label("Username")` or `Label[text: "Username"]`. It wraps at the available content width, clips to its box, supports the shared text properties, and blocks pointer input like `Text`. Its authored `id` reads and writes the string through `value()` / `setValue()` / `controlText()`.
+
+### `Badge`
+
+A short text leaf for counts and status words: `Badge("New")` or `Badge[text: "3"]`. It renders exactly like other text leaves; give it `bg`, `fg`, `radius`, `pad`, and `align: Center` in `.xss` for the pill look. It participates in layout as an ordinary leaf and exposes its text through the value API.
+
+```xss
+Badge.tag { resting: { bg: #2563eb, fg: #ffffff, size: auto 22px, pad: 7px 2px, radius: 11px, font-size: 12px, align: Center } }
+```
+
+### `Separator` and `Divider`
+
+Aliases for the same control: a thin line drawn in the control's `fg`. The intrinsic size is 12x1; inside a `Column` the default cross-axis stretch spans the container width, and inside a `Row` give it an explicit `size` (for example `size: 1px 32px` draws a vertical divider). Orientation follows the painted aspect: a region wider than tall draws horizontally.
+
+```xss
+Separator.rule { resting: { fg: #33415560, margin: 8px 0px } }
+```
+
+### `Image`
+
+Paints a PNG file: `Image("assets/logo.png")` or `Image[source: "assets/logo.png", fit: Cover]`. The file is read once at first paint, uploaded as an RGBA8 texture through the `Renderer` interface, drawn aspect-correct per `fit` (`Fill` stretches, `Contain` — the default — letterboxes, `Cover` fills and center-crops), and clipped to the widget with optional `radius`. Missing sources, unreadable files, or headless clients without a renderer draw an outlined placeholder box instead of failing.
+
+> **Decoder limit:** `Image` currently reads only the uncompressed PNG variant this project writes (`xui::writePng`: 8-bit RGBA, filters 0/2, stored or fixed-Huffman deflate blocks). Compressed PNGs from other tools fall back to the placeholder until a general decoder lands. Do not point `Image` at arbitrary assets yet. The showcase demo generates its own image with `writePng` at startup (see `examples/glfw_demo.cpp`) and reads it back through this path.
+
+Without an explicit size, a source-less image measures 96x64 and a loaded image takes its natural pixel size as logical pixels.
+
+### `Spinner`
+
+An activity indicator: eight radial ticks in the control's `fg` with a fading tail, rotating one step per 80 ms timer tick. It animates only while enabled and visible and uses the runtime's idle-event timer, so it never forces continuous redraws. The intrinsic size is 18x18; scale it with `size`. A disabled spinner stops animating and picks up the `disabled` state styles.
+
+```xss
+Spinner.busy { resting: { size: 24px 24px, fg: #60a5fa } }
+```
+
 ## Stacking and hit testing
 
 Normal widgets paint in `.xui` tree order: a parent paints before its children, and later siblings paint above earlier siblings. Hit testing walks that order in reverse, stops at the first visible painted hit surface, and updates at most one target's hover, focus, press, or activation state. Visible controls, text, and panels block widgets behind them, including disabled controls. Transparent `Row` and `Column` containers pass pointer input through. Inactive tabs are excluded.
 
-Open dropdown and color-picker popups sit above the tree and tab headers and receive pointer input inside their popup bounds. Clicking outside closes an open popup, then the exposed target receives that click. Tab headers sit above ordinary tree content. Tooltips are pointer-transparent and hidden while a popup is open. Arbitrary `.xss z-index` and general container clipping are not implemented; pointer coordinates are clipped to the window, and inactive tabs are filtered consistently with painting.
+Open dropdown and color-picker popups sit above the tree and tab headers and receive pointer input inside their popup bounds. Clicking outside closes an open popup, then the exposed target receives that click. Tab headers sit above ordinary tree content. Tooltips are pointer-transparent and hidden while a popup is open. `Label`, `Badge`, `Spinner`, and `Image` nodes block pointer input like text and panels. RadioGroup rows and the SearchField clear region are part of their control: a click inside the group's bounds selects the row under the pointer, and a click on the clear region clears the field. Arbitrary `.xss z-index` and general container clipping are not implemented; pointer coordinates are clipped to the window, and inactive tabs are filtered consistently with painting.
 
 ## Reading and changing values
 
-Stateful controls with an authored `id` expose a typed `std::optional<UiValue>` from `ui.runtime().value(id)`. The alternatives are `bool` for `CheckItem` / `CheckBox`, `f64` for `Slider`, `std::string` for `Dropdown` / `TextBox` / `TextArea` / identified `Text` nodes, `Color` for `ColorPicker`, and `u32` for the selected `Tabs` index. `setValue(id, value)` updates and redraws a control; `notify` defaults to `false`. User interaction invokes the authored `change` callback, where the application can read the current value.
+Stateful controls with an authored `id` expose a typed `std::optional<UiValue>` from `ui.runtime().value(id)`. The alternatives are `bool` for `CheckItem` / `CheckBox` / `Switch` / `ToggleButton`, `f64` for `Slider` / `NumberField`, `std::string` for `Dropdown` / `RadioGroup` / `SearchField` / `TextBox` / `TextArea` / `Label` / `Badge` / identified `Text` nodes, `Color` for `ColorPicker`, and `u32` for the selected `Tabs` index. `setValue(id, value)` updates and redraws a control; `notify` defaults to `false`. User interaction invokes the authored `change` callback, where the application can read the current value.
 
 ```cpp
 if (const auto value = ui.runtime().value("email"); value && std::holds_alternative<std::string>(*value)) {
@@ -277,10 +381,10 @@ Button.primary {
 CheckItem.check-item { resting: { fg: #f8fafc, size: 260px 36px } hover: { bg: #263752 } checked: { fg: #60a5fa } }
 ```
 
-The full property/value table is in the [styling reference](styling-reference.md). The default [showcase](../examples/showcase.xui) and [stylesheet](../examples/showcase.xss) exercise the complete runtime-supported object set across its Input, Controls, and Layout tabs. The earlier [cross-platform sample](../examples/cross_platform.xui) and focused [controls sample](../examples/controls.xui) remain available as smaller references.
+The full property/value table is in the [styling reference](styling-reference.md). The default [showcase](../examples/showcase.xui) and [stylesheet](../examples/showcase.xss) exercise the complete runtime-supported object set: the Input tab covers `TextBox`/`TextArea`/`CheckBox` plus `SearchField`/`NumberField`, the Controls tab covers `Button`/`Slider`/`ProgressBar`/`Dropdown`/`ColorPicker` plus `Switch`/`ToggleButton`/`RadioGroup`, and the Layout tab covers `Split`/`CheckList` plus a display section with `Separator`, `Image`, `Label`, `Badge`, and `Spinner`. The earlier [cross-platform sample](../examples/cross_platform.xui) and focused [controls sample](../examples/controls.xui) remain available as smaller references.
 
 ## Schema-recognized, runtime-unsupported objects
 
-The current core schema also recognizes names that are not materialized by `UiRuntime::build()`: `Grid`, `Stack`, `ScrollView`, `Toolbar`, `MenuBar`, `StatusBar`, `Menu`, `MenuItem`, `Popover`, `Modal`, `ContextMenu`, `DockSpace`, `IconButton`, `ToggleButton`, `RadioGroup`, `Switch`, `NumberField`, `RangeSlider`, `ComboBox`, `SearchField`, `DatePicker`, `KeybindField`, `Label`, `Image`, `Icon`, `Spinner`, `Divider`, `Separator`, `Badge`, `TreeView`, `ListView`, `Table`, `Canvas`, `HUD`, `Crosshair`, `RadialMenu`, `HealthBar`, and `DamageNumber`.
+The current core schema also recognizes names that are not materialized by `UiRuntime::build()`: `Grid`, `Stack`, `ScrollView`, `Toolbar`, `MenuBar`, `StatusBar`, `Menu`, `MenuItem`, `Popover`, `Modal`, `ContextMenu`, `DockSpace`, `IconButton`, `RangeSlider`, `ComboBox`, `DatePicker`, `KeybindField`, `Icon`, `TreeView`, `ListView`, `Table`, `Canvas`, `HUD`, `Crosshair`, `RadialMenu`, `HealthBar`, and `DamageNumber`.
 
 Use only the supported object list above in a document passed to `Xui::attach()`. Parser/schema entries are retained for future implementation and language validation; they are not native controls or hidden fallbacks.

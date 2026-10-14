@@ -195,6 +195,13 @@ Rect popupBounds(Rect anchor, bool dropdown, std::size_t optionCount, f32 window
 }
 } // namespace
 
+std::string formatNumberText(f32 value, u32 precision) {
+    char text[64];
+    if (precision) std::snprintf(text, sizeof(text), "%.*f", static_cast<int>(std::min<u32>(precision, 6)), double(value));
+    else std::snprintf(text, sizeof(text), "%.6g", double(value));
+    return text;
+}
+
 bool loadUiAssets(std::string_view xuiSource, std::string_view xssSource, StringInterner& strings,
                   UiAssetBundle& out, std::string& error, std::string_view xuiName, std::string_view xssName) {
     auto document = parseXui(xuiSource, xuiName, strings);
@@ -338,6 +345,18 @@ bool UiRuntime::buildNode(const Document& document, u32 index, u32 parentIndex, 
     node.tabs = typeIs(source.type, *m_strings, "Tabs");
     node.tab = typeIs(source.type, *m_strings, "Tab");
     node.fpsCounter = typeIs(source.type, *m_strings, "FpsCounter");
+    node.radioGroup = typeIs(source.type, *m_strings, "RadioGroup");
+    node.switchToggle = typeIs(source.type, *m_strings, "Switch");
+    node.toggleButton = typeIs(source.type, *m_strings, "ToggleButton");
+    node.numberField = typeIs(source.type, *m_strings, "NumberField");
+    node.searchField = typeIs(source.type, *m_strings, "SearchField");
+    node.label = typeIs(source.type, *m_strings, "Label");
+    node.badge = typeIs(source.type, *m_strings, "Badge");
+    node.separator = typeIs(source.type, *m_strings, "Separator") || typeIs(source.type, *m_strings, "Divider");
+    node.spinner = typeIs(source.type, *m_strings, "Spinner");
+    node.image = typeIs(source.type, *m_strings, "Image");
+    if (node.numberField) { node.textBox = true; node.value = 0.f; }
+    if (node.searchField) node.textBox = true;
 
     if (typeIs(source.type, *m_strings, "Window") || typeIs(source.type, *m_strings, "Column") ||
         typeIs(source.type, *m_strings, "Panel") || typeIs(source.type, *m_strings, "CheckList")) {
@@ -350,7 +369,7 @@ bool UiRuntime::buildNode(const Document& document, u32 index, u32 parentIndex, 
         node.layout = m_layout.create(LayoutKind::Stack);
     } else if (node.tab) {
         node.layout = m_layout.create(LayoutKind::Column);
-    } else if (typeIs(source.type, *m_strings, "Text") || node.button || node.checkItem || node.checkBox || node.slider || node.progressBar || node.fpsCounter || node.dropdown || node.colorPicker || node.textBox || node.textArea) {
+    } else if (typeIs(source.type, *m_strings, "Text") || node.button || node.checkItem || node.checkBox || node.slider || node.progressBar || node.fpsCounter || node.dropdown || node.colorPicker || node.textBox || node.textArea || node.radioGroup || node.switchToggle || node.toggleButton || node.label || node.badge || node.separator || node.spinner || node.image) {
         node.layout = m_layout.create(LayoutKind::Leaf);
     } else {
         error = "unsupported runtime widget '" + std::string(m_strings->view(source.type)) + "'";
@@ -363,10 +382,11 @@ bool UiRuntime::buildNode(const Document& document, u32 index, u32 parentIndex, 
         return false;
     }
 
-    if ((typeIs(source.type, *m_strings, "Text") || node.button || node.checkItem || node.checkBox || node.fpsCounter) && source.argCount) {
+    if ((typeIs(source.type, *m_strings, "Text") || node.button || node.checkItem || node.checkBox || node.fpsCounter || node.label || node.badge || node.toggleButton) && source.argCount) {
         node.text.assign(literal(document, *m_strings, document.args[source.argFirst].expr));
     }
     if (node.tab && source.argCount) node.tabTitle.assign(literal(document, *m_strings, document.args[source.argFirst].expr));
+    if (node.image && source.argCount) node.imageSource.assign(literal(document, *m_strings, document.args[source.argFirst].expr));
     for (const XArg& arg : document.argsOf(source)) {
         const std::string_view name = m_strings->view(arg.name);
         if (name == "checked" && arg.expr < document.exprs.size())
@@ -379,8 +399,21 @@ bool UiRuntime::buildNode(const Document& document, u32 index, u32 parentIndex, 
     for (const XProp& prop : document.propsOf(source)) {
         const std::string_view name = m_strings->view(prop.name);
         const std::string_view value = literal(document, *m_strings, prop.expr);
-        if (name == "label" && (node.button || node.checkItem)) node.text.assign(value);
-        else if (name == "label" && node.checkBox) node.text.assign(value);
+        if (node.numberField && prop.role == XPropRole::Value && prop.expr < document.exprs.size() &&
+            (name == "value" || name == "min" || name == "max" || name == "step" || name == "precision" || name == "unit")) {
+            const XExpr& expression = document.exprs[prop.expr];
+            if (name == "unit") node.unit.assign(value);
+            else if (name == "precision" && expression.kind == XExprKind::Number)
+                node.numberPrecision = static_cast<u32>(std::clamp(expression.num, 0.f, 6.f));
+            else if (name == "step" && expression.kind == XExprKind::Number)
+                node.stepValue = expression.num != 0.f ? expression.num : 1.f;
+            else if (name == "min" && expression.kind == XExprKind::Number) { node.minValue = expression.num; node.numberBounded = true; }
+            else if (name == "max" && expression.kind == XExprKind::Number) { node.maxValue = expression.num; node.numberBounded = true; }
+            else if (name == "value" && expression.kind == XExprKind::Number) node.value = expression.num;
+        }
+        else if (name == "label" && (node.button || node.checkItem || node.switchToggle)) node.text.assign(value);
+        else if (name == "label" && (node.checkBox || node.toggleButton)) node.text.assign(value);
+        else if ((node.label || node.badge) && name == "text") node.text.assign(value);
         else if (name == "tooltip" && prop.role == XPropRole::Value) node.tooltipText.assign(value);
         else if (name == "placeholder" && prop.role == XPropRole::Value) node.placeholder.assign(value);
         else if (node.colorPicker && name == "format" && prop.role == XPropRole::Value) node.pickerFormat.assign(value);
@@ -407,13 +440,13 @@ bool UiRuntime::buildNode(const Document& document, u32 index, u32 parentIndex, 
             if(name=="showHue") node.pickerShowHue=enabled;
             if(name=="showSaturationValue") node.pickerShowSaturationValue=enabled;
         }
-        else if (((name == "value" && (node.textBox || node.textArea || node.colorPicker || node.dropdown)) || (name == "selected" && node.tabs)) && prop.role == XPropRole::Value && prop.expr < document.exprs.size()) {
+        else if (((name == "value" && (node.textBox || node.textArea || node.colorPicker || node.dropdown || node.radioGroup)) || (name == "selected" && node.tabs)) && prop.role == XPropRole::Value && prop.expr < document.exprs.size()) {
             const XExpr& expression = document.exprs[prop.expr];
             if ((node.textBox || node.textArea) && name == "value") node.text = value;
             else if (node.tabs && name == "selected" && expression.kind == XExprKind::Number) node.selectedTab = static_cast<u32>(std::max(0.f, expression.num));
             else if (node.colorPicker && name == "value" && expression.kind == XExprKind::Color) node.pickerColor = Color::fromRGBA8(expression.color);
             else if (node.colorPicker && name == "value" && expression.kind == XExprKind::String) { Color parsed; if (parseColorText(value, parsed)) node.pickerColor = parsed; }
-            else if (node.dropdown && name == "value") for (u32 i = 0; i < node.options.size(); ++i) if (node.options[i] == value) node.selectedOption = i;
+            else if ((node.dropdown || node.radioGroup) && name == "value") for (u32 i = 0; i < node.options.size(); ++i) if (node.options[i] == value) node.selectedOption = i;
         }
         else if (name == "maxLength" && prop.role == XPropRole::Value && prop.expr < document.exprs.size() && document.exprs[prop.expr].kind == XExprKind::Number)
             node.maxLength = static_cast<u32>(std::max(0.f, document.exprs[prop.expr].num));
@@ -437,6 +470,12 @@ bool UiRuntime::buildNode(const Document& document, u32 index, u32 parentIndex, 
         }
         else if (name == "showFrameTime" && prop.role == XPropRole::Value && prop.expr < document.exprs.size())
             node.showFrameTime = !(document.exprs[prop.expr].kind == XExprKind::Bool && !document.exprs[prop.expr].bval);
+        else if (node.image && name == "fit" && prop.role == XPropRole::Value) {
+            if (value == "Fill") node.imageFit = 0;
+            else if (value == "Cover") node.imageFit = 2;
+            else node.imageFit = 1;   // Contain is the default
+        }
+        else if (node.image && name == "source" && prop.role == XPropRole::Value) node.imageSource.assign(value);
         else if ((name == "readOnly" || name == "password") && prop.role == XPropRole::Value && prop.expr < document.exprs.size()) {
             const bool flag = document.exprs[prop.expr].kind == XExprKind::Bool && document.exprs[prop.expr].bval;
             if (name == "readOnly") node.readOnly = flag;
@@ -624,12 +663,23 @@ bool UiRuntime::buildNode(const Document& document, u32 index, u32 parentIndex, 
             if (control.selectedOption < control.options.size()) control.text = control.options[control.selectedOption];
         } else { control.text = colorText(control.pickerColor,control.pickerFormat,control.pickerAlpha,control.pickerPrecision); }
     }
+    if (Node& group = m_nodes[runtimeIndex]; group.radioGroup) {
+        if (group.options.empty()) group.options = {"Option 1", "Option 2", "Option 3"};
+        group.selectedOption = std::min(group.selectedOption, static_cast<u32>(group.options.size() - 1));
+    }
     if (m_nodes[runtimeIndex].textBox || m_nodes[runtimeIndex].textArea) {
         Node& field = m_nodes[runtimeIndex];
         field.text = truncateUtf8(field.text, field.maxLength);
         field.caret = field.text.size();
     }
-    if (m_nodes[runtimeIndex].button || m_nodes[runtimeIndex].checkItem || m_nodes[runtimeIndex].checkBox || m_nodes[runtimeIndex].slider || m_nodes[runtimeIndex].dropdown || m_nodes[runtimeIndex].colorPicker || m_nodes[runtimeIndex].textBox || m_nodes[runtimeIndex].textArea || m_nodes[runtimeIndex].tabs) m_interactiveNodes.push_back(runtimeIndex);
+    if (Node& field = m_nodes[runtimeIndex]; field.numberField) {
+        if (field.numberBounded) field.value = std::clamp(field.value, std::min(field.minValue, field.maxValue), std::max(field.minValue, field.maxValue));
+        field.text = formatNumberText(field.value, field.numberPrecision);
+        if (!field.unit.empty()) { field.text += " "; field.text += field.unit; }
+        field.caret = field.text.size();
+    }
+    if (m_nodes[runtimeIndex].button || m_nodes[runtimeIndex].checkItem || m_nodes[runtimeIndex].checkBox || m_nodes[runtimeIndex].slider || m_nodes[runtimeIndex].dropdown || m_nodes[runtimeIndex].colorPicker || m_nodes[runtimeIndex].textBox || m_nodes[runtimeIndex].textArea || m_nodes[runtimeIndex].tabs ||
+        m_nodes[runtimeIndex].switchToggle || m_nodes[runtimeIndex].toggleButton || m_nodes[runtimeIndex].radioGroup) m_interactiveNodes.push_back(runtimeIndex);
     if (m_nodes[runtimeIndex].split) m_splitNodes.push_back(runtimeIndex);
 
     for (u32 child : document.childrenOf(source))
@@ -735,6 +785,39 @@ void UiRuntime::paint(Painter& painter, f32 dpiScale) {
         }
     }
     m_fpsLastFrame = now;
+    auto drawLabel = [&](std::string_view text, Rect rect, FontHandle fontHandle, const PropTable& style,
+                         Color fallback, f32 inset, bool wrap) {
+        if (!m_text || !m_text->atlas()->ready() || !fontHandle.valid() || text.empty()) return;
+        const f32 size = (style.has(PropId::FontSize) ? number(style.get(PropId::FontSize), 0, 14.f) : 14.f) * m_dpiScale;
+        const TextLayout& run = m_text->layout(fontHandle, text, size, wrap ? std::max(0.f, rect.w - inset * 2.f) * m_dpiScale : 0.f);
+        const Font* font = m_text->font(fontHandle); if (!font || run.glyphs.empty()) return;
+        m_glyphScratch.clear();
+        for (const ShapedGlyph& shaped : run.glyphs) {
+            const AtlasGlyph glyph = m_text->atlas()->glyph(*font, shaped.glyph, static_cast<u16>(std::clamp(std::lround(size), 1l, 65535l)));
+            const f32 scale = 1.f / m_dpiScale;
+            m_glyphScratch.push_back({{shaped.x * scale + glyph.offset.x * scale, shaped.y * scale + glyph.offset.y * scale, glyph.width * scale, glyph.height * scale}, glyph.uv});
+        }
+        const f32 width = run.width / m_dpiScale;
+        const Align alignment = style.has(PropId::Align) ? align(style.get(PropId::Align).atoms[0]) : Align::Start;
+        const f32 x = alignment == Align::Center ? rect.x + (rect.w - width) * 0.5f :
+                      alignment == Align::End ? rect.right() - inset - width : rect.x + inset;
+        const f32 y = rect.y + std::max(0.f, (rect.h - run.height / m_dpiScale) * 0.5f);
+        painter.pushClip(rect);
+        painter.glyphRun(m_text->atlas()->texture(), m_glyphScratch.data(), static_cast<u32>(m_glyphScratch.size()),
+                         {x, y + font->baselineAt(size) / m_dpiScale}, color(style, PropId::Fg, fallback));
+        painter.popClip();
+    };
+    bool spinnerActive = false;
+    for (u32 i = 0; i < m_nodes.size(); ++i)
+        if (m_nodes[i].spinner && !m_nodes[i].disabled && isNodeVisible(i)) { spinnerActive = true; break; }
+    if (spinnerActive && now >= m_spinnerDeadline) {
+        m_spinnerDeadline = now + std::chrono::milliseconds(80);
+        for (u32 i = 0; i < m_nodes.size(); ++i)
+            if (m_nodes[i].spinner && !m_nodes[i].disabled && isNodeVisible(i)) {
+                m_nodes[i].spinnerPhase = std::fmod(m_nodes[i].spinnerPhase + 0.6283185f, 6.2831853f);
+                addDamage(m_layout.absRect(m_nodes[i].layout));
+            }
+    } else if (!spinnerActive) m_spinnerDeadline = {};
     m_dpiScale = std::max(0.25f, dpiScale);
     for (u32 nodeIndex = 0; nodeIndex < m_nodes.size(); ++nodeIndex) {
         Node& node = m_nodes[nodeIndex];
@@ -857,6 +940,115 @@ void UiRuntime::paint(Painter& painter, f32 dpiScale) {
             }
         }
         if (node.progressBar || node.slider) { painter.popOpacity(); continue; }
+        if (node.switchToggle) {
+            const f32 trackHeight = std::clamp(rect.h - 8.f, 18.f, 26.f);
+            const f32 trackWidth = std::clamp(trackHeight * 1.8f, 36.f, 58.f);
+            const Rect track{rect.x, rect.y + (rect.h - trackHeight) * 0.5f, trackWidth, trackHeight};
+            RectStyle trackStyle;
+            trackStyle.fill = node.checked ? color(node.style, PropId::Fg, Color::fromRGBA8(0x2563EBFFu)) : Color::fromRGBA8(0x334155FFu);
+            trackStyle.radius = CornerRadii::all(trackHeight * 0.5f);
+            if (node.style.has(PropId::Border) && node.style.get(PropId::Border).count >= 3) {
+                const Atom& borderColor = node.style.get(PropId::Border).atoms[2];
+                if (borderColor.kind == AtomKind::Color) { trackStyle.border = Color::fromRGBA8(borderColor.bits); trackStyle.borderWidth = number(node.style.get(PropId::Border), 0); }
+            }
+            painter.roundRect(track, trackStyle);
+            const f32 knob = trackHeight - 4.f;
+            const f32 knobX = track.x + 2.f + (node.checked ? track.w - knob - 2.f : 0.f);
+            painter.fillRect({knobX, track.y + 2.f, knob, knob}, Color::fromRGBA8(0xF8FAFCFFu), CornerRadii::all(knob * 0.5f));
+        }
+        if (node.separator) {
+            const Color lineColor = color(node.style, PropId::Fg, Color::fromRGBA8(0x475569FFu));
+            if (rect.w >= rect.h) painter.line({rect.x, rect.y + rect.h * 0.5f}, {rect.right(), rect.y + rect.h * 0.5f}, 1.f, lineColor);
+            else painter.line({rect.x + rect.w * 0.5f, rect.y}, {rect.x + rect.w * 0.5f, rect.bottom()}, 1.f, lineColor);
+            painter.popOpacity(); continue;
+        }
+        if (node.spinner) {
+            const Color tick = color(node.style, PropId::Fg, Color::fromRGBA8(0x60A5FAFFu));
+            const f32 radiusOuter = std::max(2.f, std::min(rect.w, rect.h) * 0.5f - 2.f);
+            const f32 cx = rect.x + rect.w * 0.5f, cy = rect.y + rect.h * 0.5f;
+            constexpr u32 ticks = 8;
+            for (u32 i = 0; i < ticks; ++i) {
+                const f32 angle = node.spinnerPhase + f32(i) * (6.2831853f / f32(ticks));
+                const f32 inner = radiusOuter * 0.45f;
+                painter.line({cx + std::cos(angle) * inner, cy + std::sin(angle) * inner},
+                             {cx + std::cos(angle) * radiusOuter, cy + std::sin(angle) * radiusOuter},
+                             std::max(1.5f, radiusOuter * 0.18f),
+                             i == 0 ? tick : tick.withAlpha(0.85f * (1.f - f32(i) / f32(ticks))));
+            }
+            painter.popOpacity(); continue;
+        }
+        if (node.image) {
+            if (!node.imageLoaded && !node.imageSource.empty()) {
+                node.imageLoaded = true;
+                if (readPng(node.imageSource, node.imagePixels) && !node.imagePixels.rgba.empty()) {
+                    node.imageW = node.imagePixels.width; node.imageH = node.imagePixels.height;
+                    if (m_renderer) {
+                        TextureDesc desc;
+                        desc.width = node.imageW; desc.height = node.imageH;
+                        desc.format = TextureFormat::RGBA8;
+                        desc.pixels = node.imagePixels.rgba.data();
+                        node.imageTexture = m_renderer->createTexture(desc);
+                    }
+                    m_layout.markContentChanged(node.layout);
+                    addDamage(rect);
+                } else node.imageFailed = true;
+            }
+            if (node.imageTexture.valid()) {
+                Rect dst = rect;
+                Rect uv{0.f, 0.f, 1.f, 1.f};
+                if (node.imageFit != 0 && node.imageW > 0 && node.imageH > 0 && rect.w > 0.f && rect.h > 0.f) {
+                    const f32 scale = node.imageFit == 2
+                        ? std::max(rect.w / f32(node.imageW), rect.h / f32(node.imageH))
+                        : std::min(rect.w / f32(node.imageW), rect.h / f32(node.imageH));
+                    if (node.imageFit == 2) {
+                        // Cover: scale up to fill and crop the source so the destination stays the widget bounds.
+                        const f32 drawW = f32(node.imageW) * scale, drawH = f32(node.imageH) * scale;
+                        const f32 cropX = std::clamp((drawW - rect.w) * 0.5f / drawW, 0.f, 0.5f);
+                        const f32 cropY = std::clamp((drawH - rect.h) * 0.5f / drawH, 0.f, 0.5f);
+                        uv = {cropX, cropY, 1.f - cropX, 1.f - cropY};
+                        dst = rect;
+                    } else {
+                        const f32 drawW = f32(node.imageW) * scale, drawH = f32(node.imageH) * scale;
+                        dst = {rect.x + (rect.w - drawW) * 0.5f, rect.y + (rect.h - drawH) * 0.5f, drawW, drawH};
+                    }
+                }
+                const f32 radius = node.style.has(PropId::Radius) ? number(node.style.get(PropId::Radius), 0) : 0.f;
+                painter.pushClip(rect);
+                painter.image(node.imageTexture, dst, uv, Color{1, 1, 1, 1}, CornerRadii::all(radius));
+                painter.popClip();
+            } else {
+                // Placeholder while the source is missing, unreadable, or there is no renderer for textures.
+                RectStyle frame;
+                frame.border = Color::fromRGBA8(0x475569FFu); frame.borderWidth = 1.f;
+                painter.roundRect(rect, frame);
+                painter.line({rect.x + 2.f, rect.y + 2.f}, {rect.right() - 2.f, rect.bottom() - 2.f}, 1.f, Color::fromRGBA8(0x47556980u));
+                painter.line({rect.right() - 2.f, rect.y + 2.f}, {rect.x + 2.f, rect.bottom() - 2.f}, 1.f, Color::fromRGBA8(0x47556980u));
+            }
+            painter.popOpacity(); continue;
+        }
+        if (node.radioGroup) {
+            const Color accent = color(node.style, PropId::Fg, Color::fromRGBA8(0x60A5FAFFu));
+            const f32 rowHeight = node.options.empty() ? rect.h : rect.h / f32(node.options.size());
+            for (u32 i = 0; i < node.options.size(); ++i) {
+                // Row-local hover highlight; the control's own :hover style still applies to the whole group.
+                if (static_cast<i32>(i) == node.hoveredOption && !node.disabled)
+                    painter.fillRect({rect.x, rect.y + rowHeight * f32(i), rect.w, rowHeight}, accent.withAlpha(0.08f), CornerRadii::all(2.f));
+                const f32 diameter = std::clamp(rowHeight - 12.f, 10.f, 16.f);
+                const f32 cy = rect.y + rowHeight * (f32(i) + 0.5f);
+                const Rect ring{rect.x + 2.f, cy - diameter * 0.5f, diameter, diameter};
+                RectStyle ringStyle;
+                ringStyle.border = i == node.selectedOption ? accent : Color::fromRGBA8(0x94A3B8FFu);
+                ringStyle.borderWidth = i == node.selectedOption ? 2.f : 1.f;
+                ringStyle.radius = CornerRadii::all(diameter * 0.5f);
+                painter.roundRect(ring, ringStyle);
+                if (i == node.selectedOption) {
+                    const f32 dot = diameter * 0.45f;
+                    painter.fillRect({ring.x + (diameter - dot) * 0.5f, cy - dot * 0.5f, dot, dot}, accent, CornerRadii::all(dot * 0.5f));
+                }
+                drawLabel(node.options[i], {rect.x, rect.y + rowHeight * f32(i), rect.w, rowHeight}, node.font, node.style, accent, 26.f, false);
+            }
+            painter.popOpacity(); continue;
+        }
         const bool placeholderText = (node.textBox || node.textArea) && node.text.empty() && !node.placeholder.empty();
         std::string passwordMask;
         std::string_view displayText = placeholderText ? std::string_view(node.placeholder) : std::string_view(node.text);
@@ -877,8 +1069,9 @@ void UiRuntime::paint(Painter& painter, f32 dpiScale) {
         const f32 padTop = textPadding.t;
         const f32 padBottom = textPadding.b;
         const f32 textLeft = textPadding.l;
-        const f32 textRight = textPadding.r + ((node.dropdown || node.colorPicker) ? 30.f : 0.f);
-        const f32 checkOffset = (node.checkItem || node.checkBox) ? 26.f : 0.f;
+        const f32 textRight = textPadding.r + ((node.dropdown || node.colorPicker) ? 30.f : (node.searchField && !node.text.empty() ? 18.f : 0.f));
+        const f32 switchTrackWidth = node.switchToggle ? std::clamp(std::clamp(rect.h - 8.f, 18.f, 26.f) * 1.8f, 36.f, 58.f) : 0.f;
+        const f32 checkOffset = (node.checkItem || node.checkBox) ? 26.f : (node.switchToggle ? switchTrackWidth + 10.f : 0.f);
         const f32 contentWidth = std::max(0.f, rect.w - textLeft - textRight - checkOffset);
         const f32 wrapWidth = node.textBox ? 0.f : contentWidth * m_dpiScale;
         const TextLayout& run = m_text->layout(node.font, displayText, rasterSize, wrapWidth);
@@ -901,8 +1094,8 @@ void UiRuntime::paint(Painter& painter, f32 dpiScale) {
         const f32 runHeight = run.height / m_dpiScale;
         const f32 baseline = rect.y + padTop + std::max(0.f, (rect.h - padTop - padBottom - runHeight) * 0.5f) + font->baselineAt(rasterSize) / m_dpiScale;
         const Align textAlign = node.style.has(PropId::Align) ? align(node.style.get(PropId::Align).atoms[0]) : Align::Start;
-        const bool textCenter = node.button || (!node.checkItem && textAlign == Align::Center);
-        if (node.checkItem || node.checkBox) x += textLeft + checkOffset;
+        const bool textCenter = node.button || node.toggleButton || (!node.checkItem && textAlign == Align::Center);
+        if (node.checkItem || node.checkBox || node.switchToggle) x += textLeft + checkOffset;
         else if (node.dropdown) x += padLeft;
         else if (node.colorPicker) x += padLeft;
         else if (textCenter) x += textPadding.l + std::max(0.f, (rect.w - textPadding.l - textPadding.r - runWidth) * 0.5f);
@@ -938,6 +1131,13 @@ void UiRuntime::paint(Painter& painter, f32 dpiScale) {
             }
         }
         painter.glyphRun(atlas->texture(), m_glyphScratch.data(), static_cast<u32>(m_glyphScratch.size()), {x, baseline}, fg);
+        if (node.searchField && !node.text.empty()) {
+            const Rect clearRect = searchClearRect(node);
+            const Color mark = fg.withAlpha(0.7f);
+            const f32 inset = clearRect.w * 0.3f;
+            painter.line({clearRect.x + inset, clearRect.y + inset}, {clearRect.right() - inset, clearRect.bottom() - inset}, 1.2f, mark);
+            painter.line({clearRect.right() - inset, clearRect.y + inset}, {clearRect.x + inset, clearRect.bottom() - inset}, 1.2f, mark);
+        }
         if ((node.textBox || node.textArea) && node.focused && !node.disabled && !node.readOnly && !placeholderText) {
             const std::string_view prefix(node.text.data(), std::min(node.caret, node.text.size()));
             const TextLayout& caretRun = m_text->layout(node.font, prefix, rasterSize, node.textArea ? contentWidth * m_dpiScale : 0.f);
@@ -963,28 +1163,6 @@ void UiRuntime::paint(Painter& painter, f32 dpiScale) {
 
     // Tabs and popups render after the retained tree, so their chrome stays above page content.
     painter.setLayer(1);
-    auto drawLabel = [&](std::string_view text, Rect rect, FontHandle fontHandle, const PropTable& style,
-                         Color fallback, f32 inset, bool wrap) {
-        if (!m_text || !m_text->atlas()->ready() || !fontHandle.valid() || text.empty()) return;
-        const f32 size = (style.has(PropId::FontSize) ? number(style.get(PropId::FontSize), 0, 14.f) : 14.f) * m_dpiScale;
-        const TextLayout& run = m_text->layout(fontHandle, text, size, wrap ? std::max(0.f, rect.w - inset * 2.f) * m_dpiScale : 0.f);
-        const Font* font = m_text->font(fontHandle); if (!font || run.glyphs.empty()) return;
-        m_glyphScratch.clear();
-        for (const ShapedGlyph& shaped : run.glyphs) {
-            const AtlasGlyph glyph = m_text->atlas()->glyph(*font, shaped.glyph, static_cast<u16>(std::clamp(std::lround(size), 1l, 65535l)));
-            const f32 scale = 1.f / m_dpiScale;
-            m_glyphScratch.push_back({{shaped.x * scale + glyph.offset.x * scale, shaped.y * scale + glyph.offset.y * scale, glyph.width * scale, glyph.height * scale}, glyph.uv});
-        }
-        const f32 width = run.width / m_dpiScale;
-        const Align alignment = style.has(PropId::Align) ? align(style.get(PropId::Align).atoms[0]) : Align::Start;
-        const f32 x = alignment == Align::Center ? rect.x + (rect.w - width) * 0.5f :
-                      alignment == Align::End ? rect.right() - inset - width : rect.x + inset;
-        const f32 y = rect.y + std::max(0.f, (rect.h - run.height / m_dpiScale) * 0.5f);
-        painter.pushClip(rect);
-        painter.glyphRun(m_text->atlas()->texture(), m_glyphScratch.data(), static_cast<u32>(m_glyphScratch.size()),
-                         {x, y + font->baselineAt(size) / m_dpiScale}, color(style, PropId::Fg, fallback));
-        painter.popClip();
-    };
     for (u32 tabsIndex = 0; tabsIndex < m_nodes.size(); ++tabsIndex) {
         Node& tabs = m_nodes[tabsIndex];
         if (!tabs.tabs || !isNodeVisible(tabsIndex)) continue;
@@ -1193,6 +1371,15 @@ bool UiRuntime::pointerMove(Vec2 point) {
         changed = true;
         addDamage(splitBounds);
     }
+    for (u32 i = 0; i < m_nodes.size(); ++i) {
+        Node& node = m_nodes[i];
+        if (!node.radioGroup || node.disabled || !isNodeVisible(i) || node.options.empty()) continue;
+        const Rect rect = m_layout.absRect(node.layout);
+        const f32 rowHeight = rect.h / f32(node.options.size());
+        const i32 over = rect.contains(point)
+            ? std::clamp<i32>(static_cast<i32>((point.y - rect.y) / std::max(1.f, rowHeight)), 0, static_cast<i32>(node.options.size()) - 1) : -1;
+        if (over != node.hoveredOption) { node.hoveredOption = over; changed = true; addDamage(rect); }
+    }
     return changed;
 }
 
@@ -1200,7 +1387,10 @@ CursorShape UiRuntime::cursorAt(Vec2 point) const {
     const u32 target = hitTestNode(point);
     if (target < m_nodes.size()) {
         const Node& node = m_nodes[target];
-        if ((node.textBox || node.textArea) && !node.disabled && !node.readOnly) return CursorShape::IBeam;
+        if ((node.textBox || node.textArea) && !node.disabled && !node.readOnly) {
+            if (node.searchField && !node.text.empty() && searchClearRect(node).contains(point)) return CursorShape::Arrow;
+            return CursorShape::IBeam;
+        }
     }
     return CursorShape::Arrow;
 }
@@ -1334,12 +1524,36 @@ bool UiRuntime::pointerDown(Vec2 point) {
         const bool focus = target == &node && !node.disabled;
         changed |= node.focused != focus;
         if (node.focused != focus) addDamage(m_layout.absRect(node.layout));
+        if (!focus && node.focused && node.numberField && !node.disabled) commitNumberText(node);
         node.focused = focus;
         if (!node.hovered && !node.focused) node.tooltipDismissed = false;
         if ((node.textBox || node.textArea) && focus) node.caret = node.text.size();
         if ((node.textBox || node.textArea) && focus) node.selectionAnchor = node.caret;
     }
     refreshTooltipTarget();
+    if (target && target->searchField && !target->text.empty() && !target->disabled && !target->readOnly) {
+        const Rect clearRect = searchClearRect(*target);
+        if (clearRect.contains(point)) {
+            target->text.clear();
+            target->caret = target->selectionAnchor = 0;
+            m_layout.markContentChanged(target->layout);
+            addDamage(m_layout.absRect(target->layout));
+            if (target->pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(target->pressHandler));
+            return true;
+        }
+    }
+    if (target && target->radioGroup && !target->disabled && !target->options.empty()) {
+        const Rect rect = m_layout.absRect(target->layout);
+        const f32 rowHeight = rect.h / f32(target->options.size());
+        const u32 row = std::clamp<u32>(static_cast<u32>((point.y - rect.y) / std::max(1.f, rowHeight)), 0, static_cast<u32>(target->options.size() - 1));
+        if (row != target->selectedOption) {
+            target->selectedOption = row;
+            changed = true;
+            addDamage(rect);
+            if (target->pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(target->pressHandler));
+        }
+        return true;
+    }
 
     // Split gutters are painted by the Split node before its children. They only
     // receive input when no later-painted node covers that point.
@@ -1361,7 +1575,7 @@ bool UiRuntime::pointerDown(Vec2 point) {
     }
     if (target && !target->disabled) {
         const bool shouldPress = target->button || target->checkItem || target->checkBox || target->slider ||
-            target->dropdown || target->colorPicker || target->textBox || target->textArea;
+            target->dropdown || target->colorPicker || target->textBox || target->textArea || target->switchToggle || target->toggleButton;
         for (Node& node : m_nodes) if (&node != target && node.pressed) {
             node.pressed = false;
             addDamage(m_layout.absRect(node.layout));
@@ -1407,12 +1621,12 @@ bool UiRuntime::pointerUp(Vec2 point) {
         if (node.pressed) addDamage(m_layout.absRect(node.layout));
         node.pressed = false;
     }
-    if (activated && (activated->checkItem || activated->checkBox)) {
+    if (activated && (activated->checkItem || activated->checkBox || activated->switchToggle || activated->toggleButton)) {
         activated->checked = !activated->checked;
         changed = true;
         addDamage(m_layout.absRect(activated->layout));
     }
-    if (activated && (activated->button || activated->checkItem || activated->checkBox) &&
+    if (activated && (activated->button || activated->checkItem || activated->checkBox || activated->switchToggle || activated->toggleButton) &&
         activated->pressHandler.v && m_eventFn)
         m_eventFn(m_eventContext, m_strings->view(activated->pressHandler));
     m_splitDrag = {};
@@ -1496,6 +1710,7 @@ bool UiRuntime::keyDown(Key key, u8 mods, Platform* platform) {
             field.selectionAnchor = std::min(field.selectionAnchor, field.text.size());
             m_layout.markContentChanged(field.layout);
             if (field.pickerEditor) updatePickerFromEditor(field);
+            else if (field.numberField) commitNumberText(field);
             else if (field.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(field.pressHandler));
         }
         if (edited || oldCaret != field.caret) { addDamage(field.pickerEditor ? pickerEditorRect(field) : m_layout.absRect(field.layout)); return true; }
@@ -1545,6 +1760,17 @@ bool UiRuntime::keyDown(Key key, u8 mods, Platform* platform) {
         }
     }
     if (key == Key::Escape) {
+        for (u32 index : m_interactiveNodes) {
+            Node& field = m_nodes[index];
+            if (field.searchField && field.focused && !field.disabled && !field.text.empty()) {
+                field.text.clear();
+                field.caret = field.selectionAnchor = 0;
+                m_layout.markContentChanged(field.layout);
+                addDamage(m_layout.absRect(field.layout));
+                if (field.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(field.pressHandler));
+                return true;
+            }
+        }
         for (Node& node : m_nodes) if (node.popupOpen) { node.popupOpen = false; addDamage(m_layout.absRect(node.layout)); return true; }
         return false;
     }
@@ -1557,11 +1783,30 @@ bool UiRuntime::keyDown(Key key, u8 mods, Platform* platform) {
             return true;
         }
     }
+    if (key == Key::Down || key == Key::Up) {
+        for (u32 index : m_interactiveNodes) {
+            Node& node = m_nodes[index];
+            if (node.radioGroup && node.focused && !node.disabled && !node.options.empty()) {
+                const i32 direction = key == Key::Down ? 1 : -1;
+                const u32 next = static_cast<u32>(std::clamp<i32>(static_cast<i32>(node.selectedOption) + direction, 0, static_cast<i32>(node.options.size()) - 1));
+                if (next == node.selectedOption) return false;
+                node.selectedOption = next;
+                addDamage(m_layout.absRect(node.layout));
+                if (node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
+                return true;
+            }
+            if (node.numberField && node.focused && !node.disabled) {
+                applyNumberStep(node, key == Key::Up ? 1.f : -1.f);
+                addDamage(m_layout.absRect(node.layout));
+                return true;
+            }
+        }
+    }
     if (key != Key::Enter && key != Key::Space) return false;
     for (u32 index : m_interactiveNodes) {
         Node& node = m_nodes[index];
         if (!node.focused || node.disabled) continue;
-        if (node.checkItem || node.checkBox) node.checked = !node.checked;
+        if (node.checkItem || node.checkBox || node.switchToggle || node.toggleButton) node.checked = !node.checked;
         if (node.dropdown || node.colorPicker) node.popupOpen = !node.popupOpen;
         addDamage(m_layout.absRect(node.layout));
         if (!node.dropdown && !node.colorPicker && node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
@@ -1574,6 +1819,11 @@ bool UiRuntime::textInput(u32 codepoint) {
     for (u32 index : m_interactiveNodes) {
         Node& field = m_nodes[index];
         if (!(field.textBox || field.textArea) || !field.focused || field.disabled || field.readOnly || !codepoint || codepoint == '\r' || codepoint == '\n') continue;
+        if (field.numberField) {
+            const bool numeric = (codepoint >= '0' && codepoint <= '9') || codepoint == '.' || codepoint == '-' ||
+                codepoint == '+' || codepoint == ' ' || codepoint == 'e' || codepoint == 'E';
+            if (!numeric) return false;
+        }
         const std::size_t begin = std::min(field.caret, field.selectionAnchor);
         const std::size_t end = std::max(field.caret, field.selectionAnchor);
         const u32 selectedCount = codepointCount(std::string_view(field.text).substr(begin, end - begin));
@@ -1584,6 +1834,7 @@ bool UiRuntime::textInput(u32 codepoint) {
         field.caret = field.selectionAnchor = begin + encoded.size();
         m_layout.markContentChanged(field.layout); addDamage(field.pickerEditor ? pickerEditorRect(field) : m_layout.absRect(field.layout));
         if (field.pickerEditor) updatePickerFromEditor(field);
+        else if (field.numberField) commitNumberText(field);
         else if (field.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(field.pressHandler));
         if (field.pickerEditor) addDamage(pickerEditorRect(field));
         return true;
@@ -1733,6 +1984,37 @@ bool UiRuntime::updatePickerFromEditor(Node& editor) {
     return true;
 }
 
+Rect UiRuntime::searchClearRect(const Node& node) const {
+    const Rect rect = m_layout.absRect(node.layout);
+    const f32 side = std::clamp(rect.h - 10.f, 12.f, 20.f);
+    return {rect.right() - side - 4.f, rect.y + (rect.h - side) * 0.5f, side, side};
+}
+
+void UiRuntime::applyNumberStep(Node& node, f32 direction) {
+    const f32 stepped = node.value + direction * node.stepValue;
+    const f32 clamped = node.numberBounded ? std::clamp(stepped, std::min(node.minValue, node.maxValue), std::max(node.minValue, node.maxValue)) : stepped;
+    if (clamped == node.value) return;
+    node.value = clamped;
+    node.text = formatNumberText(clamped, node.numberPrecision) + (node.unit.empty() ? std::string{} : node.unit);
+    node.caret = node.selectionAnchor = node.text.size();
+    m_layout.markContentChanged(node.layout);
+    if (node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
+}
+
+bool UiRuntime::commitNumberText(Node& node) {
+    const char* text = node.text.c_str();
+    char* end = nullptr;
+    const f32 parsed = std::strtof(text, &end);
+    if (end == text || !std::isfinite(parsed)) return false;
+    while (end && *end == ' ') ++end;
+    if (end && *end != '\0' && (node.unit.empty() || std::string_view(end) != std::string_view(node.unit))) return false;
+    const f32 clamped = node.numberBounded ? std::clamp(parsed, std::min(node.minValue, node.maxValue), std::max(node.minValue, node.maxValue)) : parsed;
+    const bool changed = clamped != node.value;
+    node.value = clamped;
+    if (changed && node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
+    return true;
+}
+
 u32 UiRuntime::hitTestNode(Vec2 point) const {
     if (point.x < 0.f || point.y < 0.f || point.x >= m_lastLayoutWidth || point.y >= m_lastLayoutHeight)
         return 0xFFFFFFFFu;
@@ -1760,11 +2042,12 @@ u32 UiRuntime::hitTestNode(Vec2 point) const {
         if (rect.empty() || !rect.contains(point)) continue;
 
         const bool interactive = node.button || node.checkItem || node.checkBox || node.slider || node.dropdown ||
-            node.colorPicker || node.textBox || node.textArea || node.tabs;
+            node.colorPicker || node.textBox || node.textArea || node.tabs ||
+            node.switchToggle || node.toggleButton || node.radioGroup;
         const bool structuralBlocker = typeIs(node.type, *m_strings, "Window") || typeIs(node.type, *m_strings, "Text") ||
             typeIs(node.type, *m_strings, "Panel") || typeIs(node.type, *m_strings, "Split") ||
             typeIs(node.type, *m_strings, "CheckList") || typeIs(node.type, *m_strings, "Tab") ||
-            node.progressBar || node.fpsCounter;
+            node.progressBar || node.fpsCounter || node.label || node.badge || node.spinner || node.image;
         const bool styledBlocker = node.style.has(PropId::Bg) && color(node.style, PropId::Bg, Color{}).a > 0.f;
         // Node storage follows paint order: descendants and later siblings are on top.
         // Transparent Row/Column containers pass input through; painted containers block
@@ -1871,6 +2154,16 @@ bool UiRuntime::updateTimers(std::chrono::steady_clock::time_point now) {
             if (m_nodes[i].fpsCounter && isNodeVisible(i)) addDamage(m_layout.absRect(m_nodes[i].layout));
         redraw = true;
     }
+    bool spinnerVisible = false;
+    for (u32 i = 0; i < m_nodes.size(); ++i)
+        if (m_nodes[i].spinner && !m_nodes[i].disabled && isNodeVisible(i)) { spinnerVisible = true; break; }
+    if (spinnerVisible && (m_spinnerDeadline.time_since_epoch().count() == 0 || now >= m_spinnerDeadline)) {
+        for (u32 i = 0; i < m_nodes.size(); ++i)
+            if (m_nodes[i].spinner && !m_nodes[i].disabled && isNodeVisible(i)) addDamage(m_layout.absRect(m_nodes[i].layout));
+        redraw = true;
+    } else if (!spinnerVisible && m_spinnerDeadline.time_since_epoch().count() != 0) {
+        m_spinnerDeadline = {};
+    }
     return redraw;
 }
 
@@ -1886,6 +2179,10 @@ f64 UiRuntime::nextTimerDelay(std::chrono::steady_clock::time_point now) const {
         const f64 fpsDelay = std::max(0.0, std::chrono::duration<f64>(m_fpsDeadline - now).count());
         delay = delay < 0.0 ? fpsDelay : std::min(delay, fpsDelay);
     }
+    if (m_spinnerDeadline.time_since_epoch().count() != 0) {
+        const f64 spinnerDelay = std::max(0.0, std::chrono::duration<f64>(m_spinnerDeadline - now).count());
+        delay = delay < 0.0 ? spinnerDelay : std::min(delay, spinnerDelay);
+    }
     return delay;
 }
 
@@ -1895,16 +2192,19 @@ Color UiRuntime::controlColor(std::string_view id) const {
 }
 
 std::string_view UiRuntime::controlText(std::string_view id) const {
-    for (const Node& node : m_nodes) if ((node.dropdown || node.colorPicker || node.textBox || node.textArea || typeIs(node.type,*m_strings,"Text")) && node.id.v && m_strings->view(node.id) == id) return node.text;
+    for (const Node& node : m_nodes) if ((node.dropdown || node.colorPicker || node.textBox || node.textArea || typeIs(node.type,*m_strings,"Text") || node.label || node.badge) && node.id.v && m_strings->view(node.id) == id) return node.text;
+    for (const Node& node : m_nodes) if (node.radioGroup && node.id.v && m_strings->view(node.id) == id && node.selectedOption < node.options.size()) return node.options[node.selectedOption];
     return {};
 }
 
 std::optional<UiValue> UiRuntime::value(std::string_view id) const {
     for (const Node& node : m_nodes) {
         if (!node.id.v || m_strings->view(node.id) != id) continue;
-        if (node.checkItem || node.checkBox) return UiValue{node.checked};
+        if (node.checkItem || node.checkBox || node.switchToggle || node.toggleButton) return UiValue{node.checked};
         if (node.slider) return UiValue{static_cast<f64>(node.value)};
-        if (node.dropdown || node.textBox || node.textArea || typeIs(node.type,*m_strings,"Text")) return UiValue{node.text};
+        if (node.numberField) return UiValue{static_cast<f64>(node.value)};
+        if (node.dropdown || node.textBox || node.textArea || typeIs(node.type,*m_strings,"Text") || node.label || node.badge) return UiValue{node.text};
+        if (node.radioGroup) return node.selectedOption < node.options.size() ? UiValue{node.options[node.selectedOption]} : UiValue{std::string{}};
         if (node.colorPicker) return UiValue{node.pickerColor};
         if (node.tabs) return UiValue{node.selectedTab};
     }
@@ -1922,13 +2222,35 @@ bool UiRuntime::setValue(std::string_view id, const UiValue& valueToSet, bool no
             const f64* value = std::get_if<f64>(&valueToSet); if (!value) return false;
             const f32 clamped = std::clamp(static_cast<f32>(*value), node.minValue, node.maxValue);
             changed = node.value != clamped; node.value = clamped;
+        } else if (node.switchToggle || node.toggleButton) {
+            const bool* value = std::get_if<bool>(&valueToSet); if (!value) return false;
+            changed = node.checked != *value; node.checked = *value;
+        } else if (node.radioGroup) {
+            const std::string* value = std::get_if<std::string>(&valueToSet); if (!value) return false;
+            const auto found = std::find(node.options.begin(), node.options.end(), *value); if (found == node.options.end()) return false;
+            const u32 selected = static_cast<u32>(found - node.options.begin());
+            changed = node.selectedOption != selected; node.selectedOption = selected;
+        } else if (node.numberField) {
+            if (const f64* number = std::get_if<f64>(&valueToSet)) {
+                const f32 clamped = node.numberBounded ? std::clamp(static_cast<f32>(*number), std::min(node.minValue, node.maxValue), std::max(node.minValue, node.maxValue)) : static_cast<f32>(*number);
+                changed = node.value != clamped;
+                node.value = clamped;
+                node.text = formatNumberText(clamped, node.numberPrecision) + (node.unit.empty() ? std::string{} : node.unit);
+                node.caret = node.selectionAnchor = node.text.size();
+                if (changed) m_layout.markContentChanged(node.layout);
+            } else if (const std::string* string = std::get_if<std::string>(&valueToSet)) {
+                node.text = truncateUtf8(*string, node.maxLength);
+                node.caret = node.selectionAnchor = node.text.size();
+                m_layout.markContentChanged(node.layout);
+                changed = commitNumberText(node);
+            } else return false;
         } else if (node.dropdown) {
             const std::string* value = std::get_if<std::string>(&valueToSet); if (!value) return false;
             const auto found = std::find(node.options.begin(), node.options.end(), *value); if (found == node.options.end()) return false;
             const u32 selected = static_cast<u32>(found - node.options.begin());
             changed = node.selectedOption != selected; node.selectedOption = selected; node.text = *value;
             if (changed) m_layout.markContentChanged(node.layout);
-        } else if (node.textBox || node.textArea || typeIs(node.type,*m_strings,"Text")) {
+        } else if (node.textBox || node.textArea || typeIs(node.type,*m_strings,"Text") || node.label || node.badge) {
             const std::string* value = std::get_if<std::string>(&valueToSet); if (!value) return false;
             std::string next = truncateUtf8(*value, node.maxLength);
             changed = node.text != next; node.text = std::move(next); node.caret = node.selectionAnchor = node.text.size();
@@ -1963,7 +2285,21 @@ Size UiRuntime::measureLeaf(void* context, NodeId node, Constraint constraint) {
 
 Size UiRuntime::measure(NodeId node, Constraint constraint) const {
     const Node* runtimeNode = findNode(node);
-    if (!runtimeNode || runtimeNode->text.empty() || !m_text || !runtimeNode->font.valid()) return {};
+    if (!runtimeNode) return {};
+    // Non-text widgets keep usable intrinsic sizes when .xui/.xss leave them auto-sized.
+    if (runtimeNode->switchToggle && runtimeNode->text.empty()) return {44.f, 24.f};
+    if (runtimeNode->separator) return {12.f, 1.f};
+    if (runtimeNode->spinner) return {18.f, 18.f};
+    if (runtimeNode->image) return runtimeNode->imageW ? Size{f32(runtimeNode->imageW), f32(runtimeNode->imageH)} : Size{96.f, 64.f};
+    if (runtimeNode->radioGroup) {
+        if (!m_text || !runtimeNode->font.valid() || runtimeNode->options.empty()) return {160.f, 28.f};
+        const f32 fontSize = runtimeNode->style.has(PropId::FontSize) ? number(runtimeNode->style.get(PropId::FontSize), 0, 16) : 16.f;
+        f32 width = 0.f;
+        for (const std::string& option : runtimeNode->options)
+            width = std::max(width, m_text->layout(runtimeNode->font, option, fontSize, 0.f).width + 30.f);
+        return {width, f32(runtimeNode->options.size()) * 28.f};
+    }
+    if (runtimeNode->text.empty() || !m_text || !runtimeNode->font.valid()) return {};
     f32 fontSize = runtimeNode->style.has(PropId::FontSize) ? number(runtimeNode->style.get(PropId::FontSize), 0, 16) : 16.f;
     const f32 wrapWidth = constraint.fw ? constraint.w : 0.f;
     const TextLayout& run = m_text->layout(runtimeNode->font, runtimeNode->text, fontSize, wrapWidth);

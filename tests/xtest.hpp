@@ -16,6 +16,7 @@ inline int runAll() {
         c.fn();
         bool ok = failures() == before;
         std::printf("[%s] %s\n", ok ? " OK " : "FAIL", c.name);
+        std::fflush(stdout);   // keep per-test progress visible when a case crashes the process
         if (!ok) ++failedCases;
     }
     std::printf("\n%zu tests, %d failed\n", registry().size(), failedCases);

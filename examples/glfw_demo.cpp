@@ -1,5 +1,6 @@
 #include "gl_drawlist_renderer.hpp"
 #include "glfw_platform.hpp"
+#include <xui/render/image_io.hpp>
 #include <xui/xui.hpp>
 #include <cstdio>
 #include <cstdlib>
@@ -51,6 +52,25 @@ void onUiEvent(void* context, std::string_view name) {
         const std::string_view id = name == "onTaskLayout" ? "task-layout" : name == "onTaskStyles" ? "task-styles" :
                                     name == "onTaskBackend" ? "task-backend" : "task-resize";
         if (const auto value = valueAs<bool>(app, id)) app.setWindowTitle(std::string(id) + (*value ? " completed" : " unchecked"));
+    } else if (name == "onSearchChange") {
+        // SearchField: string value by id; the clear glyph and Escape both fire change with "".
+        if (const auto value = valueAs<std::string>(app, "query")) {
+            app.runtime().setValue("search-readout", value->empty() ? std::string("(empty)") : *value);
+            app.setWindowTitle(value->empty() ? "Xui showcase" : "Search: " + *value);
+        }
+    } else if (name == "onNumberChange") {
+        // NumberField: committed f64 by id, clamped to min/max and stepped by Up/Down or the steppers.
+        if (const auto value = valueAs<xui::f64>(app, "delay"))
+            app.runtime().setValue("number-readout", "Delay: " + std::to_string(static_cast<int>(*value)) + " ms");
+    } else if (name == "onSwitchChange") {
+        if (const auto value = valueAs<bool>(app, "live-sync"))
+            app.runtime().setValue("switch-readout", std::string("Live sync: ") + (*value ? "on" : "off"));
+    } else if (name == "onToggleChange") {
+        if (const auto value = valueAs<bool>(app, "mute"))
+            app.runtime().setValue("toggle-readout", std::string("Mute: ") + (*value ? "on" : "off"));
+    } else if (name == "onRadioChange") {
+        if (const auto value = valueAs<std::string>(app, "density-choice"))
+            app.runtime().setValue("radio-readout", "Layout: " + *value);
     }
 }
 
@@ -95,6 +115,24 @@ int main(int argc, char** argv) {
     xui::Xui app(std::move(options));
     std::filesystem::path directory = argc > 0 && argv[0] ? std::filesystem::absolute(argv[0]).parent_path()
                                                             : std::filesystem::current_path();
+    // The Image widget resolves its source against the process working directory, so generate the
+    // demo asset there once. It uses the project's own PNG writer (see doc/widgets.md for the
+    // decoder limits).
+    if (!std::filesystem::exists("xui-demo-image.png")) {
+        xui::Image image;
+        image.width = 96;
+        image.height = 64;
+        image.rgba.assign(std::size_t(image.width) * image.height * 4, 0);
+        for (xui::u32 y = 0; y < image.height; ++y)
+            for (xui::u32 x = 0; x < image.width; ++x) {
+                xui::u8* pixel = image.px(x, y);
+                pixel[0] = static_cast<xui::u8>(40 + x * 2);
+                pixel[1] = static_cast<xui::u8>(60 + y * 3);
+                pixel[2] = static_cast<xui::u8>(160 + x);
+                pixel[3] = 255;
+            }
+        xui::writePng("xui-demo-image.png", image);
+    }
     if (!loadFirstFont(app) ||
         !app.loadXui((directory / "showcase.xui").string()) ||
         !app.loadXss((directory / "showcase.xss").string())) {

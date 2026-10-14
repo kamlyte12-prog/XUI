@@ -99,6 +99,7 @@ bool Xui::attach(Renderer& renderer, Platform& platform) {
         setError("Could not initialize the renderer backend."); shutdown(); return false;
     }
     m_rendererReady = true;
+    m_runtime.setRenderer(&renderer);
     m_widthPixels = u32(pixels.x); m_heightPixels = u32(pixels.y);
     if (!m_text.initAtlas(m_renderer, m_options.atlasSize)) {
         setError("Could not initialize the glyph atlas."); shutdown(); return false;
@@ -214,6 +215,7 @@ void Xui::setWindowTitle(std::string_view title) {
 }
 
 void Xui::shutdown() {
+    m_runtime.setRenderer(nullptr);
     if (m_rendererReady && m_text.atlas()->ready()) m_text.atlas()->shutdown();
     if (m_rendererReady && m_renderer) m_renderer->shutdown();
     m_rendererReady = false;

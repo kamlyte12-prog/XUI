@@ -57,7 +57,7 @@ Xui separates **what your UI is** from **how it looks** and **where it runs**:
 ## ✨ Features
 
 - **Declarative UI:** `.xui` for structure and layout, `.xss` for visuals.
-- **Supported widgets:** `Window`, `Column`, `Row`, `Panel`, `Split`, `CheckList`, `CheckItem`, `CheckBox`, `TextBox`, `TextArea`, `Tabs` / `Tab`, `Text`, `Button`, `Slider`, `ProgressBar`, `Dropdown`, `ColorPicker`, `FpsCounter`, plus tooltips via the `tooltip` property.
+- **Supported widgets:** `Window`, `Column`, `Row`, `Panel`, `Split`, `CheckList`, `CheckItem`, `CheckBox`, `Switch`, `ToggleButton`, `RadioGroup`, `TextBox`, `TextArea`, `NumberField`, `SearchField`, `Tabs` / `Tab`, `Text`, `Label`, `Badge`, `Separator` / `Divider`, `Image`, `Spinner`, `Button`, `Slider`, `ProgressBar`, `Dropdown`, `ColorPicker`, `FpsCounter`, plus tooltips via the `tooltip` property.
 - **Styling:** background/foreground, borders, radius, shadow, opacity, font family/size/weight, letter spacing, text alignment, and interaction states (`resting`, `hover`, `focus`, `checked`, `disabled`, `pressed`; `active` is an alias for `pressed`).
 - **Layout properties:** `align`, `size`, `pad`, `margin`, `gap`, `grow`, and `justify` feed the retained layout engine.
 - **Text:** TrueType glyph atlas rasterized at the current DPI; wrapped text advances line baselines, contributes measured height when auto-sized, and clips to its widget.
@@ -72,6 +72,7 @@ Xui separates **what your UI is** from **how it looks** and **where it runs**:
 
 - The runtime does not yet evaluate bindings, conditions, loops, component expansion, or transitions.
 - There is no data binding between widgets yet (the progress bar is display-only).
+- `Image` decodes only the project's own uncompressed PNG writer output; general image formats are not supported yet.
 - Unsupported nodes return an error instead of silently becoming native controls.
 - The `Xui` facade is a one-window, one-run convenience lifecycle. For multiple windows or a host-owned event loop, use the lower-level APIs.
 
@@ -81,7 +82,7 @@ Xui separates **what your UI is** from **how it looks** and **where it runs**:
 
 ![Screenshot](doc/showcase.png)
 
-The `showcase.xui` / `showcase.xss` example demonstrates editable fields, checkbox, tabs, delayed tooltips, dropdown, color picker, checklist, resizable panels, slider, progress bar, and an FPS counter.
+The `showcase.xui` / `showcase.xss` example demonstrates every runtime-supported widget across its tabs: editable fields, checkbox, search and numeric entry, tabs, delayed tooltips, dropdown, color picker, switch, toggle button, radio group, checklist, resizable split panels, slider, progress bar, static label, badge, separators, activity spinner, a generated PNG image, and an FPS counter. Each stateful control is wired to a live readout so its value can be watched through the `value()` API while you interact.
 
 Press **F3** in either example to toggle the `.xss`-styled FPS counter. It is visible on first launch.
 

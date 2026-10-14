@@ -29,6 +29,22 @@ Window(title: "Xui GLFW/OpenGL widget showcase", size: 1080x760) {
                     tooltip: "Checkbox state is available as a bool by id.", change: onCheckChange, class: "checkbox", width: 240px, height: 38px, pad: 6px]
             CheckBox(label: "Disabled example")[id: "disabled-check", checked: false, disabled: true, class: "checkbox disabled-check", width: 240px, height: 38px, pad: 6px]
           }
+
+          // Search field: clear button + Escape reset, plus the numeric field with steppers.
+          Separator[class: "rule"]
+          Text("Search and numeric entry")[class: "section-title"]
+          Row(gap: 12)[id: "search-row", class: "field-row"] {
+            SearchField[id: "query", placeholder: "Search widgets…", maxLength: 60,
+                   tooltip: "Click the x glyph or press Escape to clear. The string is readable by id.",
+                   change: onSearchChange, class: "search", width: 440px, height: 40px]
+            Text("(empty)")[id: "search-readout", class: "value-readout", width: 260px, height: 24px]
+          }
+          Row(gap: 12)[id: "number-row", class: "field-row"] {
+            NumberField[id: "delay", value: 250, min: 0, max: 2000, step: 50, unit: "ms", precision: 0,
+                   tooltip: "Type a number, use the steppers, or focus and press Up/Down. Clamped to min/max.",
+                   change: onNumberChange, class: "number", width: 220px, height: 40px]
+            Text("Delay: 250 ms")[id: "number-readout", class: "value-readout", width: 320px, height: 24px]
+          }
         }
       }
 
@@ -57,6 +73,26 @@ Window(title: "Xui GLFW/OpenGL widget showcase", size: 1080x760) {
                         tooltip: "Click and drag in the popup to choose a color, or edit the value row.",
                         change: onColorChange, class: "color-picker", width: 260px, height: 38px, pad: 8px]
           }
+
+          // Switch and ToggleButton keep a bool by id; RadioGroup keeps the selected option string.
+          Separator[class: "rule"]
+          Text("Selection controls")[class: "section-title"]
+          Row(gap: 16)[id: "selection-row", class: "selection-row"] {
+            Switch[label: "Live sync", checked: true, tooltip: "Switch state is a bool by id.",
+                   change: onSwitchChange, class: "switch", width: 220px, height: 36px]
+            ToggleButton(label: "Mute")[id: "mute", checked: false, tooltip: "A button that stays pressed.",
+                   change: onToggleChange, class: "toggle", width: 150px, height: 36px]
+          }
+          Row(gap: 16)[id: "radio-row", class: "radio-row"] {
+            RadioGroup[id: "density-choice", options: "Compact|Comfortable|Spacious", value: "Comfortable",
+                   tooltip: "Click a row or focus and press Up/Down.",
+                   change: onRadioChange, class: "radio", width: 300px, height: 108px]
+            Column(gap: 8)[id: "selection-readouts", class: "readouts"] {
+              Text("Live sync: on")[id: "switch-readout", class: "value-readout", width: 240px, height: 22px]
+              Text("Mute: off")[id: "toggle-readout", class: "value-readout", width: 240px, height: 22px]
+              Text("Layout: Comfortable")[id: "radio-readout", class: "value-readout", width: 240px, height: 22px]
+            }
+          }
         }
       }
 
@@ -80,6 +116,23 @@ Window(title: "Xui GLFW/OpenGL widget showcase", size: 1080x760) {
               Text("This page is described entirely with .xui structure and .xss styling. The GLFW platform supplies window and input events; the OpenGL renderer draws the same backend-neutral command list.")[class: "body"]
               Text("Long content wraps to the next line, contributes to auto layout, and is clipped to the widget bounds instead of painting over neighboring controls.")[class: "body"]
               Button(label: "Test hover and focus")[tooltip: "This tooltip is attached to its target control.", press: onAction, class: "secondary", width: 240px, height: 40px]
+            }
+          }
+
+          // Display widgets: static label, badge, activity spinner, and a PNG image.
+          // The demo generates xui-demo-image.png at startup if it is missing (see glfw_demo.cpp).
+          Separator[class: "rule"]
+          Text("Display widgets")[class: "section-title"]
+          Row(gap: 14)[id: "display-row", class: "display-row"] {
+            Image("xui-demo-image.png")[fit: Contain, tooltip: "PNG image loaded through the renderer's texture API.",
+                  class: "demo-image", width: 200px, height: 120px]
+            Column(gap: 10)[id: "display-column", class: "display-column"] {
+              Label("Static label text")[class: "demo-label", width: 220px, height: 22px]
+              Row(gap: 10)[id: "badge-row", class: "badge-row"] {
+                Badge("NEW")[class: "badge", width: 58px, height: 22px]
+                Spinner[class: "spinner", width: 22px, height: 22px]
+                Spinner[disabled: true, class: "spinner", width: 22px, height: 22px]
+              }
             }
           }
         }

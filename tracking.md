@@ -2,6 +2,86 @@
 
 This file records project changes, design decisions, trade-offs, current status, and next steps. It is updated as implementation work lands.
 
+## Showcase demo extended to the full widget set — 2026-10-14
+
+### What was added
+
+- `examples/showcase.xui` now demonstrates every runtime-supported widget, organized by category:
+  - **Input tab** (existing `TextBox`, read-only `TextBox`, `TextArea`, `CheckBox` pair) plus `SearchField` (clear glyph, Escape reset, live readout) and `NumberField` (value/min/max/step/unit, live `Delay: N ms` readout).
+  - **Controls tab** (existing `Button` pair, `Slider` + readout, `ProgressBar`, `Dropdown`, `ColorPicker`) plus `Switch` (with label), `ToggleButton`, and `RadioGroup`, each with a live value readout in a readout column.
+  - **Layout tab** (existing `Split` + `CheckList`/`CheckItem` + wrapping text + tooltip button) plus a display section: `Separator` (used as section dividers on all three tabs), `Image` (Contain fit, rounded), `Label`, `Badge`, and an enabled/disabled `Spinner` pair.
+- Every new stateful control has an authored `id` and a `change` handler; `glfw_demo.cpp` reads each value through `Xui::runtime().value()` and displays it via `setValue()` on a readout `Text` (and, for search/notes/name, the window title). This demonstrates the value retriever API end to end for `bool` (switch/toggle), `f64` (number field), and `string` (search/radio) alternatives.
+- `glfw_demo.cpp` generates `xui-demo-image.png` (96x64 RGBA gradient) into the process working directory at startup via `xui::writePng` when missing, because `Image` resolves sources against the CWD. The widget reads it back through the project's own PNG reader — deliberately exercising both sides of the image I/O pair.
+- `showcase.xss` gained token-consistent styles for all ten Phase 1 widgets, including `hover`/`focus`/`checked`/`pressed`/`readonly`/`disabled` state blocks.
+- Runtime fixes found while building the demo: `RadioGroup` had no intrinsic measure (auto-sized to zero without explicit `.xui` size; now measures widest option + 28 px per row), and `NumberField`'s initial text appended the unit without a space while stepping added one (`250ms` vs `250 ms`) — both paths now produce `N unit`.
+
+### Coverage audit
+
+Runtime-supported and demoed: `Window`, `Column`, `Row`, `Panel`, `Split`, `CheckList`, `CheckItem`, `CheckBox`, `Switch`, `ToggleButton`, `RadioGroup`, `TextBox`, `TextArea`, `NumberField`, `SearchField`, `Tabs`/`Tab`, `Text`, `Label`, `Badge`, `Separator`/`Divider`, `Image`, `Spinner`, `Button`, `Slider`, `ProgressBar`, `Dropdown`, `ColorPicker`, `FpsCounter`, tooltips (property, multiple triggers/delays), plus the read-only and disabled variants. No supported widget is absent from the demo. Schema-only names (`Grid`, `ScrollView`, `Menu*`, `Modal`, `ListView`, `Table`, `Canvas`, …) remain unsupported and are listed in `doc/widgets.md`.
+
+Premise corrections worth recording: this checkout has a GLFW + OpenGL 2.1 backend only (no separate Win32 adapter; `xui_hello` is the same sources on Windows), and the backend contracts are `xui::Renderer` / `xui::Platform`. The task context's "modal, scroll view, menu, list view" are not implemented; "image, separator, spinner" are and are now demoed.
+
+### Decisions and trade-offs
+
+- Widgets were added to the three existing category tabs rather than a new tab, keeping one place per category; `Separator` doubles as the section divider so it is demonstrated structurally, not just as an exhibit.
+- Readouts use identified `Text` nodes updated from `change` handlers (the existing slider pattern) rather than any new binding mechanism; the window title remains the interaction log for single-shot events (actions, tasks, tab changes).
+- The demo writes one small file into the CWD (`xui-demo-image.png`) instead of changing process directory or copying assets; this keeps the app code platform-neutral and matches the documented CWD-relative source resolution.
+- Two runtime fixes were small enough to fold into this change rather than defer: the `RadioGroup` intrinsic measure and the `NumberField` unit spacing.
+
+### Verification and current status
+
+- **Compile-verified only, partially.** The runtime and Phase 1 widget code compiled clean under MSVC `/W4 /WX` (targets `xui_core` through `xui_tests`) in a freshly reconfigured `build/` directory before the demo edits. The demo edits themselves (`showcase.xui/.xss`, `glfw_demo.cpp`, and the two runtime fixes above) have **not** been compiled or run in this session — binary execution and further builds were stopped by the owner, so the following remain unverified: showcase parse/validate/build, all new-widget interactions, spinner animation cadence, image generation/readback, FPS, and the no-regression checklist (text overlap, freezing on resize, tooltip behavior).
+- This checkout's `build/` directory was reconfigured in place (the stale cache pointed at the older `Desktop/xui` checkout); that older tree keeps its own build directory.
+
+### Next steps
+
+1. Build and run the suite: `cmake --build build --config Release --target xui_tests && ./build/tests/Release/xui_tests.exe` (expect 152+ passing, including `showcase_example_assets_parse_validate_and_build` over the new content).
+2. Build and run the demo: `cmake --build build --config Release --target xui_glfw_demo && ./build/examples/Release/xui_glfw_demo.exe` — walk the three tabs, exercise every control, and watch readouts update.
+3. FPS check with the spinner visible: `./build/examples/Release/xui_glfw_demo.exe --profile` (bounded hidden run) plus a visible run with F3 enabled during interaction and resize.
+4. Visible smoke pass items still open from earlier entries: hover/checked visuals, tooltip dismissal over popups, resize smoothness, close behavior.
+
+## Phase 1 widgets: selection, numeric, and display controls — 2026-10-14
+
+### Audit and diagnosis
+
+- The agreed scope for this slice was the "inputs & display" set at full fidelity: `RadioGroup`, `Switch`, `ToggleButton`, `NumberField`, `SearchField`, `Label`, `Badge`, `Separator`/`Divider`, `Spinner` (activity indicator), and `Image`, plus read-only state styling. Scrolling/containers, overlays/menus, and lists/tables were deferred to later phases in dependency order.
+- The core schema already validated all of these names (`xui_schema.cpp`), so no new language surface was required except small property additions; the gap was runtime materialization in `UiRuntime::buildNode`.
+- The existing primitives covered the set without new infrastructure: `Painter::line` for separators/spinner ticks, `Painter::image` + `Renderer::createTexture` for images, `readPng`/`Image` for decode, the timer system (tooltips/FPS) for the spinner cadence, and the `TextBox` editing path for `NumberField`/`SearchField`.
+- `readonly` already existed end to end (style state enum, `.xss` parser name, runtime activation for `textBox`/`textArea`); it was previously undocumented. `NumberField`/`SearchField` reuse it by sharing the `textBox` flag.
+
+### Changes made
+
+- `UiRuntime::Node` gained per-type flags and state for the ten widgets; `buildNode` maps them to `Leaf` layout nodes, parses their `.xui` properties (options/value/step/precision/unit/fit/source/checked), and registers the interactive ones for focus, tab, and event routing.
+- `RadioGroup`: pipe-separated `options` with `value` selection, click-to-select rows, Up/Down/Left/Right keyboard movement, row-local hover tint, `change` on selection, and string `value()`/`setValue()`. Rows are painted by the control (ring, dot, labels) like dropdown rows; per-row selectors are not available.
+- `Switch`: track/knob paint driven by `checked`; the on-state color is the control's `fg`. Optional label is offset clear of the track (this overlap was caught during documentation review and fixed before delivery). Toggles on click-release, Space/Enter; `bool` value API.
+- `ToggleButton`: `Button` behavior plus persistent `checked`; toggles on release with `change`/`press` events; text centered like `Button`; `pressed`/`checked` states style it.
+- `NumberField`: `TextBox` editing path with numeric input filtering, live commit-and-`change` on every valid edit, Up/Down stepping by `step`, `min`/`max` clamping, `precision` (0–6) and `unit` formatting, and `f64` value API. Invalid or partial entries never change the committed value.
+- `SearchField`: `TextBox` semantics plus a painted `×` clear affordance with a reserved 18 px text inset, click-to-clear, and Escape-to-clear; both fire `change`.
+- `Label` (alias of `Text` with its own name and value exposure), `Badge` (text leaf for pill styling), `Separator`/`Divider` (aspect-oriented 1 px line in `fg`), `Spinner` (eight-tick activity indicator, one step per 80 ms through the existing idle timer, disabled-aware), and `Image` (first-paint PNG load, RGBA8 texture via the renderer, `Fill`/`Contain`/`Cover` fitting with center-crop UVs, rounded-corner clip, placeholder box when the source is missing/unreadable or no renderer is attached).
+- `Xui::attach()` now calls `UiRuntime::setRenderer()` so `Image` can create textures; the facade clears it on shutdown. Headless clients get the placeholder path.
+- Value routing: `value()`/`setValue()` gained `bool` for `Switch`/`ToggleButton`, `f64` for `NumberField`, and string handling for `RadioGroup`/`Label`/`Badge`; `controlText()` covers the text-bearing display widgets. Intrinsic measure sizes keep auto-sized `Switch` (44x24), `Separator` (12x1), `Spinner` (18x18), and `Image` (96x64 placeholder / natural size) usable with no configuration.
+- Hit testing treats `Label`/`Badge`/`Spinner`/`Image` as pointer blockers like text/panels; RadioGroup rows and the SearchField clear region resolve inside their control's bounds. `cursorAt` returns an arrow over the clear region.
+- Schema additions: `readOnly` on `NumberField`, `maxLength`/`readOnly` on `SearchField`. Documentation-only otherwise; the `.xss` state table gained its missing `enabled`/`readonly` entries in the reference.
+
+### Trade-offs and limitations
+
+- `Image` uses the project's own `readPng`, which only reads the uncompressed PNG variant `writePng` produces (8-bit RGBA, filters 0/2). General PNG/JPEG decoding is future work; the placeholder path makes the failure visible instead of silent.
+- RadioGroup rows, Switch knob colors, spinner cadence, and the SearchField clear glyph are built-in chrome; `.xss` styles the control surface and text colors but not those sub-elements. Per-row radio styling needs the same virtual-target styling work as dropdown rows.
+- `NumberField` keeps typed text as authored until a step or programmatic set reformats it; the committed `f64` is always available through `value(id)`. Escape does not revert a number edit (only SearchField clear and popup close use Escape today).
+- The spinner reuses the fixed-interval idle timer (80 ms) rather than interpolating real elapsed time, matching the FPS counter's approach; animation smoothness is bounded by event-loop wakeups.
+- No animation/transition system was introduced; `Spinner` and existing timers remain the only time-driven paint.
+
+### Verification and current status
+
+- **Not yet build-verified.** This checkout's `build/` directory is stale: its CMake cache points at an older checkout (`C:/Users/Franck/Desktop/xui`), so `cmake --build build` compiles that tree, not this one. The one suite run performed after the changes executed the stale tree's binaries and crashed before printing its summary — that result says nothing about this code. A fresh configure inside this checkout (for example `cmake -S . -B out/ci` or reconfiguring `build/`) is required before any compile, test, profile, or regression claim can be made.
+- Code review during documentation caught and fixed four defects before delivery: Switch label/track overlap, ToggleButton text not centered like Button, `Label`/`Badge` ignoring the named `text:` property, and RadioGroup hover state tracked but never painted.
+- `plan.md` is no longer present in the checkout (it was also gitignored); phase planning and scope decisions are recorded here instead.
+
+### Next steps
+
+- Configure a working build directory, compile `xui_tests`, add per-widget unit tests (build/parse, interaction, value API, readonly state, spinner timer, image placeholder), run the full suite plus `--profile`, and update the showcase `.xui`/`.xss` with a Phase 1 widget section.
+- Then the visible GLFW smoke pass that remains open from earlier entries: hover/checked visuals, spinner motion, number stepping, image rendering, resize, and FPS during interaction.
+
 ## Dropdown hover, color input, and live slider values — 2026-10-14
 
 ### Audit and diagnosis

@@ -1,0 +1,7 @@
+build/
+out/
+.vs/
+*.o
+.env
+plan.md
+tracking.md

@@ -1,0 +1,29 @@
+Window(title: "Xui cross-platform demo", size: 1000x680) {
+  Column[class: "app"] {
+    Text("Xui cross-platform example")[class: "title"]
+    Text("Layout is in .xui; visual rules are in .xss. Drag the divider and toggle checklist items.")[class: "subtitle"]
+    Text("Try the slider; its value control is interactive.")[class: "slider-label"]
+    Slider[class: "slider", value: 0.65, min: 0, max: 1, change: onSliderChange]
+    ProgressBar[class: "progress", value: 0.65, min: 0, max: 1]
+    FpsCounter[class: "fps"]
+    Split(direction: Horizontal)[class: "split", ratio: 0.36, gutter: 8, grow: 1] {
+      Panel(title: "Checklist")[class: "panel left"] {
+        Text("Project checklist")[class: "panel-title"]
+        CheckList[class: "checklist"] {
+          CheckItem(label: "Parse .xui structure", checked: true)[class: "check-item"]
+          CheckItem(label: "Resolve .xss styling", checked: true)[class: "check-item"]
+          CheckItem(label: "Keep layout backend-neutral")[class: "check-item"]
+          CheckItem(label: "Add platform backends")[class: "check-item"]
+        }
+      }
+      Panel(title: "Resizable panel")[class: "panel right"] {
+        Text("Resizable panel")[class: "panel-title"]
+        Text("The splitter uses the shared layout engine. Application layout and style stay independent of the GLFW/OpenGL backend.")[class: "body"]
+        Text("Long text wraps into additional lines and increases its layout height, so following controls keep their own space instead of being painted over.")[class: "body wrapped"]
+        Button(label: "Framework button")[class: "action", align: Center, press: onAction]
+        Dropdown[id: "density", options: "Compact|Comfortable|Spacious", value: "Comfortable", change: onDensityChange, class: "dropdown"]
+        ColorPicker[id: "accent-color", value: #5b8cff, change: onColorChange, class: "color-picker"]
+      }
+    }
+  }
+}

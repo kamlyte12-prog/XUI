@@ -1,0 +1,84 @@
+tokens {
+  color.canvas = #0b1020
+  color.panel = #151e32
+  color.raised = #1d2b45
+  color.fg = #f2f6ff
+  color.muted = #a9b7d0
+  color.accent = #5b8cff
+  color.accent-hover = #77a0ff
+  color.outline = #344563
+  color.disabled = #64748b
+}
+
+Window { resting: { bg: color.canvas } }
+Text.title { resting: { fg: color.fg, font-size: 26px, font-weight: 700 } }
+Text.subtitle { resting: { fg: color.muted, font-size: 13px } }
+Text.section-title { resting: { fg: color.fg, font-size: 18px, font-weight: 600 } }
+Text.help { resting: { fg: color.muted, font-size: 13px, margin: 0px 0px 4px } }
+Text.value-readout { resting: { fg: color.accent-hover, font-size: 13px, font-weight: 600 } }
+Text.panel-title { resting: { fg: color.fg, font-size: 16px, font-weight: 600, margin: 0px 0px 8px } }
+Text.body { resting: { fg: color.muted, font-size: 14px, pad: 0px 0px 10px } }
+
+FpsCounter.fps { resting: { bg: color.raised, fg: color.fg, font-size: 12px, radius: 5px } }
+Tabs.tabs { resting: { bg: color.panel, radius: 10px } focus: { border: 1px solid color.accent } }
+Tab {
+  resting: { bg: #111a2b, fg: color.muted, font-size: 13px }
+  hover: { bg: color.raised, fg: color.fg }
+  selected: { bg: color.panel, fg: color.fg, border: 1px solid color.accent }
+  disabled: { opacity: 0.45 }
+}
+Column.page { resting: { bg: color.panel } }
+
+TextBox.field, TextArea.field {
+  resting: { bg: #10192b, fg: color.fg, border: 1px solid color.outline, radius: 7px, pad: 9px, font-size: 14px }
+  enabled: { cursor: text }
+  hover: { border: 1px solid color.accent-hover }
+  focus: { border: 2px solid color.accent }
+  readonly: { bg: #1a2233, fg: #bac6da, border: 1px solid #46536b }
+  placeholder: { fg: color.muted }
+  disabled: { opacity: 0.45 }
+}
+TextBox.picker-channel, TextBox.picker-hex {
+  resting: { bg: #101827, fg: color.fg, border: 1px solid color.outline, radius: 4px, font-size: 12px }
+  enabled: { cursor: text }
+  hover: { border: 1px solid color.accent-hover }
+  focus: { border: 2px solid color.accent }
+  readonly: { bg: #1a2233, fg: #bac6da }
+  disabled: { opacity: 0.45 }
+}
+CheckBox.checkbox {
+  resting: { bg: color.raised, fg: color.fg, radius: 6px }
+  hover: { bg: #293b5c }
+  focus: { border: 1px solid color.accent }
+  checked: { fg: color.accent }
+  disabled: { opacity: 0.45 }
+}
+CheckBox.disabled-check { resting: { fg: color.disabled } }
+
+Button.action, Button.secondary {
+  resting: { bg: color.accent, fg: color.fg, radius: 7px, font-size: 14px }
+  hover: { bg: color.accent-hover }
+  pressed: { opacity: 0.78 }
+  focus: { border: 2px solid #b7ccff }
+  disabled: { bg: #303b50, fg: #94a3b8, opacity: 0.6 }
+}
+Button.disabled-action { resting: { bg: #303b50, fg: #94a3b8, opacity: 0.6 } }
+Slider.slider { resting: { bg: color.outline, fg: color.accent } hover: { fg: color.accent-hover } focus: { border: 1px solid color.fg } disabled: { opacity: 0.45 } }
+ProgressBar.progress { resting: { bg: color.outline, fg: color.accent, radius: 8px } }
+Dropdown.dropdown, ColorPicker.color-picker {
+  resting: { bg: color.raised, fg: color.fg, radius: 7px, border: 1px solid color.outline }
+  hover: { bg: #293b5c, border: 1px solid color.accent-hover }
+  open: { border: 2px solid color.accent }
+  focus: { border: 1px solid color.accent }
+  disabled: { opacity: 0.45 }
+}
+Split.split { resting: { fg: color.outline } }
+Panel.panel { resting: { bg: color.panel, border: 1px solid color.outline, radius: 8px } }
+CheckItem.check-item {
+  resting: { fg: color.fg, font-size: 13px, radius: 5px }
+  hover: { bg: color.raised }
+  focus: { border: 1px solid color.accent }
+  checked: { fg: color.accent }
+  disabled: { opacity: 0.45 }
+}
+Tooltip { resting: { bg: #202a40, fg: color.fg, font-size: 13px, pad: 7px, radius: 5px, border: 1px solid color.outline } }

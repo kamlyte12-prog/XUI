@@ -1,0 +1,23 @@
+Window(title: "Xui controls example", size: 920x640) {
+  Column[class: "app"] {
+    Text("Text input, checkboxes, tabs, and tooltips")[class: "title"]
+    Text("The controls are described in .xui, styled in .xss, and exposed by authored ids.")[class: "intro"]
+    TextBox[id: "username", value: "", placeholder: "Your display name", maxLength: 48, tooltip: "Enter a name. Unicode text input is supported.", change: onTextChange, class: "field"]
+    TextArea[id: "notes", value: "", placeholder: "Write a few notes…", maxLength: 800, tooltip: "Multiline text wraps inside the field. Press Enter to add a line.", change: onNotesChange, class: "notes"]
+    CheckBox(label: "Receive update notices")[id: "updates", checked: true, tooltip: "Choose whether this example opts into update notices.", change: onCheckChange, class: "checkbox"]
+    Tabs[id: "sections", selected: 0, change: onTabChange, class: "tabs"] {
+      Tab(title: "Profile") {
+        Column[class: "page"] {
+          Text("Profile settings")[class: "page-title"]
+          Text("The selected tab is available as a numeric value through runtime().value(\"sections\").")[class: "body"]
+        }
+      }
+      Tab(title: "About") {
+        Column[class: "page"] {
+          Text("About this framework")[class: "page-title"]
+          Text("A single authored UI document can be rendered by a platform backend without putting platform calls in the application UI.")[class: "body"]
+        }
+      }
+    }
+  }
+}

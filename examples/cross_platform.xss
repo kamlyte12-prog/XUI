@@ -1,0 +1,56 @@
+tokens {
+  color.canvas = #0b1020
+  color.panel = #151e32
+  color.panel-raised = #1d2b45
+  color.fg = #f2f6ff
+  color.muted = #a9b7d0
+  color.accent = #5b8cff
+  color.accent.hover = #77a0ff
+  color.outline = #344563
+  space.page = 24px
+  space.gap = 12px
+}
+
+Window { resting: { bg: color.canvas } }
+Column.app { resting: { pad: space.page, gap: space.gap } }
+Text.title { resting: { fg: color.fg, font-size: 26px, font-weight: 700 } }
+Text.subtitle { resting: { fg: color.muted, font-size: 14px, margin: 0px 0px 8px } }
+Text.slider-label { resting: { fg: color.muted, font-size: 13px } }
+Slider.slider { resting: { bg: color.outline, fg: color.accent, size: 280px 24px, margin: 2px 0px 4px } hover: { fg: color.accent.hover } disabled: { opacity: 0.45 } }
+ProgressBar.progress { resting: { bg: color.outline, fg: color.accent, size: 280px 16px, margin: 0px 0px 10px, radius: 8px } }
+FpsCounter.fps { resting: { bg: color.panel-raised, fg: color.muted, size: 88px 24px, font-size: 12px, pad: 5px, radius: 5px, margin: 0px 0px 8px } }
+Split.split { resting: { fg: color.outline, gap: 0px, radius: 12px } }
+Panel.panel { resting: { bg: color.panel, border: 1px solid color.outline, radius: 12px, pad: 18px, shadow: 0px 6px 18px 0px #00000055 } }
+Panel.left { resting: { margin: 0px 8px 0px 0px } }
+Panel.right { resting: { margin: 0px 0px 0px 8px } }
+Text.panel-title { resting: { fg: color.fg, font-size: 18px, font-weight: 600, margin: 0px 0px 14px } }
+Text.body { resting: { fg: color.muted, font-size: 15px, pad: 0px 0px 18px } }
+Text.wrapped { resting: { margin: 0px 0px 10px } }
+CheckList.checklist { resting: { gap: 8px } }
+CheckItem.check-item {
+  resting: { fg: color.fg, font-size: 15px, size: 300px 34px, pad: 6px, radius: 6px }
+  hover: { bg: color.panel-raised }
+  focus: { border: 1px solid color.accent }
+  checked: { fg: color.accent }
+  disabled: { opacity: 0.45 }
+}
+Button.action {
+  resting: { bg: color.accent, fg: color.fg, size: 220px 44px, radius: 8px, font-size: 15px }
+  hover: { bg: color.accent.hover }
+  pressed: { opacity: 0.82 }
+  disabled: { opacity: 0.45 }
+}
+Dropdown.dropdown {
+  resting: { bg: color.panel-raised, fg: color.fg, size: 260px 38px, radius: 7px, border: 1px solid color.outline, pad: 8px }
+  hover: { bg: color.accent.hover, border: 1px solid color.accent }
+  open: { border: 1px solid color.accent }
+  focus: { border: 1px solid color.accent }
+  disabled: { opacity: 0.45 }
+}
+ColorPicker.color-picker {
+  resting: { bg: color.panel-raised, fg: color.fg, size: 260px 38px, radius: 7px, border: 1px solid color.outline, pad: 8px }
+  hover: { bg: color.accent.hover, border: 1px solid color.accent }
+  open: { border: 1px solid color.accent }
+  focus: { border: 1px solid color.accent }
+  disabled: { opacity: 0.45 }
+}

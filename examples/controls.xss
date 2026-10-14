@@ -1,0 +1,46 @@
+tokens {
+  color.canvas = #0b1020
+  color.panel = #151e32
+  color.raised = #1d2b45
+  color.fg = #f2f6ff
+  color.muted = #a9b7d0
+  color.accent = #5b8cff
+  color.outline = #344563
+}
+
+Window { resting: { bg: color.canvas } }
+Column.app { resting: { pad: 24px, gap: 12px } }
+Text.title { resting: { fg: color.fg, font-size: 25px, font-weight: 700 } }
+Text.intro { resting: { fg: color.muted, font-size: 14px } }
+Text.page-title { resting: { fg: color.fg, font-size: 18px, font-weight: 600, margin: 0px 0px 8px } }
+Text.body { resting: { fg: color.muted, font-size: 14px } }
+
+TextBox.field {
+  resting: { bg: color.panel, fg: color.fg, size: 480px 42px, pad: 10px, radius: 7px, border: 1px solid color.outline }
+  hover: { border: 1px solid #668fff }
+  focus: { border: 1px solid color.accent }
+  placeholder: { fg: color.muted }
+  disabled: { opacity: 0.45 }
+}
+TextArea.notes {
+  resting: { bg: color.panel, fg: color.fg, size: 620px 128px, pad: 10px, radius: 7px, border: 1px solid color.outline, align: Start }
+  hover: { border: 1px solid #668fff }
+  focus: { border: 1px solid color.accent }
+  placeholder: { fg: color.muted }
+  disabled: { opacity: 0.45 }
+}
+CheckBox.checkbox {
+  resting: { bg: color.panel, fg: color.fg, size: 300px 38px, pad: 6px, radius: 6px }
+  hover: { bg: color.raised }
+  focus: { border: 1px solid color.accent }
+  checked: { fg: color.accent }
+  disabled: { opacity: 0.45 }
+}
+Tabs.tabs { resting: { bg: color.panel, size: 680px 210px, radius: 8px, pad: 0px } }
+Tab {
+  resting: { bg: #111a2b, fg: color.muted, font-size: 13px }
+  hover: { bg: color.raised, fg: color.fg }
+  selected: { bg: color.panel, fg: color.fg, border: 1px solid color.accent }
+}
+Column.page { resting: { bg: color.panel, pad: 18px, gap: 8px } }
+Tooltip { resting: { bg: #202a40, fg: color.fg, font-size: 13px, pad: 7px, radius: 5px } }

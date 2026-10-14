@@ -1,0 +1,89 @@
+Window(title: "Xui GLFW/OpenGL widget showcase", size: 1080x760) {
+  Column[id: "app-column", class: "app", pad: 20px, gap: 10px] {
+    Text("Xui widget showcase")[class: "title"]
+    Row(gap: 12)[class: "toolbar", width: 100%, height: 28px, align: Center] {
+      Text("Try the controls below. Press F3 to toggle the live FPS display.")[class: "subtitle"]
+      FpsCounter[class: "fps", width: 168px, height: 26px, pad: 5px]
+    }
+
+    Tabs[id: "demo-sections", selected: 0, change: onTabChange, class: "tabs", width: 100%, height: 590px] {
+      // Text entry, checkbox state, keyboard focus, and hover/focus tooltips.
+      Tab(title: "Input")[id: "input-tab"] {
+        Column[id: "input-page", class: "page", pad: 18px, gap: 10px, grow: 1] {
+          Text("Text input and focus")[class: "section-title"]
+          Text("Type in either field. Values are read by authored id when the change callback fires.")[class: "help"]
+          Row(gap: 12)[id: "input-row", class: "field-row"] {
+            TextBox[id: "display-name", value: "Guest", placeholder: "Display name", maxLength: 48,
+                   tooltip: "Single-line input. Try Shift+arrows, Ctrl+A/C/X/V, Delete, and Backspace.",
+                   tooltipTrigger: "both", tooltipShowDelay: 450, tooltipHideDelay: 120,
+                   change: onNameChange, class: "field name-field", width: 440px, height: 40px]
+            TextBox[id: "readonly-field", value: "Read only", readOnly: true,
+                   tooltip: "This tip is disabled for this field.", tooltipDisabled: true,
+                   class: "field readonly-field", width: 260px, height: 40px]
+          }
+          TextArea[id: "notes", value: "", placeholder: "Write a multiline note…", maxLength: 800,
+                   tooltip: "Text wraps inside this area. Press Enter to add a line.",
+                   change: onNotesChange, class: "field notes", width: 720px, height: 132px, align: Start]
+          Row(gap: 12)[id: "checks-row", class: "checks"] {
+            CheckBox(label: "Receive update notices")[id: "updates", checked: true,
+                    tooltip: "Checkbox state is available as a bool by id.", change: onCheckChange, class: "checkbox", width: 240px, height: 38px, pad: 6px]
+            CheckBox(label: "Disabled example")[id: "disabled-check", checked: false, disabled: true, class: "checkbox disabled-check", width: 240px, height: 38px, pad: 6px]
+          }
+        }
+      }
+
+      // Buttons, slider, progress bar, dropdown, and HSV color picker.
+      Tab(title: "Controls")[id: "controls-tab"] {
+        Column(gap: 12)[id: "controls-page", class: "page controls-page", pad: 18px, grow: 1] {
+          Text("Actions and values")[class: "section-title"]
+          Text("Hover, focus, and press the enabled button. Disabled controls show their disabled styling.")[class: "help"]
+          Row(gap: 12)[id: "actions-row", class: "actions", margin: 0x4] {
+            Button(label: "Run action")[id: "run-action", tooltip: "Activate the demo action.", press: onAction, class: "action", width: 220px, height: 42px]
+            Button(label: "Disabled action")[disabled: true, class: "action disabled-action", width: 220px, height: 42px]
+          }
+          Text("Slider value: drag the thumb or focus it and press Left/Right.")[class: "help"]
+          Slider[id: "volume", value: 0.65, min: 0, max: 1, tooltip: "The slider reports a numeric value by id.",
+                 change: onSliderChange, class: "slider", width: 480px, height: 26px, margin: 0x2]
+          Text("Volume: 65%")[id: "volume-readout", class: "value-readout", width: 180px, height: 24px]
+          ProgressBar[id: "progress-demo", value: 0.65, min: 0, max: 1, class: "progress", width: 480px, height: 16px]
+          Row(gap: 16)[id: "picker-row", class: "picker-row", margin: 0x8] {
+            Dropdown[id: "density", options: "Compact|Comfortable|Spacious", value: "Comfortable",
+                     tooltip: "Click to open; choose one density.", tooltipTrigger: "hover", tooltipShowDelay: 350,
+                     change: onDensityChange, class: "dropdown", width: 260px, height: 38px, pad: 8px]
+            ColorPicker[id: "accent-color", value: #5b8cff, format: "hex", formats: "hex|rgb|hsl|hsv", precision: 1,
+                        popupSize: 248x264,
+                        alpha: true, showAlpha: true, showInputs: true, showFormatSwitcher: true,
+                        showHue: true, showSaturationValue: true,
+                        tooltip: "Click and drag in the popup to choose a color, or edit the value row.",
+                        change: onColorChange, class: "color-picker", width: 260px, height: 38px, pad: 8px]
+          }
+        }
+      }
+
+      // A draggable split with a checklist and wrapping text.
+      Tab(title: "Layout")[id: "layout-tab"] {
+        Column(gap: 10)[id: "layout-page", class: "page layout-page", pad: 18px, grow: 1] {
+          Text("Resizable layout and checklist")[class: "section-title"]
+          Text("Drag the splitter between the panels. The content paragraph wraps and remains clipped to its layout bounds.")[class: "help"]
+          Split(direction: Horizontal)[id: "main-split", class: "split", ratio: 0.34, gutter: 8, grow: 1] {
+            Panel[id: "tasks-panel", class: "panel checklist-panel", pad: 14px] {
+              Text("Tasks")[class: "panel-title"]
+              CheckList[gap: 8, class: "checklist"] {
+                CheckItem(label: "Parse the .xui tree", checked: true)[id: "task-layout", change: onTaskLayout, class: "check-item", width: 100%, height: 34px, pad: 5px]
+                CheckItem(label: "Resolve .xss styles", checked: true)[id: "task-styles", change: onTaskStyles, class: "check-item", width: 100%, height: 34px, pad: 5px]
+                CheckItem(label: "Keep controls backend-neutral")[id: "task-backend", change: onTaskBackend, class: "check-item", width: 100%, height: 34px, pad: 5px]
+                CheckItem(label: "Resize the split panels")[id: "task-resize", change: onTaskResize, class: "check-item", width: 100%, height: 34px, pad: 5px]
+              }
+            }
+            Panel[id: "content-panel", class: "panel content-panel", pad: 14px] {
+              Text("Shared document, replaceable backends")[class: "panel-title"]
+              Text("This page is described entirely with .xui structure and .xss styling. The GLFW platform supplies window and input events; the OpenGL renderer draws the same backend-neutral command list.")[class: "body"]
+              Text("Long content wraps to the next line, contributes to auto layout, and is clipped to the widget bounds instead of painting over neighboring controls.")[class: "body"]
+              Button(label: "Test hover and focus")[tooltip: "This tooltip is attached to its target control.", press: onAction, class: "secondary", width: 240px, height: 40px]
+            }
+          }
+        }
+      }
+    }
+  }
+}

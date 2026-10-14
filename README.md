@@ -1,10 +1,127 @@
 # Xui
 
-Xui is an experimental C++23 GUI framework. `.xui` describes the widget tree and layout intent, `.xss` describes visual rules, and the `xui::Xui` facade connects them to replaceable `Platform` / `Renderer` backends. `UiRuntime` remains available as the lower-level API.
+> An experimental C++23 GUI framework: describe your UI in `.xui`, style it in `.xss`, and plug in any rendering or windowing backend.
 
-## Quick start: Windows host
+<!-- 📍 Badge suggestions (add only the ones that apply):
+[![Build](https://img.shields.io/badge/build-TODO-lightgrey)](TODO)
+[![Version](https://img.shields.io/badge/version-TODO-lightgrey)](TODO)
+[![License](https://img.shields.io/badge/license-TODO-lightgrey)](TODO)
+[![C++23](https://img.shields.io/badge/C%2B%2B-23-blue)](TODO)
+-->
 
-Requirements: CMake 3.25+, a C++23 compiler, and OpenGL 2.1 support. The Windows hello target uses the same GLFW `Platform` and direct OpenGL `Renderer` as the cross-platform example:
+
+---
+
+## 📖 Table of Contents
+
+- [What is this?](#-what-is-this)
+- [Features](#-features)
+- [Demo](#-demo)
+- [Prerequisites](#-prerequisites)
+- [Installation](#-installation)
+- [Quick start](#-quick-start)
+- [Usage](#-usage)
+  - [Authoring `.xui` and `.xss`](#authoring-xui-and-xss)
+  - [Using Xui in your C++ app](#using-xui-in-your-c-app)
+  - [Custom backends](#custom-backends)
+  - [Before and after the facade](#before-and-after-the-facade)
+- [Configuration](#-configuration)
+- [Project structure](#-project-structure)
+- [Build and test](#-build-and-test)
+- [Documentation](#-documentation)
+- [Contributing](#-contributing)
+- [License](#-license)
+- [FAQ / Troubleshooting](#-faq--troubleshooting)
+
+---
+
+## 💡 What is this?
+
+Xui separates **what your UI is** from **how it looks** and **where it runs**:
+
+| Piece | Role |
+| --- | --- |
+| `.xui` file | Describes the widget tree and layout intent |
+| `.xss` file | Describes visual rules (colors, borders, fonts, states) |
+| `xui::Xui` facade | Loads the files, builds the runtime, and runs the event/layout/paint loop |
+| `Platform` backend | Owns the native window and translates input into normalized events |
+| `Renderer` backend | Owns the drawing device and executes the backend-neutral `DrawList` |
+
+> **Jargon check:** A `DrawList` is Xui's backend-neutral list of draw commands. Any `Renderer` can execute it, so shared application code never makes OS or graphics-API calls.
+
+**Why use it?**
+
+- One small entry point: one `Xui` object plus two backend objects.
+- Layout and styling live in declarative files, not in C++ code.
+- Backends are replaceable. Neither `Platform` nor `Renderer` parses `.xui` or `.xss`.
+- Lower-level APIs (`UiRuntime`, `LayoutTree`, `Painter`, text APIs) stay available for custom lifecycles or embedding.
+
+---
+
+## ✨ Features
+
+- **Declarative UI:** `.xui` for structure and layout, `.xss` for visuals.
+- **Supported widgets:** `Window`, `Column`, `Row`, `Panel`, `Split`, `CheckList`, `CheckItem`, `CheckBox`, `TextBox`, `TextArea`, `Tabs` / `Tab`, `Text`, `Button`, `Slider`, `ProgressBar`, `Dropdown`, `ColorPicker`, `FpsCounter`, plus tooltips via the `tooltip` property.
+- **Styling:** background/foreground, borders, radius, shadow, opacity, font family/size/weight, letter spacing, text alignment, and interaction states (`resting`, `hover`, `focus`, `checked`, `disabled`, `pressed`; `active` is an alias for `pressed`).
+- **Layout properties:** `align`, `size`, `pad`, `margin`, `gap`, `grow`, and `justify` feed the retained layout engine.
+- **Text:** TrueType glyph atlas rasterized at the current DPI; wrapped text advances line baselines, contributes measured height when auto-sized, and clips to its widget.
+- **Cascading:** parent text properties (`font`, `font-size`, `fg`, `align`, `letter-spacing`) act as defaults; explicit child rules override them.
+- **Rendering:** shared OpenGL 2.1 renderer drawing SDF (signed distance field) shapes and glyphs directly from `DrawList` buffers.
+- **Software reference renderer:** the CPU `SoftRenderer` is a deterministic reference and headless backend.
+- **Stateful controls:** read and write values by authored id with `ui.runtime().value(id)` and `setValue(id, value)`.
+- **Color picker:** accepts typed HEX/RGB(A)/HSL(A)/HSV(A) input; RGBA `Color` stays the canonical value.
+- **Cross-platform demo:** Windows, Linux, and macOS via bundled GLFW 3.5.1 source.
+
+**Current limitations**
+
+- The runtime does not yet evaluate bindings, conditions, loops, component expansion, or transitions.
+- There is no data binding between widgets yet (the progress bar is display-only).
+- Unsupported nodes return an error instead of silently becoming native controls.
+- The `Xui` facade is a one-window, one-run convenience lifecycle. For multiple windows or a host-owned event loop, use the lower-level APIs.
+
+---
+
+## 🖼️ Demo
+
+![Screenshot](doc/showcase.png)
+
+<!-- 📍 Suggested visuals:
+  1. Screenshot of the showcase window, one per tab.
+  2. GIF of dragging a Split divider and using the dropdown/color picker.
+  3. Diagram: .xui + .xss -> Xui -> DrawList -> Renderer, with Platform feeding events in. -->
+
+The `showcase.xui` / `showcase.xss` example demonstrates editable fields, checkbox, tabs, delayed tooltips, dropdown, color picker, checklist, resizable panels, slider, progress bar, and an FPS counter.
+
+Press **F3** in either example to toggle the `.xss`-styled FPS counter. It is visible on first launch.
+
+---
+
+## 📋 Prerequisites
+
+- CMake **3.25+**
+- A **C++23** compiler
+- **OpenGL 2.1** support
+- Linux/macOS: the system OpenGL development package (the GLFW source is bundled)
+- Optional: a `.ttf` font file for the cross-platform demo if it cannot find a system font (see [Configuration](#-configuration))
+
+---
+
+## 📦 Installation
+
+Xui is built from source with CMake. [TODO: Document how to consume Xui from another project (e.g., `add_subdirectory`, `find_package`, or package manager), since the existing README does not specify this.]
+
+```sh
+git clone https://github.com/kamlyte12-prog/XUI.git
+cd XUI
+```
+
+---
+
+## 🚀 Quick start
+
+### Option A: Windows host (`xui_hello`)
+
+Uses the same GLFW `Platform` and direct OpenGL `Renderer` as the cross-platform example.
 
 ```powershell
 cmake -S . -B build/hello -DXUI_BUILD_TESTS=ON -DXUI_BUILD_BENCHMARKS=OFF
@@ -12,24 +129,37 @@ cmake --build build/hello --config Release --target xui_hello
 .\build\hello\examples\Release\xui_hello.exe
 ```
 
-The host loads `showcase.xui` and `showcase.xss` beside the executable. The example layout and style are backend-neutral; GLFW contains the window and context calls. The OpenGL renderer consumes the backend-neutral `DrawList` directly. Text is rasterized into a TrueType glyph atlas at the current DPI.
+The host loads `showcase.xui` and `showcase.xss` from beside the executable.
 
-## Cross-platform GLFW example
-
-The demo builds on Windows, Linux and macOS using the bundled GLFW 3.5.1 source and the system OpenGL development package. It uses the same `Platform`, `Renderer`, `.xui`, and `.xss` boundaries as the rest of Xui:
+### Option B: Cross-platform GLFW demo (Windows, Linux, macOS)
 
 ```sh
 cmake -S . -B build/glfw -DXUI_BUILD_GLFW_EXAMPLE=ON -DXUI_BUILD_TESTS=OFF -DXUI_BUILD_BENCHMARKS=OFF
 cmake --build build/glfw --target xui_glfw_demo
 ```
 
-Run `xui_glfw_demo` from any working directory; it loads the copied `showcase.xui` and `showcase.xss` beside its executable. The demo tries common system font locations; set `XUI_DEMO_FONT` to a `.ttf` path if it cannot find one. Its Input, Controls, and Layout tabs demonstrate the runtime-supported widgets, including editable fields, checkbox, tabs, delayed tooltips, dropdown, color picker, checklist, resizable panels, slider, progress bar, and FPS counter. GLFW-specific calls stay in the platform adapter; UI input and layout use Xui interfaces.
+Run `xui_glfw_demo` from any working directory. It loads the copied `showcase.xui` and `showcase.xss` beside its executable. [TODO: Add the exact output path of `xui_glfw_demo` per platform.]
 
-Both sample executables render SDF shapes and glyphs directly from `DrawList` buffers with the shared OpenGL 2.1 renderer. The CPU `SoftRenderer` remains available as a deterministic reference and headless backend. `xui_hello.exe --profile` and `xui_glfw_demo.exe --profile` run a hidden bounded application-loop profile and print frame count and effective FPS.
+> 💡 If the demo can't find a font, set `XUI_DEMO_FONT` to a `.ttf` path.
 
-Press **F3** in either example to toggle the `.xss`-styled FPS counter. The showcase displays it initially and keeps it visible on first launch. The progress bar is display-only; the framework does not yet have data binding between widgets. `--profile` runs a hidden, continuously redrawn five-second loop; it measures loop throughput, not visible presentation or input latency.
+### Profile mode
 
-## Authoring
+```sh
+xui_hello.exe --profile
+xui_glfw_demo.exe --profile
+```
+
+Runs a hidden, continuously redrawn, bounded (five-second) loop and prints frame count and effective FPS.
+
+> **Note:** `--profile` measures loop throughput, not visible presentation or input latency.
+
+---
+
+## 🧰 Usage
+
+### Authoring `.xui` and `.xss`
+
+**`app.xui`** describes structure and layout:
 
 ```xui
 Window(title: "Demo", size: 800x500) {
@@ -45,6 +175,8 @@ Window(title: "Demo", size: 800x500) {
 }
 ```
 
+**`app.xss`** describes visuals:
+
 ```xss
 Panel.sidebar, Panel.content { resting: { bg: #172033, border: 1px solid #344563, radius: 10px } }
 CheckItem { resting: { fg: #f5f7ff, font-size: 15px }
@@ -55,15 +187,39 @@ CheckItem { resting: { fg: #f5f7ff, font-size: 15px }
 }
 ```
 
-Layout values such as `align`, `size`, `pad`, `margin`, `gap`, `grow`, and `justify` feed the retained layout engine. `.xss` styles paint: background/foreground, borders, radius, shadow, opacity, font family/size/weight, letter spacing, text alignment and interaction states. Load a font with `Xui::loadFont(path, family, weight)` before attaching backends, then use `font: "Family"` in `.xss`. Low-level users can register faces through `UiRuntime::registerFont()`. Font selection falls back to the host's default face when no matching family is registered. `active` is accepted as an alias for `pressed`.
+**Fonts:** load a font with `Xui::loadFont(path, family, weight)` before attaching backends, then use `font: "Family"` in `.xss`. Low-level users can register faces through `UiRuntime::registerFont()`. If no matching family is registered, Xui falls back to the host's default face.
 
-For a basic application, use the `xui::Xui` facade below. It reads the files, loads fonts, parses and validates `.xui`, compiles `.xss`, builds the runtime, creates the window through the supplied platform, and owns the ordinary event/layout/paint loop. The lower-level `loadUiAssets`, `UiRuntime`, `LayoutTree`, `Painter`, and text APIs remain available for custom lifecycle or embedding needs.
+See the [widget guide](doc/widgets.md) for supported options and limitations.
 
-The runtime supports `Window`, `Column`, `Row`, `Panel`, `Split`, `CheckList`, `CheckItem`, `CheckBox`, `TextBox`, `TextArea`, `Tabs` / `Tab`, `Text`, `Button`, `Slider`, `ProgressBar`, `Dropdown`, `ColorPicker`, `FpsCounter`, and tooltips via the `tooltip` property. Stateful controls can be accessed by authored id using `ui.runtime().value(id)` and `setValue(id, value)`. Slider changes are reported as the logical value moves; the color picker accepts typed HEX/RGB(A)/HSL(A)/HSV(A) input while retaining RGBA `Color` as its canonical value. See the [widget guide](doc/widgets.md) for supported options and limitations. Parent text properties (`font`, `font-size`, `fg`, `align`, and `letter-spacing`) cascade as defaults; explicit child rules override them. Wrapped text advances line baselines, contributes measured height when auto-sized, and clips to its widget. The runtime does not yet evaluate bindings, conditions, loops, component expansion, or transitions. Unsupported nodes return an error instead of silently becoming native controls.
+### Using Xui in your C++ app
 
-## Start a project with a custom backend
+The `xui::Xui` facade reads the files, loads fonts, parses and validates `.xui`, compiles `.xss`, builds the runtime, creates the window through the supplied platform, and owns the ordinary event/layout/paint loop.
 
-The default path is one `Xui` object and two backend objects. Replace the example backend headers and types with your own implementations of `xui::Renderer` and `xui::Platform`:
+Minimal entry point (no custom settings or callbacks):
+
+```cpp
+int main() {
+  MyRenderer renderer;
+  MyPlatform platform;
+  xui::Xui ui;
+  if (!ui.loadFont("font.ttf") || !ui.loadXui("app.xui") || !ui.loadXss("app.xss")) return 1;
+  if (!ui.attach(renderer, platform)) return 1;
+  return ui.run();
+}
+```
+
+Reading and writing stateful controls by authored id:
+
+```cpp
+ui.runtime().value(id);
+ui.runtime().setValue(id, value);
+```
+
+Slider changes are reported as the logical value moves.
+
+### Custom backends
+
+Replace the example backend headers and types with your own implementations of `xui::Renderer` and `xui::Platform`:
 
 ```cpp
 #include <xui/xui.hpp>
@@ -90,20 +246,16 @@ int main() {
 }
 ```
 
-The entry point can be reduced further when the app does not need custom settings or callbacks:
+**Backend contracts**
 
-```cpp
-int main() {
-  MyRenderer renderer;
-  MyPlatform platform;
-  xui::Xui ui;
-  if (!ui.loadFont("font.ttf") || !ui.loadXui("app.xui") || !ui.loadXss("app.xss")) return 1;
-  if (!ui.attach(renderer, platform)) return 1;
-  return ui.run();
-}
-```
+| Interface | Responsibilities |
+| --- | --- |
+| `Platform` | Owns the native window. Translates input into normalized events with top-left-origin logical coordinates. Reports logical client size, physical framebuffer size, and DPI. Waits instead of busy-polling when idle. |
+| `Renderer` | Owns the drawing device/surface and texture lifecycle. Executes the backend-neutral `DrawList`. Implements frame begin/submit/end/present. Reports truthful capabilities. |
 
-### Before and after
+Neither interface parses `.xui` or `.xss`. `Xui` accepts both as references, so applications can provide custom implementations without OS calls in shared application code. See [`architecture.md`](architecture.md) for interface contracts and data flow.
+
+### Before and after the facade
 
 | Previous application path | Facade path |
 | --- | --- |
@@ -112,11 +264,62 @@ int main() {
 | Build `UiRuntime`, initialize atlas, construct `Painter` | `attach(renderer, platform)` |
 | Implement event draining, layout, paint, submit, present, and resize loop | `run()` |
 
-The backend contracts are unchanged. `Platform` owns the native window and translates input into normalized events with top-left-origin logical coordinates; it reports logical client size, physical framebuffer size, and DPI, and waits instead of busy-polling when idle. `Renderer` owns the drawing device/surface, texture lifecycle, and execution of the backend-neutral `DrawList`; it implements frame begin/submit/end/present and reports truthful capabilities. Neither interface parses `.xui` or `.xss`. `Xui` accepts both as references, so applications can still provide custom implementations without making OS calls in shared application code.
+`Xui::runtime()` and `Xui::textSystem()` expose lower-level operations for advanced applications.
 
-`XuiOptions` customizes app/window names, initial and minimum size, resizability, visibility, OpenGL-context request, vsync, and glyph atlas size. Set `glContext = false` for a non-GL backend. `loadFont(path, family, weight)` loads a TrueType face before attach; `.xss` can then select the family and weight. `Xui::runtime()` and `Xui::textSystem()` expose lower-level operations for advanced applications. The facade is a one-window, one-run convenience lifecycle; use the lower-level APIs for multiple windows or a host-owned event loop. See [`architecture.md`](architecture.md) for the interface contracts and data flow.
+---
 
-## Build and checks
+## ⚙️ Configuration
+
+### `XuiOptions` (C++)
+
+`XuiOptions` customizes the following. [TODO: List exact field names and defaults from the header.]
+
+| Option | Purpose | Default |
+| --- | --- | --- |
+| App/window names | Application and window naming | xui-app |
+| Initial and minimum size | Starting and minimum window size | 720x440 |
+| Resizability | Whether the window can be resized | true |
+| Visibility | Whether the window is shown | true |
+| OpenGL-context request (`glContext`) | Request a GL context; set `glContext = false` for a non-GL backend | true |
+| Vsync | Vertical sync | false |
+| Glyph atlas size | Size of the glyph texture atlas | GlyphAtlas::kMinSize |
+
+### CMake options
+
+| Option | Purpose | Default |
+| --- | --- | --- |
+| `XUI_BUILD_TESTS` | Build tests | ON |
+| `XUI_BUILD_BENCHMARKS` | Build benchmarks | ON |
+| `XUI_BUILD_GLFW_EXAMPLE` | Build the cross-platform GLFW demo (`xui_glfw_demo`) | ON |
+
+### Environment variables and runtime flags
+
+| Name | Applies to | Purpose | Default |
+| --- | --- | --- | --- |
+| `--profile` | `xui_hello`, `xui_glfw_demo` | Run a hidden, bounded, continuously redrawn five-second profile loop | ON |
+| `F3` (key) | Both demos | Toggle the FPS counter | Visible on first launch |
+
+---
+
+## 🗂️ Project structure
+
+> [TODO: Verify and complete this tree against the repository; only the items below are mentioned in the existing README.]
+
+```text
+.
+├── doc/             # Focused guides (see doc/README.md)
+│   ├── README.md    # Documentation index
+│   ├── widgets.md   # Supported widgets, options, limitations
+│   └── architecture.md  # Architecture and backend development
+├── examples/        # xui_hello and xui_glfw_demo; showcase.xui / showcase.xss
+├── architecture.md  # Project architecture notes and measurement history
+├── tracking.md      # Audit findings, design choices, status, next steps
+└── CMakeLists.txt   # [TODO: confirm]
+```
+
+---
+
+## 🧪 Build and test
 
 ```sh
 cmake -S . -B build/debug -DXUI_BUILD_TESTS=ON -DXUI_BUILD_BENCHMARKS=ON
@@ -124,8 +327,57 @@ cmake --build build/debug --config Debug
 ctest --test-dir build/debug -C Debug --output-on-failure
 ```
 
-See [tracking.md](tracking.md) for audit findings, design choices, status and next steps.
+---
 
-## Documentation
+## 📚 Documentation
 
-The [`doc/`](doc/README.md) folder contains focused guides for getting started, `.xui` structure, `.xss` styling, supported UI objects and style properties, backend architecture, performance, and troubleshooting. Start with the [documentation index](doc/README.md); advanced renderer/platform authors can go directly to [Architecture and backend development](doc/architecture.md). The root [architecture.md](architecture.md) remains available as the project's architecture notes and measurement history.
+The [`doc/`](doc/README.md) folder contains focused guides on:
+
+- Getting started
+- `.xui` structure
+- `.xss` styling
+- Supported UI objects and style properties
+- Backend architecture
+- Performance
+- Troubleshooting
+
+Start with the [documentation index](doc/README.md). Renderer/platform authors can go directly to [Architecture and backend development](doc/architecture.md). The root [`architecture.md`](architecture.md) remains available as the project's architecture notes and measurement history.
+
+---
+
+## 🤝 Contributing
+
+[TODO: Add contribution guidelines (issue reporting, pull request process, code style).]
+
+Before submitting changes, please run the [build and test](#-build-and-test) commands above.
+
+---
+
+## 📄 License
+
+[TODO: Add license name and link to the `LICENSE` file.]
+
+---
+
+## ❓ FAQ / Troubleshooting
+
+**My `.xss` font family isn't applied.**
+Load the face first with `Xui::loadFont(path, family, weight)` before attaching backends. Without a matching registered family, Xui falls back to the host's default face.
+
+**I get an error about an unsupported node.**
+Unsupported nodes return an error rather than becoming native controls. Check the supported widget list above and the [widget guide](doc/widgets.md).
+
+**Bindings, conditions, loops, components, or transitions don't work.**
+The runtime does not evaluate these yet. The progress bar is display-only, and there is no data binding between widgets.
+
+**`--profile` shows a high FPS, but the UI feels laggy.**
+Profile mode measures loop throughput, not visible presentation or input latency.
+
+**I need a non-OpenGL backend.**
+Set `glContext = false` in `XuiOptions` and provide your own `Renderer` and `Platform`. See [Custom backends](#custom-backends).
+
+**I need multiple windows or my own event loop.**
+The `Xui` facade is one-window and one-run. Use the lower-level APIs (`UiRuntime`, `LayoutTree`, `Painter`, text APIs).
+
+**Other problems?**
+See the troubleshooting guide in [`doc/`](doc/README.md). [TODO: Link the exact troubleshooting page.]

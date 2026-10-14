@@ -30,7 +30,7 @@ Open an issue at <https://github.com/kamlyte12-prog/XUI/issues>. Please include:
 
 ## Setting up a development environment
 
-Prerequisites (details in [Prerequisites](README.md#-prerequisites)): CMake **3.25+**, a **C++23** compiler (CI uses GCC 13, Clang 18, Apple Clang, and MSVC 2022), and on Linux/macOS the system OpenGL development package. GLFW 3.5.1 is bundled, so no windowing dependency to install.
+Prerequisites (details in [Prerequisites](README.md#-prerequisites)): CMake **3.25+**, a **C++23** compiler (CI uses GCC 13, Clang 18, Apple Clang, and MSVC 2022), and on Linux the OpenGL/X11/Wayland development packages for the bundled GLFW (on Ubuntu: `sudo apt install libgl-dev xorg-dev libwayland-dev libxkbcommon-dev`). GLFW 3.5.1 is bundled, so macOS and Windows need no windowing dependency.
 
 ### Build, test, and run
 

@@ -14,10 +14,21 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      # The bundled GLFW 3.5.1 builds both X11 and Wayland by default on Linux and the
+      # examples need OpenGL headers; none of these dev packages ship with the runner image.
+      - name: Install Linux GL/X11/Wayland development packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgl-dev xorg-dev libwayland-dev libxkbcommon-dev
+
       - name: Configure
         shell: bash
         run: |
-          [ -n "${{ matrix.cxx }}" ] && export CC=${{ matrix.cc }} CXX=${{ matrix.cxx }}
+          if [ -n "${{ matrix.cxx }}" ]; then
+            export CC="${{ matrix.cc }}" CXX="${{ matrix.cxx }}"
+          fi
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DXUI_SANITIZE=${{ matrix.san }}
       - name: Build
         run: cmake --build build --config Debug --parallel

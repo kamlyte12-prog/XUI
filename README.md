@@ -92,7 +92,8 @@ Press **F3** in either example to toggle the `.xss`-styled FPS counter. It is vi
 - CMake **3.25+**
 - A **C++23** compiler (CI builds with GCC 13, Clang 18, Apple Clang on macOS 14, and MSVC 2022)
 - **OpenGL 2.1** support
-- Linux/macOS: the system OpenGL development package (the GLFW source is bundled)
+- Linux: OpenGL, X11, and Wayland development packages for the bundled GLFW 3.5 (on Ubuntu: `sudo apt install libgl-dev xorg-dev libwayland-dev libxkbcommon-dev`)
+- macOS: nothing extra (GLFW uses the system Cocoa and OpenGL frameworks)
 
 ---
 

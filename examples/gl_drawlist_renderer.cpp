@@ -173,7 +173,8 @@ void GlDrawListRenderer::shutdown() {
 	for (auto& t : m_textures)if (t.alive) {
 		glDeleteTextures(1, &t.name);
 		t.alive = false;
-	}if (m_vertexBuffer)m_deleteBuffers(1, &m_vertexBuffer);
+	};
+	if (m_vertexBuffer)m_deleteBuffers(1, &m_vertexBuffer);
 	if (m_indexBuffer)m_deleteBuffers(1, &m_indexBuffer);
 	m_vertexBuffer = m_indexBuffer = 0;
 	releaseProgram();

@@ -435,8 +435,40 @@ DatePicker[id: "due-date", value: "2026-10-15", change: onDue][class: "date"]
 ### `Toolbar` and `StatusBar`
 Schema-recognized horizontal containers now materialized as Row-equivalent layout nodes for app chrome; they have no state or painting of their own — style them like `Row`/`Panel`.
 
+### `ScrollView`
+`ScrollView` is a retained container backed by the shared `LayoutKind::Scroll` solver. It can scroll vertically, horizontally, or both (`vertical` defaults to true; `horizontal` defaults to false). The solver measures overflowing child content once and clamps the offset without rerunning layout for every scroll tick. Children are clipped to the scroll viewport in painting and pointer targeting.
+
+```xui
+ScrollView[id: "feed", vertical: true, horizontal: false, scrollSpeed: 42,
+          scrollBehavior: "smooth", scrollbar: "auto", width: 320px, height: 240px,
+          change: onFeedScroll][class: "feed"] {
+  Column(gap: 8) {
+    Text("First row")
+    Text("More content can continue beyond the viewport")
+    Button(label: "Last row")[id: "last-row"]
+  }
+}
+```
+
+The platform reports mouse-wheel input as the backend-neutral `EventType::Wheel`; nested views consume the event from the deepest hit child outward, so an outer view can take over when an inner view reaches its limit. GLFW maps the native scroll callback to this event. Drag the visible scrollbar thumb; `scrollbar: "always"`, `"auto"`, and `"never"` control visibility. `scrollSpeed` is logical pixels per wheel notch. `scrollBehavior` accepts `"instant"` or `"smooth"`; smooth applies a short shared-runtime easing animation. Keyboard arrows scroll a focused `ScrollView`; PageUp/PageDown/Home/End also scroll a focused non-text descendant's nearest view. Tab focus calls scroll-into-view for the next focusable child.
+
+The lower-level API is available from `UiRuntime`: `scrollOffset(id)`, `scrollTo(id, {x, y}, smooth)`, and `scrollIntoView(id, smooth)`. `value(id)` also returns a `Vec2` offset for ScrollView IDs; the `change` callback can read it and update a status label. Offsets are logical pixels. Scrollbars are overlays painted from `.xss` values, not platform-native controls.
+
+```xss
+ScrollView.feed {
+  resting: { bg: #242424, border: 1px solid #333333, radius: 5px,
+             pad: 8px, scrollbar-size: 12px, scrollbar-visibility: auto,
+             scroll-behavior: smooth, scroll-speed: 42,
+             scroll-track: #171717, scroll-thumb: #777777 }
+  hover: { scroll-thumb: #9a9a9a }
+  pressed: { scroll-thumb: #4772b3 }
+}
+```
+
+Limitations: inertial/momentum scrolling, touch/gesture input, scrollbar corner styling, accessibility semantics, wheel-axis remapping, and per-child overscroll policy are not implemented. For two-axis scrolling, explicitly sized wide children provide horizontal overflow while vertical content can continue to grow. The shipped GLFW showcase has vertical, horizontal, nested, always-visible, and hidden-scrollbar examples.
+
 ## Schema-recognized, runtime-unsupported objects
 
-The current core schema also recognizes names that are not materialized by `UiRuntime::build()`: `Grid`, `Stack`, `ScrollView`, `MenuBar`, `Menu`, `MenuItem`, `Popover`, `Modal`, `ContextMenu`, `DockSpace`, `IconButton`, `RangeSlider`, `ComboBox`, `Icon`, `TreeView`, `ListView`, `Table`, `Canvas`, `HUD`, `Crosshair`, `RadialMenu`, `HealthBar`, and `DamageNumber`. (`Toolbar` and `StatusBar` are implemented as plain horizontal containers.)
+The current core schema also recognizes names that are not materialized by `UiRuntime::build()`: `Grid`, `Stack`, `MenuBar`, `Menu`, `MenuItem`, `Popover`, `Modal`, `ContextMenu`, `DockSpace`, `IconButton`, `RangeSlider`, `ComboBox`, `Icon`, `TreeView`, `ListView`, `Table`, `Canvas`, `HUD`, `Crosshair`, `RadialMenu`, `HealthBar`, and `DamageNumber`. (`Toolbar` and `StatusBar` are implemented as plain horizontal containers.)
 
 Use only the supported object list above in a document passed to `Xui::attach()`. Parser/schema entries are retained for future implementation and language validation; they are not native controls or hidden fallbacks.

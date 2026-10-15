@@ -33,6 +33,7 @@ private:
 	static void push(GLFWwindow* window, const xui::Event& event);
 	static void onSize(GLFWwindow*, int, int);
 	static void onCursor(GLFWwindow*, double, double);
+	static void onScroll(GLFWwindow*, double, double);
 	static void onMouse(GLFWwindow*, int, int, int);
 	static void onKey(GLFWwindow*, int, int, int, int);
 	static void onChar(GLFWwindow*, unsigned int);

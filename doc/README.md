@@ -33,3 +33,5 @@ The bundled examples are the practical reference implementation:
 - [`glfw_demo.cpp`](../examples/glfw_demo.cpp)
 - [`glfw_platform.hpp`](../examples/glfw_platform.hpp)
 - [`gl_drawlist_renderer.hpp`](../examples/gl_drawlist_renderer.hpp)
+
+The showcase's **Scrolling** tab demonstrates the shared `ScrollView` runtime: nested vertical wheel routing, a horizontal row, smooth scrolling, scrollbar drag, a hidden scrollbar, programmatic scroll-into-view, and a live `Vec2` offset readout. See the [ScrollView reference](widgets.md#scrollview) for supported properties and limitations.

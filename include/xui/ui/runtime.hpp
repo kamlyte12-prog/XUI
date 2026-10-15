@@ -28,7 +28,7 @@ bool loadUiAssets(std::string_view xuiSource, std::string_view xssSource, String
 using UiEventFn = void (*)(void* context, std::string_view handlerName);
 
 /// Values exposed by stateful controls through their authored `.xui` id.
-using UiValue = std::variant<bool, f64, std::string, Color, u32>;
+using UiValue = std::variant<bool, f64, std::string, Color, u32, Vec2>;
 
 /// Runtime bridge for a deliberately small, usable widget subset.
 ///
@@ -63,6 +63,7 @@ public:
     CursorShape cursorAt(Vec2 point) const;
     bool pointerDown(Vec2 point);
     bool pointerUp(Vec2 point);
+    bool scrollWheel(Vec2 point, Vec2 delta);
     bool keyDown(Key key);
     bool keyDown(Key key, u8 mods, Platform* platform);
     bool textInput(u32 codepoint);
@@ -88,6 +89,9 @@ public:
     std::string_view controlText(std::string_view id) const;
     std::optional<UiValue> value(std::string_view id) const;
     bool setValue(std::string_view id, const UiValue& value, bool notify = false);
+    Vec2 scrollOffset(std::string_view id) const;
+    bool scrollTo(std::string_view id, Vec2 offset, bool smooth = false);
+    bool scrollIntoView(std::string_view id, bool smooth = false);
     u32 windowWidth() const { return m_windowWidth; }
     u32 windowHeight() const { return m_windowHeight; }
     const std::string& windowTitle() const { return m_windowTitle; }
@@ -107,7 +111,7 @@ private:
         StateMask resolvedStates = 0;
         bool styleResolved = false;
         u8 inheritedTextMask = 0;
-        bool button = false, checkItem = false, checkBox = false, split = false, slider = false, progressBar = false;
+        bool button = false, checkItem = false, checkBox = false, split = false, scrollView = false, slider = false, progressBar = false;
         bool dropdown = false, colorPicker = false, popupOpen = false, pickerAlpha = true;
         bool pickerEditor = false;
         bool pickerShowAlpha = true, pickerShowInputs = true, pickerShowFormatSwitcher = true;
@@ -119,6 +123,11 @@ private:
         bool label = false, badge = false, separator = false, spinner = false, image = false;
         bool datePicker = false, segmented = false, stepper = false, rating = false, breadcrumb = false, keybindField = false;
         bool indeterminate = false;
+        bool scrollSmooth = false, scrollAnimating = false, scrollDragX = false, scrollDragY = false;
+        bool xuiScrollBehavior = false, xuiScrollSpeed = false, xuiScrollbarVisibility = false;
+        f32 scrollSpeed = 42.f, scrollBarSize = 10.f;
+        u8 scrollBarVisibility = 0; // 0 auto, 1 always, 2 never
+        Vec2 scrollTarget{};
         u8 stepperZone = 0;   // 0 none, 1 minus button, 2 plus button (pressed visual)
         i32 dateYear = 2026, viewYear = 2026;
         u32 dateMonth = 1, dateDay = 1, viewMonth = 1;
@@ -161,6 +170,10 @@ private:
     void syncPickerEditors(u32 ownerIndex, u32 preserveIndex = 0xFFFFFFFFu);
     bool updatePickerFromEditor(Node& editor);
     bool isNodeVisible(u32 index) const;
+    bool pointInsideScrollAncestors(u32 index, Vec2 point) const;
+    Rect scrollBarRect(u32 index, bool horizontal, Rect* track = nullptr) const;
+    bool setScrollOffset(u32 index, Vec2 offset, bool smooth);
+    bool ensureVisible(u32 index, bool smooth);
     bool caretEditableFocused() const;
     u32 hitTestNode(Vec2 point) const;
     Rect searchClearRect(const Node& node) const;
@@ -207,6 +220,9 @@ private:
     NodeId m_dragSplit;
     SplitDrag m_splitDrag;
     f32 m_dragStart = 0;
+    u32 m_dragScroll = 0xFFFFFFFFu;
+    bool m_dragScrollX = false;
+    f32 m_dragScrollStart = 0, m_dragPointerStart = 0;
     f32 m_dpiScale = 1.f;
     bool m_fpsEnabled = false;
     f64 m_fpsElapsed = 0;

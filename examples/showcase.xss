@@ -136,3 +136,13 @@ SegmentedControl.segmented {
 Rating.rating { resting: { fg: color.accent } hover: { fg: color.accent-hover } focus: { border: 1px solid color.accent } disabled: { opacity: 0.4 } }
 Stepper.stepper { resting: { bg: color.raised, fg: color.fg, border: 1px solid color.outline, radius: 3px, font-size: 14px } hover: { bg: color.hover } focus: { border: 1px solid color.accent } disabled: { opacity: 0.4 } }
 Breadcrumb.crumbs { resting: { fg: color.fg, font-size: 13px } hover: { fg: #ffffff } focus: { border: 1px solid color.accent } disabled: { opacity: 0.4 } }
+
+ScrollView.scroll-demo {
+  resting: { bg: #242424, border: 1px solid color.outline, radius: 5px, pad: 8px, scroll-track: #171717, scroll-thumb: #777777, scrollbar-size: 12px, scrollbar-visibility: always, scroll-behavior: smooth, scroll-speed: 42 }
+  hover: { scroll-thumb: #9a9a9a }
+  pressed: { scroll-thumb: color.accent }
+  focus: { border: 1px solid color.accent }
+}
+ScrollView.scroll-hidden { resting: { scrollbar-visibility: never } }
+Text.scroll-item { resting: { fg: color.fg, bg: #393939, pad: 6px, radius: 3px, margin: 0px 0px 4px } }
+Button.scroll-action { resting: { bg: color.raised, fg: color.fg, radius: 3px, pad: 6px, margin: 0px 0px 4px } hover: { bg: color.hover } pressed: { bg: color.accent } }

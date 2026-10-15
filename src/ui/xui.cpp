@@ -144,6 +144,9 @@ namespace xui {
 				case EventType::MouseUp:
 					if (event.button == MouseButton::Left) redraw |= m_runtime.pointerUp({ event.x, event.y });
 					break;
+				case EventType::Wheel:
+					redraw |= m_runtime.scrollWheel({ event.x, event.y }, { event.dx, event.dy });
+					break;
 				case EventType::KeyDown:
 					if (!(event.key == Key::F3 && event.repeat)) redraw |= m_runtime.keyDown(event.key, event.mods, m_platform);
 					break;

@@ -32,7 +32,25 @@ Comments support `// line comments` and `/* block comments */`. Strings support 
 - Bracket properties are written as `[name: value]`; the parser validates them against the schema.
 - Event properties use `eventName: handlerName`, for example `press: onSave` or `change: onColorChange`.
 
-The parser recognizes `press`, `release`, `click`, `doubleClick`, `change`, `submit`, `focus`, `blur`, `hover`, `scroll`, `drag`, `drop`, `key`, `resize`, and `close`. The current runtime wires `press` on buttons and `change` on slider/dropdown/color-picker controls to the same callback mechanism. It passes the handler name, not a value payload. Slider changes are reported immediately for each distinct pointer or keyboard value. Read a dropdown or color value through `UiRuntime::value(id)`, `controlText(id)`, or `controlColor(id)` inside the callback; color picker format/options are described in the [widget guide](widgets.md#popup-controls). Other parser event names are not dispatched by this runtime.
+The parser recognizes `press`, `release`, `click`, `doubleClick`, `change`, `submit`, `focus`, `blur`, `hover`, `scroll`, `drag`, `drop`, `key`, `resize`, and `close`. The current runtime wires `press` on buttons and `change` on slider/dropdown/color-picker/scroll-view controls to the same callback mechanism. It passes the handler name, not a value payload. Slider changes are reported immediately for each distinct pointer or keyboard value. Read a ScrollView's offset as a `Vec2` through `UiRuntime::value(id)` or `scrollOffset(id)` inside its callback. Read a dropdown or color value through `value(id)`, `controlText(id)`, or `controlColor(id)`; color picker format/options are described in the [widget guide](widgets.md#popup-controls). Other parser event names are not dispatched by this runtime.
+
+### Scrollable containers
+
+Use a `ScrollView` to bound and clip overflowing content. `vertical` defaults to `true`, `horizontal` to `false`; set both to `true` to permit overflow on both axes. `scrollSpeed` and `scrollBehavior` set the default wheel step and animation; `scrollbar` accepts `"auto"`, `"always"`, or `"never"`.
+
+```xui
+ScrollView[id: "results", vertical: true, horizontal: false, scrollSpeed: 42,
+          scrollBehavior: "smooth", scrollbar: "auto", width: 360px, height: 280px,
+          change: onScroll][class: "results"] {
+  Column(gap: 6) {
+    Text("A result")
+    Text("Another result")
+    Button(label: "Jump target")[id: "target"]
+  }
+}
+```
+
+Use `ui.runtime().scrollTo("results", {0, 120})` for direct positioning or `scrollIntoView("target", true)` to reveal a descendant. See the [ScrollView widget reference](widgets.md#scrollview) for nested input routing, clipping, keyboard behavior, and current limitations.
 
 The common validator accepts generic names including `id`, `class`, `key`, `slot`, `grow`, `shrink`, `visible`, `disabled`, `tooltip`, `tooltipShowDelay`, `tooltipHideDelay`, `tooltipTrigger`, `tooltipHideOnClick`, `tooltipDisabled`, `align`, `justify`, `pad`, `margin`, `size`, `minSize`, `maxSize`, `width`, `height`, and `opacity`. Tooltip timing/trigger are behavior properties in `.xui`; bubble appearance belongs to `.xss`. The runtime applies structural geometry properties `grow`, `shrink`, `align`, `justify`, `pad`, `margin`, `size`, `minSize`, `maxSize`, `width`, and `height` from `.xui`; Row/Column also accept a named `gap` constructor argument, and CheckList accepts `gap` as a property. `.xui` values override the same `.xss` layout defaults. `visible` and `.xui opacity` are still not implemented as runtime state/paint behavior; use `.xss opacity` for visual opacity.
 

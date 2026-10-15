@@ -442,6 +442,7 @@ namespace xui {
 		node.checkItem = typeIs(source.type, *m_strings, "CheckItem");
 		node.checkBox = typeIs(source.type, *m_strings, "CheckBox");
 		node.split = typeIs(source.type, *m_strings, "Split");
+		node.scrollView = typeIs(source.type, *m_strings, "ScrollView");
 		node.slider = typeIs(source.type, *m_strings, "Slider");
 		node.progressBar = typeIs(source.type, *m_strings, "ProgressBar");
 		node.dropdown = typeIs(source.type, *m_strings, "Dropdown");
@@ -482,6 +483,9 @@ namespace xui {
 		else if (node.split) {
 			node.layout = m_layout.create(LayoutKind::Split);
 		}
+		else if (node.scrollView) {
+			node.layout = m_layout.create(LayoutKind::Scroll);
+		}
 		else if (node.tabs) {
 			node.layout = m_layout.create(LayoutKind::Stack);
 		}
@@ -519,6 +523,24 @@ namespace xui {
 		for (const XProp& prop : document.propsOf(source)) {
 			const std::string_view name = m_strings->view(prop.name);
 			const std::string_view value = literal(document, *m_strings, prop.expr);
+			if (node.scrollView && name == "scrollSpeed" && prop.expr < document.exprs.size() && document.exprs[prop.expr].kind == XExprKind::Number)
+				{ node.scrollSpeed = std::clamp(document.exprs[prop.expr].num, 1.f, 400.f); node.xuiScrollSpeed = true; }
+			else if (node.scrollView && name == "scrollBehavior") { node.scrollSmooth = value == "smooth" || value == "Smooth"; node.xuiScrollBehavior = true; }
+			else if (node.scrollView && name == "scrollbar") {
+				if (value == "always" || value == "Always") node.scrollBarVisibility = 1;
+				else if (value == "never" || value == "Never" || value == "hidden") node.scrollBarVisibility = 2;
+				node.xuiScrollbarVisibility = true;
+			}
+			else if (node.scrollView && name == "horizontal" && prop.expr < document.exprs.size()) {
+				LayoutStyle layout = m_layout.style(node.layout);
+				layout.scrollX = document.exprs[prop.expr].kind == XExprKind::Bool && document.exprs[prop.expr].bval;
+				m_layout.setStyle(node.layout, layout);
+			}
+			else if (node.scrollView && name == "vertical" && prop.expr < document.exprs.size()) {
+				LayoutStyle layout = m_layout.style(node.layout);
+				layout.scrollY = document.exprs[prop.expr].kind != XExprKind::Bool || document.exprs[prop.expr].bval;
+				m_layout.setStyle(node.layout, layout);
+			}
 			if ((node.numberField || node.stepper) && prop.role == XPropRole::Value && prop.expr < document.exprs.size() &&
 				(name == "value" || name == "min" || name == "max" || name == "step" || name == "precision" || name == "unit")) {
 				const XExpr& expression = document.exprs[prop.expr];
@@ -681,6 +703,22 @@ namespace xui {
 		match.classes = node.classes;
 		node.styleSet = m_styles->match(match);
 		m_styles->resolve(node.styleSet, stateBit(State::Resting), 0, node.style);
+		if (node.scrollView) {
+			if (node.style.has(PropId::ScrollbarSize)) node.scrollBarSize = std::clamp(number(node.style.get(PropId::ScrollbarSize), 0, 10.f), 4.f, 24.f);
+			if (!node.xuiScrollSpeed && node.style.has(PropId::ScrollSpeed)) node.scrollSpeed = std::clamp(number(node.style.get(PropId::ScrollSpeed), 0, 42.f), 1.f, 400.f);
+			if (!node.xuiScrollbarVisibility && node.style.has(PropId::ScrollbarVisibility)) {
+				const Atom& mode = node.style.get(PropId::ScrollbarVisibility).atoms[0];
+				if (mode.kind == AtomKind::Ident) {
+					const std::string_view value = m_strings->view(mode.str());
+					if (value == "always") node.scrollBarVisibility = 1;
+					else if (value == "never" || value == "hidden") node.scrollBarVisibility = 2;
+				}
+			}
+			if (!node.xuiScrollBehavior && node.style.has(PropId::ScrollBehavior)) {
+				const Atom& behavior = node.style.get(PropId::ScrollBehavior).atoms[0];
+				node.scrollSmooth = behavior.kind == AtomKind::Ident && m_strings->view(behavior.str()) == "smooth";
+			}
+		}
 		if (parentIndex != 0xFFFFFFFFu && parentIndex < m_nodes.size()) {
 			const PropId inherited[] = { PropId::Font, PropId::FontSize, PropId::Fg, PropId::Align, PropId::LetterSpacing };
 			const PropTable& parentStyle = m_nodes[parentIndex].style;
@@ -830,7 +868,7 @@ namespace xui {
 			if (!field.unit.empty()) { field.text += " "; field.text += field.unit; }
 			field.caret = field.text.size();
 		}
-		if (m_nodes[runtimeIndex].button || m_nodes[runtimeIndex].checkItem || m_nodes[runtimeIndex].checkBox || m_nodes[runtimeIndex].slider || m_nodes[runtimeIndex].dropdown || m_nodes[runtimeIndex].colorPicker || m_nodes[runtimeIndex].textBox || m_nodes[runtimeIndex].textArea || m_nodes[runtimeIndex].tabs ||
+		if (m_nodes[runtimeIndex].button || m_nodes[runtimeIndex].checkItem || m_nodes[runtimeIndex].checkBox || m_nodes[runtimeIndex].scrollView || m_nodes[runtimeIndex].slider || m_nodes[runtimeIndex].dropdown || m_nodes[runtimeIndex].colorPicker || m_nodes[runtimeIndex].textBox || m_nodes[runtimeIndex].textArea || m_nodes[runtimeIndex].tabs ||
 			m_nodes[runtimeIndex].switchToggle || m_nodes[runtimeIndex].toggleButton || m_nodes[runtimeIndex].radioGroup ||
 			m_nodes[runtimeIndex].segmented || m_nodes[runtimeIndex].stepper || m_nodes[runtimeIndex].rating || m_nodes[runtimeIndex].breadcrumb || m_nodes[runtimeIndex].keybindField || m_nodes[runtimeIndex].datePicker) m_interactiveNodes.push_back(runtimeIndex);
 		if (m_nodes[runtimeIndex].split) m_splitNodes.push_back(runtimeIndex);
@@ -870,6 +908,99 @@ namespace xui {
 			m_lastLayoutWidth = width; m_lastLayoutHeight = height;
 		}
 		if (m_root.valid()) m_layout.layout(m_root, width, height);
+	}
+
+	Rect UiRuntime::scrollBarRect(u32 index, bool horizontal, Rect* trackOut) const {
+		if (index >= m_nodes.size() || !m_nodes[index].scrollView || m_nodes[index].scrollBarVisibility == 2) return {};
+		const Node& node = m_nodes[index];
+		const Rect view = m_layout.absRect(node.layout);
+		const Vec2 content = m_layout.contentSize(node.layout);
+		const Vec2 offset = m_layout.scrollOffset(node.layout);
+		const LayoutStyle& style = m_layout.style(node.layout);
+		const f32 thickness = node.scrollBarSize;
+		Rect track, thumb;
+		if (horizontal) {
+			if (!style.scrollX || content.x <= view.w + 0.5f || view.w <= 0.f) return {};
+			track = { view.x, view.bottom() - thickness, view.w - (style.scrollY && content.y > view.h ? thickness : 0.f), thickness };
+			const f32 length = std::max(thickness * 1.5f, track.w * view.w / std::max(view.w, content.x));
+			const f32 travel = std::max(0.f, track.w - length);
+			thumb = { track.x + travel * offset.x / std::max(1.f, content.x - view.w), track.y, length, track.h };
+		}
+		else {
+			if (!style.scrollY || content.y <= view.h + 0.5f || view.h <= 0.f) return {};
+			track = { view.right() - thickness, view.y, thickness, view.h - (style.scrollX && content.x > view.w ? thickness : 0.f) };
+			const f32 length = std::max(thickness * 1.5f, track.h * view.h / std::max(view.h, content.y));
+			const f32 travel = std::max(0.f, track.h - length);
+			thumb = { track.x, track.y + travel * offset.y / std::max(1.f, content.y - view.h), track.w, length };
+		}
+		if (trackOut) *trackOut = track;
+		return thumb;
+	}
+
+	bool UiRuntime::pointInsideScrollAncestors(u32 index, Vec2 point) const {
+		if (index >= m_nodes.size()) return false;
+		for (u32 parent = m_nodes[index].parentIndex; parent != 0xFFFFFFFFu && parent < m_nodes.size(); parent = m_nodes[parent].parentIndex)
+			if (m_nodes[parent].scrollView && !m_layout.absRect(m_nodes[parent].layout).contains(point)) return false;
+		return true;
+	}
+
+	bool UiRuntime::setScrollOffset(u32 index, Vec2 offset, bool smooth) {
+		if (index >= m_nodes.size() || !m_nodes[index].scrollView) return false;
+		Node& node = m_nodes[index];
+		const Vec2 before = m_layout.scrollOffset(node.layout);
+		if (smooth) {
+			const Vec2 content = m_layout.contentSize(node.layout);
+			const Rect rect = m_layout.rect(node.layout);
+			node.scrollTarget = { std::clamp(offset.x, 0.f, std::max(0.f, content.x - rect.w)), std::clamp(offset.y, 0.f, std::max(0.f, content.y - rect.h)) };
+			node.scrollAnimating = node.scrollTarget != before;
+			if (node.scrollAnimating) addDamage(m_layout.absRect(node.layout));
+			return node.scrollAnimating;
+		}
+		node.scrollAnimating = false;
+		m_layout.setScrollOffset(node.layout, offset);
+		const Vec2 after = m_layout.scrollOffset(node.layout);
+		if (after == before) return false;
+		addDamage(m_layout.absRect(node.layout));
+		return true;
+	}
+
+	bool UiRuntime::ensureVisible(u32 index, bool smooth) {
+		if (index >= m_nodes.size() || !isNodeVisible(index)) return false;
+		bool changed = false;
+		for (u32 parent = m_nodes[index].parentIndex; parent != 0xFFFFFFFFu && parent < m_nodes.size(); parent = m_nodes[parent].parentIndex) {
+			if (!m_nodes[parent].scrollView) continue;
+			const Rect viewport = m_layout.absRect(m_nodes[parent].layout);
+			const Rect child = m_layout.absRect(m_nodes[index].layout);
+			Vec2 offset = m_layout.scrollOffset(m_nodes[parent].layout);
+			if (child.x < viewport.x) offset.x -= viewport.x - child.x;
+			else if (child.right() > viewport.right()) offset.x += child.right() - viewport.right();
+			if (child.y < viewport.y) offset.y -= viewport.y - child.y;
+			else if (child.bottom() > viewport.bottom()) offset.y += child.bottom() - viewport.bottom();
+			const bool moved = setScrollOffset(parent, offset, smooth);
+			changed |= moved;
+			if (moved && !smooth && m_nodes[parent].pressHandler.v && m_eventFn)
+				m_eventFn(m_eventContext, m_strings->view(m_nodes[parent].pressHandler));
+		}
+		return changed;
+	}
+
+	Vec2 UiRuntime::scrollOffset(std::string_view id) const {
+		for (const Node& node : m_nodes) if (node.scrollView && m_strings->view(node.id) == id) return m_layout.scrollOffset(node.layout);
+		return {};
+	}
+
+	bool UiRuntime::scrollTo(std::string_view id, Vec2 offset, bool smooth) {
+		for (u32 i = 0; i < m_nodes.size(); ++i) if (m_nodes[i].scrollView && m_strings->view(m_nodes[i].id) == id) {
+			const bool changed = setScrollOffset(i, offset, smooth);
+			if (changed && !smooth && m_nodes[i].pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(m_nodes[i].pressHandler));
+			return changed;
+		}
+		return false;
+	}
+
+	bool UiRuntime::scrollIntoView(std::string_view id, bool smooth) {
+		for (u32 i = 0; i < m_nodes.size(); ++i) if (m_strings->view(m_nodes[i].id) == id) return ensureVisible(i, smooth);
+		return false;
 	}
 
 	void UiRuntime::addDamage(Rect rect) {
@@ -997,6 +1128,9 @@ namespace xui {
 		for (u32 nodeIndex = 0; nodeIndex < m_nodes.size(); ++nodeIndex) {
 			Node& node = m_nodes[nodeIndex];
 			if ((node.fpsCounter && !m_fpsEnabled) || !isNodeVisible(nodeIndex)) continue;
+			struct ScrollClipScope { Painter& painter; u32 count = 0; ~ScrollClipScope() { while (count--) painter.popClip(); } } scrollClips{ painter };
+			for (u32 parent = node.parentIndex; parent != 0xFFFFFFFFu && parent < m_nodes.size(); parent = m_nodes[parent].parentIndex)
+				if (m_nodes[parent].scrollView) { painter.pushClip(m_layout.absRect(m_nodes[parent].layout)); ++scrollClips.count; }
 			const StateMask states = activeStates(node);
 			if (!node.styleResolved || node.resolvedStates != states) {
 				m_styles->resolve(node.styleSet, states, 0, node.style);
@@ -1455,6 +1589,25 @@ namespace xui {
 
 		// Tabs and popups render after the retained tree, so their chrome stays above page content.
 		painter.setLayer(1);
+		for (u32 i = 0; i < m_nodes.size(); ++i) {
+			Node& node = m_nodes[i];
+			if (!node.scrollView || !isNodeVisible(i) || node.scrollBarVisibility == 2) continue;
+			struct ScrollbarClipScope { Painter& painter; u32 count = 0; ~ScrollbarClipScope() { while (count--) painter.popClip(); } } scrollbarClips{ painter };
+			for (u32 parent = node.parentIndex; parent != 0xFFFFFFFFu && parent < m_nodes.size(); parent = m_nodes[parent].parentIndex)
+				if (m_nodes[parent].scrollView) { painter.pushClip(m_layout.absRect(m_nodes[parent].layout)); ++scrollbarClips.count; }
+			const bool always = node.scrollBarVisibility == 1;
+			const f32 radius = node.style.has(PropId::Radius) ? number(node.style.get(PropId::Radius), 0, node.scrollBarSize * 0.5f) : node.scrollBarSize * 0.5f;
+			for (bool horizontal : { false, true }) {
+				Rect track;
+				const Rect thumb = scrollBarRect(i, horizontal, &track);
+				if (thumb.empty()) continue;
+				if (!always && !node.hovered && !node.focused) continue;
+				const Color trackColor = color(node.style, PropId::ScrollTrack, Color::fromRGBA8(0x00000030u));
+				const Color thumbColor = color(node.style, PropId::ScrollThumb, Color::fromRGBA8(0xA0A0A0C0u));
+				painter.fillRect(track, trackColor, CornerRadii::all(radius));
+				painter.fillRect(thumb, thumbColor, CornerRadii::all(radius));
+			}
+		}
 		for (u32 tabsIndex = 0; tabsIndex < m_nodes.size(); ++tabsIndex) {
 			Node& tabs = m_nodes[tabsIndex];
 			if (!tabs.tabs || !isNodeVisible(tabsIndex)) continue;
@@ -1639,6 +1792,25 @@ namespace xui {
 	bool UiRuntime::pointerMove(Vec2 point) {
 		m_pointerPosition = point;
 		bool changed = false;
+		if (m_dragScroll < m_nodes.size()) {
+			const u32 index = m_dragScroll;
+			Rect track;
+			const Rect thumb = scrollBarRect(index, m_dragScrollX, &track);
+			const Vec2 content = m_layout.contentSize(m_nodes[index].layout);
+			const Rect view = m_layout.absRect(m_nodes[index].layout);
+			const f32 thumbLength = m_dragScrollX ? thumb.w : thumb.h;
+			const f32 trackLength = m_dragScrollX ? track.w : track.h;
+			const f32 range = m_dragScrollX ? content.x - view.w : content.y - view.h;
+			const f32 travel = std::max(1.f, trackLength - thumbLength);
+			const f32 pointer = m_dragScrollX ? point.x : point.y;
+			Vec2 offset = m_layout.scrollOffset(m_nodes[index].layout);
+			const f32 value = m_dragScrollStart + (pointer - m_dragPointerStart) * range / travel;
+			if (m_dragScrollX) offset.x = value; else offset.y = value;
+			const bool moved = setScrollOffset(index, offset, false);
+			changed |= moved;
+			if (moved && m_nodes[index].pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(m_nodes[index].pressHandler));
+			return changed;
+		}
 		const u32 target = hitTestNode(point);
 		u32 popupTarget = 0xFFFFFFFFu;
 		for (std::size_t i = m_nodes.size(); i > 0; --i) {
@@ -1726,6 +1898,13 @@ namespace xui {
 	}
 
 	CursorShape UiRuntime::cursorAt(Vec2 point) const {
+		for (std::size_t i = m_nodes.size(); i > 0; --i) {
+			const u32 index = static_cast<u32>(i - 1);
+			if (m_nodes[index].scrollView && pointInsideScrollAncestors(index, point)) {
+				if (scrollBarRect(index, true).contains(point)) return CursorShape::ResizeEW;
+				if (scrollBarRect(index, false).contains(point)) return CursorShape::ResizeNS;
+			}
+		}
 		const u32 target = hitTestNode(point);
 		if (target < m_nodes.size()) {
 			const Node& node = m_nodes[target];
@@ -1737,9 +1916,52 @@ namespace xui {
 		return CursorShape::Arrow;
 	}
 
+	bool UiRuntime::scrollWheel(Vec2 point, Vec2 delta) {
+		if (delta.x == 0.f && delta.y == 0.f) return false;
+		const u32 target = hitTestNode(point);
+		for (u32 index = target; index != 0xFFFFFFFFu && index < m_nodes.size(); index = m_nodes[index].parentIndex) {
+			Node& node = m_nodes[index];
+			if (!node.scrollView || node.disabled) continue;
+			const LayoutStyle& style = m_layout.style(node.layout);
+			Vec2 before = m_layout.scrollOffset(node.layout), next = before;
+			if (style.scrollY && delta.y != 0.f) next.y -= delta.y * node.scrollSpeed;
+			if (style.scrollX && delta.x != 0.f) next.x -= delta.x * node.scrollSpeed;
+			if (next != before && setScrollOffset(index, next, node.scrollSmooth)) {
+				if (node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
+				return true;
+			}
+		}
+		return false;
+	}
+
 	bool UiRuntime::pointerDown(Vec2 point) {
 		m_pointerPosition = point;
 		bool changed = false;
+		bool popupCoversPoint = false;
+		for (u32 i = 0; i < m_nodes.size(); ++i) {
+			const Node& node = m_nodes[i];
+			if (node.popupOpen && (node.dropdown || node.colorPicker || node.datePicker) && isNodeVisible(i) &&
+				popupBounds(m_layout.absRect(node.layout), node.dropdown, node.options.size(), m_lastLayoutHeight,
+					node.datePicker ? 224.f : node.pickerWidth, node.datePicker ? 208.f : node.pickerHeight).contains(point)) {
+				popupCoversPoint = true; break;
+			}
+		}
+		for (std::size_t i = popupCoversPoint ? 0 : m_nodes.size(); i > 0; --i) {
+			const u32 index = static_cast<u32>(i - 1);
+			if (!m_nodes[index].scrollView || m_nodes[index].disabled || !pointInsideScrollAncestors(index, point)) continue;
+			for (bool horizontal : { false, true }) {
+				Rect track;
+				const Rect thumb = scrollBarRect(index, horizontal, &track);
+				if (!thumb.contains(point)) continue;
+				m_dragScroll = index; m_dragScrollX = horizontal;
+				m_nodes[index].pressed = true;
+				m_dragPointerStart = horizontal ? point.x : point.y;
+				const Vec2 offset = m_layout.scrollOffset(m_nodes[index].layout);
+				m_dragScrollStart = horizontal ? offset.x : offset.y;
+				addDamage(m_layout.absRect(m_nodes[index].layout));
+				return true;
+			}
+		}
 		// Any click dismisses an already visible tip. The dismissed owner stays suppressed
 		// until it loses both hover and focus, preventing the tip from reopening over a popup.
 		if (m_tooltipOwner < m_nodes.size() && m_nodes[m_tooltipOwner].tooltipHideOnClick) {
@@ -2024,6 +2246,13 @@ namespace xui {
 	}
 
 	bool UiRuntime::pointerUp(Vec2 point) {
+		if (m_dragScroll < m_nodes.size()) {
+			const u32 index = m_dragScroll;
+			m_dragScroll = 0xFFFFFFFFu;
+			m_nodes[index].pressed = false;
+			addDamage(m_layout.absRect(m_nodes[index].layout));
+			return true;
+		}
 		Node* activated = nullptr;
 		const u32 frontmost = hitTestNode(point);
 		for (auto it = m_interactiveNodes.rbegin(); it != m_interactiveNodes.rend(); ++it) {
@@ -2158,6 +2387,7 @@ namespace xui {
 				Node& node = m_nodes[index]; const bool focus = ordinal++ == next;
 				if (node.focused != focus) addDamage(m_layout.absRect(node.layout));
 				node.focused = focus;
+				if (focus) ensureVisible(index, false);
 			}
 			refreshTooltipTarget();
 			return true;
@@ -2181,6 +2411,28 @@ namespace xui {
 			addDamage(m_layout.absRect(field.layout));
 			if (field.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(field.pressHandler));
 			return true;
+		}
+		if (key == Key::Left || key == Key::Right || key == Key::Up || key == Key::Down || key == Key::PageUp || key == Key::PageDown || key == Key::Home || key == Key::End) {
+			for (u32 focused : m_interactiveNodes) {
+				const Node& focusedControl = m_nodes[focused];
+				if (!focusedControl.focused || focusedControl.disabled || focusedControl.textBox || focusedControl.textArea || focusedControl.numberField || focusedControl.searchField || focusedControl.keybindField) continue;
+				if ((key == Key::Left || key == Key::Right || key == Key::Up || key == Key::Down) && !focusedControl.scrollView) continue;
+				for (u32 parent = focusedControl.scrollView ? focused : focusedControl.parentIndex; parent != 0xFFFFFFFFu && parent < m_nodes.size(); parent = m_nodes[parent].parentIndex) {
+					Node& view = m_nodes[parent]; if (!view.scrollView) continue;
+					const Rect rect = m_layout.rect(view.layout);
+					Vec2 offset = m_layout.scrollOffset(view.layout);
+					if (key == Key::Home) offset.y = 0.f;
+					else if (key == Key::End) offset.y = m_layout.contentSize(view.layout).y;
+					else if (key == Key::PageUp) offset.y -= rect.h * 0.9f;
+					else if (key == Key::PageDown) offset.y += rect.h * 0.9f;
+					else if (key == Key::Up) offset.y -= view.scrollSpeed;
+					else if (key == Key::Down) offset.y += view.scrollSpeed;
+					else if (key == Key::Left) offset.x -= view.scrollSpeed;
+					else if (key == Key::Right) offset.x += view.scrollSpeed;
+					if (setScrollOffset(parent, offset, view.scrollSmooth)) return true;
+					break;
+				}
+			}
 		}
 		if (key == Key::Left || key == Key::Right || key == Key::Up || key == Key::Down || key == Key::PageUp || key == Key::PageDown) {
 			for (u32 index : m_interactiveNodes) {
@@ -2553,7 +2805,13 @@ namespace xui {
 		for (std::size_t i = m_nodes.size(); i > 0; --i) {
 			const u32 index = static_cast<u32>(i - 1);
 			const Node& node = m_nodes[index];
-			if (!isNodeVisible(index)) continue;
+			if (!node.scrollView || !isNodeVisible(index) || !pointInsideScrollAncestors(index, point)) continue;
+			if (scrollBarRect(index, false).contains(point) || scrollBarRect(index, true).contains(point)) return index;
+		}
+		for (std::size_t i = m_nodes.size(); i > 0; --i) {
+			const u32 index = static_cast<u32>(i - 1);
+			const Node& node = m_nodes[index];
+			if (!isNodeVisible(index) || !pointInsideScrollAncestors(index, point)) continue;
 			if (node.fpsCounter && !m_fpsEnabled) continue;
 			if (node.pickerEditor) continue;
 			const Rect rect = m_layout.absRect(node.layout);
@@ -2664,6 +2922,17 @@ namespace xui {
 
 	bool UiRuntime::updateTimers(std::chrono::steady_clock::time_point now) {
 		bool redraw = false;
+		for (u32 i = 0; i < m_nodes.size(); ++i) {
+			Node& node = m_nodes[i];
+			if (!node.scrollView || !node.scrollAnimating) continue;
+			const Vec2 current = m_layout.scrollOffset(node.layout);
+			Vec2 next{ current.x + (node.scrollTarget.x - current.x) * 0.28f, current.y + (node.scrollTarget.y - current.y) * 0.28f };
+			if (std::fabs(node.scrollTarget.x - next.x) < 0.5f && std::fabs(node.scrollTarget.y - next.y) < 0.5f) { next = node.scrollTarget; node.scrollAnimating = false; }
+			m_layout.setScrollOffset(node.layout, next);
+			addDamage(m_layout.absRect(node.layout));
+			if (node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
+			redraw = true;
+		}
 		if (m_tooltipOwner != 0xFFFFFFFFu && !m_tooltipVisible && now >= m_tooltipDeadline) {
 			m_tooltipVisible = true;
 			addDamage({ 0, 0, m_lastLayoutWidth, m_lastLayoutHeight });
@@ -2725,6 +2994,11 @@ namespace xui {
 			const f64 spinnerDelay = std::max(0.0, std::chrono::duration<f64>(m_spinnerDeadline - now).count());
 			delay = delay < 0.0 ? spinnerDelay : std::min(delay, spinnerDelay);
 		}
+		for (const Node& node : m_nodes) if (node.scrollAnimating) {
+			const f64 scrollDelay = 1.0 / 60.0;
+			delay = delay < 0.0 ? scrollDelay : std::min(delay, scrollDelay);
+			break;
+		}
 		if (m_caretBlinkDeadline.time_since_epoch().count() != 0 && caretEditableFocused()) {
 			const f64 caretDelay = std::max(0.0, std::chrono::duration<f64>(m_caretBlinkDeadline - now).count());
 			delay = delay < 0.0 ? caretDelay : std::min(delay, caretDelay);
@@ -2753,6 +3027,7 @@ namespace xui {
 			if (node.radioGroup || node.segmented || node.breadcrumb) return node.selectedOption < node.options.size() ? UiValue{ node.options[node.selectedOption] } : UiValue{ std::string{} };
 			if (node.colorPicker) return UiValue{ node.pickerColor };
 			if (node.tabs) return UiValue{ node.selectedTab };
+			if (node.scrollView) return UiValue{ m_layout.scrollOffset(node.layout) };
 		}
 		return std::nullopt;
 	}
@@ -2835,6 +3110,10 @@ namespace xui {
 				const u32 count = m_layout.childCount(node.layout); if (!count) return false;
 				const u32 selected = std::min(*value, count - 1); changed = node.selectedTab != selected; node.selectedTab = selected;
 				if (changed) for (u32 i = 0; i < m_nodes.size(); ++i) if (m_nodes[i].focused && !isNodeVisible(i)) m_nodes[i].focused = false;
+			}
+			else if (node.scrollView) {
+				const Vec2* offset = std::get_if<Vec2>(&valueToSet); if (!offset) return false;
+				changed = setScrollOffset(static_cast<u32>(&node - m_nodes.data()), *offset, false);
 			}
 			else return false;
 			if (changed) {

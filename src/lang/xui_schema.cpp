@@ -29,7 +29,7 @@ namespace xui {
 		W("Row", { "gap" }, { "wrap" });          W("Column", { "gap" }, { "wrap" });
 		W("Grid", { "columns" }, { "rows", "gap" });  W("Stack", {}, {});
 		W("Split", { "direction" }, { "ratio", "gutter", "collapsible" });
-		W("ScrollView", {}, { "horizontal", "vertical" });
+		W("ScrollView", {}, { "horizontal", "vertical", "scrollbar", "scrollSpeed", "scrollBehavior" });
 		W("Panel", { "title" }, { "collapsed", "collapsible" });
 		W("Tabs", {}, { "selected" });          W("Tab", { "title" }, { "icon" });
 		W("Toolbar", {}, {});                 W("MenuBar", {}, {});     W("StatusBar", {}, {});

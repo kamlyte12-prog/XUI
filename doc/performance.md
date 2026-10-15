@@ -6,11 +6,12 @@ Xui is retained: it keeps a layout tree and caches measurements, resolves style 
 
 Recorded Windows Release measurements are host-specific:
 
-- The latest hidden, uncapped facade profiles for the tabbed showcase reported 981 FPS (`xui_glfw_demo`, 4,906 frames in 5.00019 s) and 697 FPS (`xui_hello`, 4,804 frames in 6.89123 s), with the FPS widget enabled and vsync disabled. Both processes exited normally. This matches the prior observation that bounded-profile timing varies between runs; the five-second bound is not a reliable duration guarantee until the occasional overrun is explained.
-- Earlier synthetic benchmarks measured a 938-node layout resize near 95 microseconds and splitter drag layout near 87 microseconds, with unchanged same-size layout doing no work.
+- The latest hidden, uncapped Windows Release profile reported 805 FPS (`xui_glfw_demo`, 4,025 frames in 5.00004 s), with the FPS widget enabled and vsync disabled. This measures the demo's idle continuous loop; it does not simulate visible scrolling, resizing, or input latency.
+- The 938-node layout benchmark reported 103.8 μs for a full relayout, 99.8 μs for a resize, 2.4 μs for one leaf content change, and effectively zero for same-size idle layout. The pre-ScrollView baseline was 107.9 μs, 102.3 μs, 2.2 μs, and effectively zero, respectively. The differences are small and host-noisy; no solver speedup is claimed because the solver algorithm was retained.
+- A separate 1,000-child scroll benchmark measured offset update plus a descendant `absRect()` at 0.008 μs per iteration and reported zero nodes arranged. This confirms scrolling does not re-run layout; it is a microbenchmark, not a full rendered scroll-frame profile.
 - An earlier 640×360 software raster benchmark measured about 28 milliseconds for a full frame before export, below 60 FPS. Direct OpenGL drawing avoids the CPU full-frame raster loop for the bundled windows.
 
-These results verify one local Windows Release configuration. They do not guarantee a particular FPS on other GPUs, drivers, display sizes, operating systems, or under vsync. Uncapped hidden frame-loop FPS is a throughput ceiling, not a displayed monitor refresh rate or interaction-latency guarantee. This run did not isolate layout, event, text, or GPU timings; visible rendering and resize/interaction latency still need an interactive smoke test.
+These results verify one local Windows Release configuration. They do not guarantee a particular FPS on other GPUs, drivers, display sizes, operating systems, or under vsync. Uncapped hidden frame-loop FPS is a throughput ceiling, not a displayed monitor refresh rate or interaction-latency guarantee. Visible scrolling, clipping, resize smoothness, and ordinary close still need an interactive smoke test.
 
 Run the examples with `--profile` to measure their actual shared assets and loop. Use dedicated benchmarks for stage-level profiling; the simple sample profile reports frame count, elapsed seconds, and effective FPS.
 

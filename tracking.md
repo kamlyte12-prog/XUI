@@ -759,3 +759,51 @@ Premise corrections worth recording: this checkout has a GLFW + OpenGL 2.1 backe
 - Run a visible GLFW smoke pass to verify key delivery, selection/caret visuals, tooltip dismissal over dropdowns, resize, normal close, and readable FPS/ms text.
 - Investigate the inconsistent `--profile` duration and add stable stage/frame-time and input-to-frame measurements before claiming performance acceptance.
 - Add a distinct native Win32 adapter only if it remains a production requirement; otherwise update the project support policy to name GLFW on Windows as the verified current path.
+
+## ScrollView runtime integration and layout audit — 2026-10-15
+
+### Audit and findings
+
+- Read the newly supplied request and re-audited the changed checkout before editing. Git showed a clean committed working tree at the start, so the existing user changes were preserved.
+- The layout engine already had dirty-subtree invalidation, constraint-keyed measure caching, content-size tracking, clamped scroll offsets, and an unbounded scroll main-axis. The missing feature was integration: the core schema listed `ScrollView`, but `UiRuntime::buildNode` did not materialize it; the shared event loop ignored `EventType::Wheel`; and `GlfwPlatform` did not register a scroll callback.
+- Measured the pre-integration Release layout baseline with the 938-node benchmark: cold build 0.31 ms, first layout 0.118 ms, full relayout 107.9 μs, resize 102.3 μs, one leaf change 2.2 μs, and same-size idle layout effectively 0 μs. These timings indicate that replacing the existing solver would add risk without evidence of a bottleneck. I retained its cache/invalidation approach and focused code changes on wiring the feature and avoiding layout work during scrolling.
+
+### Changes made and decisions
+
+- Materialized `.xui ScrollView` as `LayoutKind::Scroll` in the shared `UiRuntime`. `vertical` defaults true and `horizontal` false; both can be enabled. Added `.xui` behavior controls `scrollSpeed`, `scrollBehavior`, and `scrollbar` (`auto`, `always`, `never`).
+- Added `Wheel` dispatch in `Xui::run()` and registered GLFW's platform scroll callback, which emits normalized wheel deltas plus logical pointer coordinates. No native API was added to shared runtime code.
+- Added per-descendant clip scopes from scroll ancestors for paint and hit tests. Scroll offsets use the existing `LayoutTree::setScrollOffset()` result path; they do not invalidate or rerun layout.
+- Added track/thumb painting and hit/drag behavior using `.xss` `scroll-track`, `scroll-thumb`, `scrollbar-size`, `scrollbar-visibility`, `scroll-behavior`, and `scroll-speed`. Standard hover/pressed state blocks control thumb colors; `radius` rounds tracks/thumbs. Added a separate shared overlay pass so descendant content cannot paint over a scrollbar.
+- Added deepest-first wheel routing with ancestor fallback, arrow/PageUp/PageDown/Home/End keyboard support for focused scroll containers (while leaving text and existing arrow-key controls in control), Tab-focus scroll-into-view, and smooth easing driven by the existing idle timer mechanism. Momentum/touch handling was left out because the request made it optional and the project has no gesture abstraction.
+- Added runtime APIs `scrollOffset(id)`, `scrollTo(id, Vec2, smooth)`, `scrollIntoView(id, smooth)`, and `value(id)` returning `Vec2` for a ScrollView ID. `change` callbacks allow applications to read and display the live offset.
+- Expanded the GLFW showcase with vertical, horizontal, nested, smooth, always-visible, and hidden scrollbar cases; a programmatic jump button; and a live offset readout. Updated widget, XUI, XSS, architecture, performance, README, plan, and docs index pages.
+- Existing behavior deliberately left intact: the retained solver's measure cache and relayout boundaries, draw-list renderer interface, glyph handling, existing control routing, and authored `.xui`/`.xss` split.
+
+### Trade-offs and limitations
+
+- Per-node clip scopes repeat ancestor checks while painting/hit-testing. This keeps ordering correct in the flat retained paint traversal and does not add per-scroll layout recomputation; a persistent clip stack would need a broader renderer traversal refactor.
+- `auto` scrollbars are shown while their view is hovered/focused; always/never visibility is explicitly controllable. Scrollbars are custom overlay geometry styled by XSS, not native controls.
+- Smooth motion uses a short exponential ease. No inertial momentum, touch input, overscroll chaining policy, scrollbar corner styling, accessibility tree, generic `overflow` clipping, or list virtualization is included.
+- The layout solver itself was not modified because its measured baseline was already inexpensive. This request therefore adds ScrollView capability and documentation of measured layout efficiency rather than claiming an unmeasured solver speedup.
+
+### Verification and status
+
+- Added automated coverage for `.xui`/`.xss` parse and schema validation, vertical wheel movement, nested view consumption and parent fallback, keyboard scrolling, programmatic scroll-to/scroll-into-view, clamping, and scrollbar dragging. The showcase asset test also parses/builds the new fifth tab.
+- Windows Release compilation succeeded for `xui_tests` and `xui_glfw_demo` after the shared runtime and GLFW adapter edits. At this point the test suite has 154 tests; final rerun/profile results are recorded below once complete.
+- Hidden profile mode measures loop throughput only; no visible desktop interaction/resize pass has been run in this turn. Linux/macOS and separate native Win32 remain unverified. Do not treat a high hidden FPS as proof of visible interaction latency.
+
+### Next steps
+
+- Complete the final test rerun, benchmark comparison, and bounded GLFW hidden profile; append measured results here.
+- Perform a visible smoke pass for nested wheel handoff, thumb drag, keyboard focus visibility, text glyphs/clipping, window resize, and normal close.
+- Next plan items remain Grid and titled/collapsible containers. For virtualized data widgets, first extend ScrollView's scroll-into-view and measurement contracts before adding ListView/Table.
+
+### Final verification addendum — 2026-10-15
+
+- Rebuilt Windows Release targets `xui_tests`, `xui_glfw_demo`, and `bench_layout` successfully with MSVC warnings treated as errors.
+- Final automated suite: **154 tests, 0 failures**. New scroll test covers wheel movement, change callbacks, Vec2 `value()` retrieval, silent-by-default `setValue` plus `notify=true`, keyboard scrolling, nested deepest-first consumption and ancestor fallback, scroll-into-view, thumb drag, and range clamping. The existing showcase asset test parses/builds the new tab and `.xss` properties.
+- Final Windows Release hidden GLFW profile: **4,025 frames / 5.00004 s / 804.994 FPS**. This clears the numeric 60 FPS target in the uncapped hidden loop; it is not a visible scrolling/resize FPS measurement.
+- Final `bench_layout` run: 938-node full relayout **103.8 μs**, resize **99.8 μs**, single-leaf change **2.4 μs**, and idle layout **0.000 μs**. Baseline was 107.9 μs, 102.3 μs, 2.2 μs, and 0.000 μs. These are within normal run variance; no layout-solver speedup is claimed. New 1,000-child scroll-offset + descendant `absRect()` benchmark: **0.008 μs** median per operation, **0 nodes arranged**.
+- The final benchmark preserves its descendant-rect checksum to prevent the compiler from removing the measured work. The generated demo assets were copied by the Release build and consumed by the successful hidden profile.
+- Remaining acceptance gap: no visible GUI session was used, so readable on-screen text, scrollbar appearance, smooth wheel feel, responsive resize, and normal close have not been visually verified. Linux/macOS and a separate native Win32 backend also remain unverified.
+- Current status: ScrollView runtime, style vocabulary, GLFW wheel delivery, showcase and documentation are implemented and headlessly verified. Performance acceptance is partial because only hidden loop throughput and deterministic synthetic layout measurements are available. Next: do a visible GLFW smoke pass; then continue Phase 2 with Grid and titled/collapsible containers.

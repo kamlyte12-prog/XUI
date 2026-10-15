@@ -33,11 +33,18 @@ namespace xui {
 			{"clip", Expand::None, 1, 1, ID | NUM},
 			{"overflow", Expand::None, 1, 2, ID},
 			{"animation", Expand::None, 1, 6, ID | NUM | CUR},
+			{"scroll-track", Expand::None, 1, 1, COL},
+			{"scroll-thumb", Expand::None, 1, 1, COL},
+			{"scrollbar-size", Expand::None, 1, 1, NUM},
+			{"scrollbar-visibility", Expand::None, 1, 1, ID},
+			{"scroll-behavior", Expand::None, 1, 1, ID},
+			{"scroll-speed", Expand::None, 1, 1, NUM},
 		};
 		constexpr std::string_view kPropNames[kPropCount] = {
 			"bg", "fg", "border", "radius", "pad", "margin", "gap", "size", "min-size", "max-size", "opacity", "shadow", "blur",
 			"transform", "font", "font-size", "font-weight", "letter-spacing", "align", "justify", "grow", "shrink", "cursor",
-			"z-index", "clip", "overflow", "animation" };
+			"z-index", "clip", "overflow", "animation", "scroll-track", "scroll-thumb", "scrollbar-size",
+			"scrollbar-visibility", "scroll-behavior", "scroll-speed" };
 		constexpr std::string_view kStateNames[kStateCount] = {
 			"resting", "enabled", "readonly", "hover", "focus", "focus-visible", "selected", "checked", "open", "closed", "pressed", "dragging", "loading", "error", "placeholder", "disabled" };
 	}

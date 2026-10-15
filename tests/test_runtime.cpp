@@ -52,6 +52,7 @@ Window(title: "Controls", size: 600x360) {
     Panel[class: "right"] { Text("Details") }
   }
 }
+
 )";
 		constexpr std::string_view xssSource = R"(
 Panel.left { resting: { background: #202a3b, padding: 12px } }
@@ -767,7 +768,7 @@ TEST(showcase_example_assets_parse_validate_and_build) {
 	CHECK(ui.pointerDown({ color.x + 100.f, color.y + color.h + 55.f }));
 	CHECK(std::get<Color>(*ui.value("accent-color")) != beforeColor);
 
-	const Vec2 layoutHeader{ tabs.x + tabs.w * 0.625f, tabs.y + 12.f };   // center of the third of four equal tabs
+	const Vec2 layoutHeader{ tabs.x + tabs.w * 0.5f, tabs.y + 12.f };   // center of the third of five equal tabs
 	CHECK(ui.pointerDown(layoutHeader)); (void)ui.pointerUp(layoutHeader);
 	CHECK_EQ(std::get<u32>(*ui.value("demo-sections")), 2u);
 	ui.layout(1080, 760);
@@ -783,4 +784,59 @@ TEST(showcase_example_assets_parse_validate_and_build) {
 	ui.layout(1080, 760);
 	CHECK(rectFor("tasks-panel").w > leftPaneBefore.w + 10.f);
 	(void)ui.pointerUp({ gutterPoint.x + 24.f, gutterPoint.y });
+}
+
+TEST(ui_runtime_scrollview_wheel_keyboard_programmatic_and_nested_scroll) {
+	constexpr std::string_view source = R"(
+Window(title: "Scroll", size: 420x300) {
+  ScrollView[id: "outer", vertical: true, horizontal: false, width: 220px, height: 180px, change: onChange] {
+    Column {
+      Text("First")[height: 40px]
+      ScrollView[id: "inner", vertical: true, width: 180px, height: 70px] {
+        Column {
+          Text("Inner 1")[height: 45px]
+          Text("Inner 2")[height: 45px]
+          Text("Inner 3")[height: 45px]
+        }
+      }
+      Text("More content")[height: 120px]
+      Text("Last target")[id: "last", height: 40px]
+    }
+  }
+}
+)";
+	constexpr std::string_view stylesSource = R"(
+ScrollView { resting: { scroll-behavior: instant, scrollbar-visibility: always, scrollbar-size: 10px, scroll-track: #222222, scroll-thumb: #aaaaaa } hover: { scroll-thumb: #ffffff } }
+)";
+	StringInterner strings; auto assets = parseXui(source, "scroll.xui", strings); auto styles = compileXss(stylesSource, "scroll.xss", strings);
+	CHECK(assets.has_value()); CHECK(styles.has_value()); if (!assets || !styles) return;
+	Program program; program.files.push_back(*assets); CHECK(validate(program, XuiSchema::withCoreWidgets(), strings).has_value());
+	TextSystem text; UiRuntime ui; std::string error; CHECK(ui.build(*assets, *styles, strings, text, {}, error)); if (!error.empty()) return;
+	ui.layout(420, 300);
+	u32 counts[2]{}; ui.setEventHandler(recordPress, counts);
+	const Rect outer = ui.bounds({1, 1}); CHECK(outer.w == 220.f); CHECK(outer.h == 180.f);
+	CHECK(ui.scrollWheel({outer.x + 20.f, outer.y + 20.f}, {0.f, -2.f}));
+	CHECK(ui.scrollOffset("outer").y > 0.f);
+	CHECK(counts[1] > 0u);
+	CHECK(std::get<Vec2>(*ui.value("outer")) == ui.scrollOffset("outer"));
+	CHECK(ui.scrollIntoView("last", false)); CHECK(ui.scrollOffset("outer").y > 0.f);
+	const u32 beforeProgrammatic = counts[1];
+	CHECK(ui.setValue("outer", UiValue{Vec2{0.f, 0.f}})); CHECK(ui.scrollOffset("outer") == Vec2{});
+	CHECK_EQ(counts[1], beforeProgrammatic); // setValue is silent by default
+	CHECK(ui.setValue("outer", UiValue{Vec2{0.f, 12.f}}, true)); CHECK_EQ(counts[1], beforeProgrammatic + 1u);
+	CHECK(ui.setValue("outer", UiValue{Vec2{0.f, 0.f}}));
+	CHECK(ui.keyDown(Key::Tab)); CHECK(ui.keyDown(Key::Down)); CHECK(ui.scrollOffset("outer").y > 0.f);
+	CHECK(ui.setValue("outer", UiValue{Vec2{0.f, 0.f}}));
+	const Rect inner = ui.bounds({4, 1});
+	CHECK(ui.scrollWheel({inner.x + 20.f, inner.y + 20.f}, {0.f, -2.f}));
+	CHECK(ui.scrollOffset("inner").y > 0.f); // deepest scrollable ancestor consumes first
+	(void)ui.scrollTo("inner", {0.f, 10000.f}, false);
+	CHECK(ui.scrollWheel({inner.x + 20.f, inner.y + 20.f}, {0.f, -2.f}));
+	CHECK(ui.scrollOffset("outer").y > 0.f); // at its limit, inner lets the outer view consume
+	CHECK(ui.scrollTo("outer", {0.f, 0.f}, false));
+	CHECK(ui.pointerDown({outer.right() - 5.f, outer.y + 15.f}));
+	CHECK(ui.pointerMove({outer.right() - 5.f, outer.y + 35.f}));
+	CHECK(ui.scrollOffset("outer").y > 0.f);
+	CHECK(ui.pointerUp({outer.right() - 5.f, outer.y + 35.f}));
+	CHECK(ui.scrollTo("outer", {0.f, 10000.f}, false)); CHECK(ui.scrollOffset("outer").y < 10000.f);
 }

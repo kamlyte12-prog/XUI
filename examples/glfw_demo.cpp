@@ -115,6 +115,15 @@ namespace {
 				app.runtime().setValue("trail-readout", "Trail: " + path);
 			}
 		}
+		else if (name == "onScrollChanged") {
+			if (const auto offset = valueAs<xui::Vec2>(app, "vertical-scroll")) {
+				app.runtime().setValue("scroll-position-readout", "Vertical offset: " +
+					std::to_string(static_cast<int>(offset->x)) + ", " + std::to_string(static_cast<int>(offset->y)));
+			}
+		}
+		else if (name == "onScrollToTarget") {
+			app.runtime().scrollIntoView("scroll-target-last", true);
+		}
 	}
 
 	std::vector<std::filesystem::path> fontCandidates() {

@@ -28,6 +28,7 @@ WindowHandle GlfwPlatform::createWindow(const WindowDesc& d) {
 	glfwSetWindowUserPointer(native, &m_windows.back());
 	glfwSetWindowSizeCallback(native, onSize);
 	glfwSetCursorPosCallback(native, onCursor);
+	glfwSetScrollCallback(native, onScroll);
 	glfwSetMouseButtonCallback(native, onMouse);
 	glfwSetKeyCallback(native, onKey);
 	glfwSetCharCallback(native, onChar);
@@ -92,6 +93,10 @@ GlfwPlatform::Window* GlfwPlatform::record(GLFWwindow* w) { return static_cast<W
 void GlfwPlatform::push(GLFWwindow* w, const Event& src) { if (Window* r = record(w)) { Event e = src; e.window = r->handle; r->owner->m_events.push_back(e); } }
 void GlfwPlatform::onSize(GLFWwindow* w, int width, int height) { Event e{}; e.type = EventType::Resize; e.w = f32(width); e.h = f32(height); push(w, e); }
 void GlfwPlatform::onCursor(GLFWwindow* w, double x, double y) { Event e{}; e.type = EventType::MouseMove; e.x = f32(x); e.y = f32(y); push(w, e); }
+void GlfwPlatform::onScroll(GLFWwindow* w, double dx, double dy) {
+	Event e{}; e.type = EventType::Wheel; e.dx = f32(dx); e.dy = f32(dy);
+	double x = 0, y = 0; glfwGetCursorPos(w, &x, &y); e.x = f32(x); e.y = f32(y); push(w, e);
+}
 void GlfwPlatform::onMouse(GLFWwindow* w, int button, int action, int mods) {
 	Event e{}; e.type = action == GLFW_PRESS ? EventType::MouseDown : EventType::MouseUp;
 	e.button = button == GLFW_MOUSE_BUTTON_RIGHT ? MouseButton::Right : button == GLFW_MOUSE_BUTTON_MIDDLE ? MouseButton::Middle : MouseButton::Left;

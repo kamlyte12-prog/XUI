@@ -41,6 +41,12 @@ Side shorthands use one to four values: one applies to all sides; two means vert
 | `clip` | One identifier or number | Accepted and compiled; runtime clips text to widget bounds and popups to their boxes, but does not apply this property. |
 | `overflow` | 1–2 identifiers | Accepted and compiled; not interpreted by the standard runtime. |
 | `animation` | 1–6 identifiers/numbers/easing curves | Keyframe name is validated and retained; runtime does not animate it. |
+| `scroll-track` | One color or color token | Scrollbar track tint for `ScrollView`; default translucent dark track. |
+| `scroll-thumb` | One color or color token | Scrollbar thumb tint; participates in `hover` and `pressed` state resolution. |
+| `scrollbar-size` | One number | Scrollbar thickness in logical pixels, clamped to 4–24; default 10. |
+| `scrollbar-visibility` | `auto`, `always`, or `never` | `auto` shows while the view is hovered/focused; default `auto`. |
+| `scroll-behavior` | `instant` or `smooth` | Wheel/programmatic animation default for a view; default `instant`. `.xui` `scrollBehavior` can override it. |
+| `scroll-speed` | One number | Wheel pixels per notch, clamped to 1–400; default 42. `.xui` `scrollSpeed` can override it. |
 
 Aliases normalize to canonical names: `background` → `bg`, `color` → `fg`, `padding` → `pad`, and `font-family` → `font`.
 

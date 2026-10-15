@@ -188,6 +188,68 @@ Window(title: "Xui GLFW/OpenGL widget showcase", size: 1080x760) {
           }
         }
       }
+
+      // ScrollView demos: vertical, horizontal, nested, keyboard and programmatic scrolling.
+      Tab(title: "Scrolling")[id: "scrolling-tab"] {
+        Column(gap: 10)[id: "scrolling-page", class: "page", pad: 18px, grow: 1] {
+          Text("Scrollable containers")[class: "section-title"]
+          Text("Wheel over a viewport, drag its thumb, focus it and use arrows/Page Up/Down, or use the scroll-into-view button.")[class: "help"]
+          Row(gap: 12)[id: "scroll-columns", grow: 1] {
+            ScrollView[id: "vertical-scroll", vertical: true, horizontal: false, scrollBehavior: "smooth", scrollSpeed: 42,
+                       class: "scroll-demo", width: 230px, height: 340px, change: onScrollChanged] {
+              Column(gap: 4)[id: "vertical-content"] {
+                Text("Vertical content")[class: "panel-title"]
+                Button(label: "Scroll target A")[id: "scroll-target-a", class: "scroll-action", width: 180px, height: 32px]
+                Text("Item 01 — cached measure")[class: "scroll-item"]
+                Text("Item 02 — retained layout")[class: "scroll-item"]
+                Text("Item 03 — clipped at viewport")[class: "scroll-item"]
+                Text("Item 04 — wheel and keyboard")[class: "scroll-item"]
+                Text("Item 05 — scrollbar drag")[class: "scroll-item"]
+                Text("Item 06 — nested containers")[class: "scroll-item"]
+                Text("Item 07 — focus navigation")[class: "scroll-item"]
+                Text("Item 08 — no forced reflow")[class: "scroll-item"]
+                Text("Item 09 — logical pixels")[class: "scroll-item"]
+                Text("Item 10 — automatic range clamp")[class: "scroll-item"]
+                Text("Item 11 — last visible target")[id: "scroll-target-last", class: "scroll-item"]
+              }
+            }
+            Column(gap: 8, grow: 1)[id: "scroll-right-column"] {
+              ScrollView[id: "horizontal-scroll", horizontal: true, vertical: false, scrollbar: "always",
+                         class: "scroll-demo", width: 100%, height: 112px, change: onScrollChanged] {
+                Row(gap: 12)[id: "horizontal-content"] {
+                  Button(label: "Horizontal 1")[class: "scroll-action", width: 180px, height: 64px]
+                  Button(label: "Horizontal 2")[class: "scroll-action", width: 180px, height: 64px]
+                  Button(label: "Horizontal 3")[class: "scroll-action", width: 180px, height: 64px]
+                  Button(label: "Horizontal 4")[class: "scroll-action", width: 180px, height: 64px]
+                  Button(label: "Horizontal 5")[class: "scroll-action", width: 180px, height: 64px]
+                }
+              }
+              Row(gap: 12, align: Center)[id: "scroll-actions"] {
+                Button(label: "Scroll to last item")[press: onScrollToTarget, class: "action", width: 210px, height: 36px]
+                Text("Vertical offset: 0, 0")[id: "scroll-position-readout", class: "value-readout", width: 260px, height: 24px]
+              }
+              ScrollView[id: "nested-outer", vertical: true, class: "scroll-demo", width: 100%, height: 190px] {
+                Column(gap: 8)[id: "nested-content"] {
+                  Text("Outer scroll area")[class: "panel-title"]
+                  Text("Outer item one")[class: "scroll-item"]
+                  ScrollView[id: "nested-inner", vertical: true, scrollbar: "never", class: "scroll-demo scroll-hidden", width: 100%, height: 92px] {
+                    Column(gap: 4)[id: "nested-inner-content"] {
+                      Text("Nested viewport — scrollbar hidden")[class: "scroll-item"]
+                      Text("Inner item 2")[class: "scroll-item"]
+                      Text("Inner item 3")[class: "scroll-item"]
+                      Text("Inner item 4")[class: "scroll-item"]
+                      Text("Inner item 5")[class: "scroll-item"]
+                      Text("Inner item 6")[class: "scroll-item"]
+                    }
+                  }
+                  Text("Outer item two")[class: "scroll-item"]
+                  Text("Outer item three")[class: "scroll-item"]
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

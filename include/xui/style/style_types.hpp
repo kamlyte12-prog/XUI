@@ -40,7 +40,7 @@ struct StyleValue {
 enum class PropId : u8 {
     Bg, Fg, Border, Radius, Pad, Margin, Gap, Size, MinSize, MaxSize, Opacity, Shadow, Blur, Transform,
     Font, FontSize, FontWeight, LetterSpacing, Align, Justify, Grow, Shrink, Cursor, ZIndex, Clip, Overflow,
-    Animation, Count
+    Animation, ScrollTrack, ScrollThumb, ScrollbarSize, ScrollbarVisibility, ScrollBehavior, ScrollSpeed, Count
 };
 constexpr int kPropCount = static_cast<int>(PropId::Count);
 enum class Expand : u8 { None, Sides4, Pair };

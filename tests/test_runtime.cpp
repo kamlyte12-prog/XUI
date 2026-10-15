@@ -567,7 +567,8 @@ Tooltip { resting: { bg: #202a40, fg: #ffffff, pad: 6px, radius: 4px } }
     CHECK(ui.keyDown(Key::A, static_cast<u8>(Mod::Ctrl), nullptr));
     CHECK(ui.textInput('X'));
     CHECK_EQ(std::get<std::string>(*ui.value("name")), "X");
-    CHECK_EQ(ui.nextTimerDelay(), -1.0);
+    // The focused field keeps its caret blink scheduled; it must be the only pending timer.
+    CHECK(ui.nextTimerDelay() >= 0.0);
     NullPlatform clipboard;
     CHECK(ui.setValue("name", std::string("hello")));
     CHECK(ui.keyDown(Key::Home));
@@ -652,6 +653,19 @@ TEST(showcase_example_assets_parse_validate_and_build) {
     CHECK(ui.value("accent-color").has_value());
     CHECK(ui.value("demo-sections").has_value());
     CHECK(ui.value("task-layout").has_value());
+    CHECK(ui.value("query").has_value());
+    CHECK(ui.value("delay").has_value());
+    CHECK(ui.value("whitespace-toggle").has_value());
+    CHECK(ui.value("live-sync").has_value());
+    CHECK(ui.value("mute").has_value());
+    CHECK(ui.value("density-choice").has_value());
+    CHECK(ui.value("shading").has_value());
+    CHECK(ui.value("priority").has_value());
+    CHECK(ui.value("subdivisions").has_value());
+    CHECK(ui.value("due-date").has_value());
+    CHECK(ui.value("save-key").has_value());
+    CHECK(ui.value("trail").has_value());
+    CHECK(ui.value("busy-bar").has_value());
     CHECK(ui.bounds(ui.root()).w > 0.f);
 
     std::unordered_map<std::string, u32> runtimeIndexById;
@@ -682,7 +696,7 @@ TEST(showcase_example_assets_parse_validate_and_build) {
 
     // Each authored tab must produce drawable content, not just parse successfully.
     Painter painter;
-    for (u32 section = 0; section < 3; ++section) {
+    for (u32 section = 0; section < 4; ++section) {
         CHECK(ui.setValue("demo-sections", section));
         ui.layout(1080, 760);
         if (section == 1) {
@@ -701,6 +715,11 @@ TEST(showcase_example_assets_parse_validate_and_build) {
             CHECK(rectFor("task-styles").y > firstTask.y);
             CHECK(rectFor("task-backend").y > rectFor("task-styles").y);
             CHECK(lastTask.y > rectFor("task-backend").y);
+        } else if (section == 3) {
+            const Rect crumbs = rectFor("trail"), segmented = rectFor("shading"), stepper = rectFor("subdivisions");
+            const Rect rating = rectFor("priority"), date = rectFor("due-date"), keybind = rectFor("save-key");
+            CHECK(crumbs.w > 0.f && segmented.w > 0.f && stepper.w > 0.f);
+            CHECK(rating.w > 0.f && date.w > 0.f && keybind.w > 0.f);
         }
         text.beginFrame();
         painter.begin(1080, 760, 1.f);
@@ -725,7 +744,7 @@ TEST(showcase_example_assets_parse_validate_and_build) {
     CHECK(!std::get<bool>(*ui.value("updates")));
 
     const Rect tabs = rectFor("demo-sections");
-    const Vec2 controlsHeader{tabs.x + tabs.w * 0.5f, tabs.y + 12.f};
+    const Vec2 controlsHeader{tabs.x + tabs.w * 0.375f, tabs.y + 12.f};   // center of the second of four equal tabs
     CHECK(ui.pointerDown(controlsHeader)); (void)ui.pointerUp(controlsHeader);
     CHECK_EQ(std::get<u32>(*ui.value("demo-sections")), 1u);
     ui.layout(1080, 760);
@@ -746,7 +765,7 @@ TEST(showcase_example_assets_parse_validate_and_build) {
     CHECK(ui.pointerDown({color.x + 100.f, color.y + color.h + 55.f}));
     CHECK(std::get<Color>(*ui.value("accent-color")) != beforeColor);
 
-    const Vec2 layoutHeader{tabs.x + tabs.w * 0.84f, tabs.y + 12.f};
+    const Vec2 layoutHeader{tabs.x + tabs.w * 0.625f, tabs.y + 12.f};   // center of the third of four equal tabs
     CHECK(ui.pointerDown(layoutHeader)); (void)ui.pointerUp(layoutHeader);
     CHECK_EQ(std::get<u32>(*ui.value("demo-sections")), 2u);
     ui.layout(1080, 760);

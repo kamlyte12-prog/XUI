@@ -2,6 +2,24 @@
 
 This file records project changes, design decisions, trade-offs, current status, and next steps. It is updated as implementation work lands.
 
+## Test fixes: caret-blink timer lifetime + showcase 4-tab drift — 2026-10-15
+
+### Root causes (2 failed tests out of 153)
+
+- `ui_runtime_text_fields_check_box_tabs_and_delayed_tooltips` — `CHECK_EQ(ui.nextTimerDelay(), -1.0)` at lines 570 and 589. The caret-blink feature arms a timer whenever an editable field is focused, but the deadline was only disarmed during `paint()`, which these headless tests never call. Line 570 fails legitimately (the field is focused and just typed — a blink tick *is* pending); line 589 fails through a stale deadline after focus moved to a checkbox. The reported "slider" failures were a misattribution: those line numbers sit inside the text_fields test; the slider test itself passes.
+- `showcase_example_assets_parse_validate_and_build` — the test encoded the old 3-tab showcase: header clicks at `width*0.5`/`width*0.84` and a 3-iteration paint loop. The demo now has four tabs, so the header clicks landed on the wrong tabs (0.5×4 → tab 2, 0.84×4 → tab 3) and every subsequent interaction check failed in cascade (lines 730–763).
+
+### Fixes
+
+- `UiRuntime`: new `caretEditableFocused()` helper; `nextTimerDelay()` and `updateTimers()` now treat the blink as pending only while an editable field is actually focused, and `updateTimers()` clears a stale deadline when focus has moved away. `paint()` reuses the helper. Contract: a focused editable field wakes the idle app at most ~2×/second for the blink; once no editable field is focused, `nextTimerDelay()` returns −1 again.
+- `ProgressBar` gained `value()`/`setValue()` (`f64`, clamped to min/max) — it held state but was the only control not exposing it, and the new showcase checks read it by id.
+- `tests/test_runtime.cpp`: the line-570 assertion is now blink-aware (`nextTimerDelay() >= 0.0` with a comment); the showcase test iterates four tabs, clicks header centers at `0.375`/`0.625` (equal-width fourths), and checks the Widgets tab: value lookups for all Phase 1 + second-wave ids (`query`, `delay`, `whitespace-toggle`, `live-sync`, `mute`, `density-choice`, `shading`, `priority`, `subdivisions`, `due-date`, `save-key`, `trail`, `busy-bar`) and non-empty rects for the Widgets-tab controls in the paint loop.
+
+### Verification and current status
+
+- Not yet rebuilt in this session (owner runs builds). Expected: suite green at 153 tests. The blink-lifetime change is test-covered by the existing assertions (570 expects a pending blink, 589 expects none after focus moves).
+- The misattributed slider test was left untouched; it passes.
+
 ## Second widget wave + Blender grey theme — 2026-10-15
 
 ### Added

@@ -161,6 +161,7 @@ private:
     void syncPickerEditors(u32 ownerIndex, u32 preserveIndex = 0xFFFFFFFFu);
     bool updatePickerFromEditor(Node& editor);
     bool isNodeVisible(u32 index) const;
+    bool caretEditableFocused() const;
     u32 hitTestNode(Vec2 point) const;
     Rect searchClearRect(const Node& node) const;
     void applyNumberStep(Node& node, f32 direction);

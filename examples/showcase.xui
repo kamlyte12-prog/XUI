@@ -85,7 +85,7 @@ Window(title: "Xui GLFW/OpenGL widget showcase", size: 1080x760) {
           Text("Selection controls")[class: "section-title"]
           Row(gap: 16)[id: "selection-row", class: "selection-row"] {
             Switch[label: "Live sync", checked: true, tooltip: "Switch state is a bool by id.",
-                   change: onSwitchChange, class: "switch", width: 220px, height: 36px]
+                   id: "live-sync", change: onSwitchChange, class: "switch", width: 220px, height: 36px]
             ToggleButton(label: "Mute")[id: "mute", checked: false, tooltip: "A button that stays pressed.",
                    change: onToggleChange, class: "toggle", width: 150px, height: 36px]
           }

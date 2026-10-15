@@ -944,11 +944,7 @@ void UiRuntime::paint(Painter& painter, f32 dpiScale) {
             }
     } else if (!spinnerActive) m_spinnerDeadline = {};
     // Caret blink: only tick while an editable field holds focus; other frames are untouched.
-    bool editableFocused = false;
-    for (u32 i = 0; i < m_nodes.size(); ++i) {
-        const Node& node = m_nodes[i];
-        if ((node.textBox || node.textArea) && node.focused && !node.disabled && !node.readOnly && isNodeVisible(i)) { editableFocused = true; break; }
-    }
+    const bool editableFocused = caretEditableFocused();
     if (editableFocused) {
         if (m_caretBlinkDeadline.time_since_epoch().count() == 0) {
             m_caretBlinkDeadline = now + kCaretBlinkInterval;
@@ -2553,6 +2549,14 @@ StateMask UiRuntime::activeStates(const Node& node) const {
     return states;
 }
 
+bool UiRuntime::caretEditableFocused() const {
+    for (u32 i = 0; i < m_nodes.size(); ++i) {
+        const Node& node = m_nodes[i];
+        if ((node.textBox || node.textArea) && node.focused && !node.disabled && !node.readOnly && isNodeVisible(i)) return true;
+    }
+    return false;
+}
+
 bool UiRuntime::isNodeVisible(u32 index) const {
     if (index >= m_nodes.size()) return false;
     if (m_nodes[index].pickerEditor) {
@@ -2628,13 +2632,18 @@ bool UiRuntime::updateTimers(std::chrono::steady_clock::time_point now) {
     } else if (!spinnerVisible && m_spinnerDeadline.time_since_epoch().count() != 0) {
         m_spinnerDeadline = {};
     }
-    if (m_caretBlinkDeadline.time_since_epoch().count() != 0 && now >= m_caretBlinkDeadline) {
-        for (u32 i = 0; i < m_nodes.size(); ++i) {
-            const Node& node = m_nodes[i];
-            if ((node.textBox || node.textArea) && node.focused && !node.disabled && !node.readOnly && isNodeVisible(i))
-                addDamage(node.pickerEditor ? pickerEditorRect(node) : m_layout.absRect(node.layout));
+    // The blink is pending only while an editable field is actually focused; a stale deadline
+    // from a field that lost focus must not keep the app waking (or report a timer delay).
+    if (m_caretBlinkDeadline.time_since_epoch().count() != 0) {
+        if (!caretEditableFocused()) m_caretBlinkDeadline = {};
+        else if (now >= m_caretBlinkDeadline) {
+            for (u32 i = 0; i < m_nodes.size(); ++i) {
+                const Node& node = m_nodes[i];
+                if ((node.textBox || node.textArea) && node.focused && !node.disabled && !node.readOnly && isNodeVisible(i))
+                    addDamage(node.pickerEditor ? pickerEditorRect(node) : m_layout.absRect(node.layout));
+            }
+            redraw = true;
         }
-        redraw = true;
     }
     return redraw;
 }
@@ -2655,7 +2664,7 @@ f64 UiRuntime::nextTimerDelay(std::chrono::steady_clock::time_point now) const {
         const f64 spinnerDelay = std::max(0.0, std::chrono::duration<f64>(m_spinnerDeadline - now).count());
         delay = delay < 0.0 ? spinnerDelay : std::min(delay, spinnerDelay);
     }
-    if (m_caretBlinkDeadline.time_since_epoch().count() != 0) {
+    if (m_caretBlinkDeadline.time_since_epoch().count() != 0 && caretEditableFocused()) {
         const f64 caretDelay = std::max(0.0, std::chrono::duration<f64>(m_caretBlinkDeadline - now).count());
         delay = delay < 0.0 ? caretDelay : std::min(delay, caretDelay);
     }
@@ -2677,7 +2686,7 @@ std::optional<UiValue> UiRuntime::value(std::string_view id) const {
     for (const Node& node : m_nodes) {
         if (!node.id.v || m_strings->view(node.id) != id) continue;
         if (node.checkItem || node.checkBox || node.switchToggle || node.toggleButton) return UiValue{node.checked};
-        if (node.slider || node.rating) return UiValue{static_cast<f64>(node.value)};
+        if (node.slider || node.rating || node.progressBar) return UiValue{static_cast<f64>(node.value)};
         if (node.numberField || node.stepper) return UiValue{static_cast<f64>(node.value)};
         if (node.dropdown || node.textBox || node.textArea || typeIs(node.type,*m_strings,"Text") || node.label || node.badge || node.datePicker || node.keybindField) return UiValue{node.text};
         if (node.radioGroup || node.segmented || node.breadcrumb) return node.selectedOption < node.options.size() ? UiValue{node.options[node.selectedOption]} : UiValue{std::string{}};
@@ -2694,7 +2703,7 @@ bool UiRuntime::setValue(std::string_view id, const UiValue& valueToSet, bool no
         if (node.checkItem || node.checkBox) {
             const bool* value = std::get_if<bool>(&valueToSet); if (!value) return false;
             changed = node.checked != *value; node.checked = *value;
-        } else if (node.slider) {
+        } else if (node.slider || node.progressBar) {
             const f64* value = std::get_if<f64>(&valueToSet); if (!value) return false;
             const f32 clamped = std::clamp(static_cast<f32>(*value), node.minValue, node.maxValue);
             changed = node.value != clamped; node.value = clamped;

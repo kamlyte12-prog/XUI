@@ -16,12 +16,15 @@ Window(title: "Xui GLFW/OpenGL widget showcase", size: 1080x760) {
             TextBox[id: "display-name", value: "Guest", placeholder: "Display name", maxLength: 48,
                    tooltip: "Single-line input. Try Shift+arrows, Ctrl+A/C/X/V, Delete, and Backspace.",
                    tooltipTrigger: "both", tooltipShowDelay: 450, tooltipHideDelay: 120,
-                   change: onNameChange, class: "field name-field", width: 440px, height: 40px]
+                   change: onNameChange, class: "field name-field", width: 380px, height: 40px]
             TextBox[id: "readonly-field", value: "Read only", readOnly: true,
                    tooltip: "This tip is disabled for this field.", tooltipDisabled: true,
-                   class: "field readonly-field", width: 260px, height: 40px]
+                   class: "field readonly-field", width: 200px, height: 40px]
+            TextBox[id: "passphrase", password: true, placeholder: "Password", maxLength: 32,
+                   tooltip: "Password mode masks the display with bullets; the stored text is plain.",
+                   change: onPassphraseChange, class: "field", width: 170px, height: 40px]
           }
-          TextArea[id: "notes", value: "", placeholder: "Write a multiline note…", maxLength: 800,
+          TextArea[id: "notes", value: "", placeholder: "Write a multiline note…", maxLength: 800, tabSize: 4,
                    tooltip: "Text wraps inside this area. Press Enter to add a line.",
                    change: onNotesChange, class: "field notes", width: 720px, height: 132px, align: Start]
           Row(gap: 12)[id: "checks-row", class: "checks"] {
@@ -47,7 +50,7 @@ Window(title: "Xui GLFW/OpenGL widget showcase", size: 1080x760) {
           }
 
           // Debug view for control characters: spaces render as a middle dot, tabs as a right arrow.
-          // Tab always moves keyboard focus in Xui; it never inserts a tab character into a field.
+          // Tab inside notes inserts four spaces; other controls use Tab for focus traversal.
           CheckBox(label: "Show whitespace marks")[id: "whitespace-toggle", checked: false,
                   tooltip: "Render spaces as a middle dot and tabs as a right arrow in the fields above.",
                   change: onWhitespaceToggle, class: "checkbox", width: 300px, height: 34px, pad: 5px]
@@ -73,7 +76,7 @@ Window(title: "Xui GLFW/OpenGL widget showcase", size: 1080x760) {
                      tooltip: "Click to open; choose one density.", tooltipTrigger: "hover", tooltipShowDelay: 350,
                      change: onDensityChange, class: "dropdown", width: 260px, height: 38px, pad: 8px]
             ColorPicker[id: "accent-color", value: #5b8cff, format: "hex", formats: "hex|rgb|hsl|hsv", precision: 1,
-                        popupSize: 248x264,
+                        popupSize: 300x352,
                         alpha: true, showAlpha: true, showInputs: true, showFormatSwitcher: true,
                         showHue: true, showSaturationValue: true,
                         tooltip: "Click and drag in the popup to choose a color, or edit the value row.",
@@ -127,7 +130,7 @@ Window(title: "Xui GLFW/OpenGL widget showcase", size: 1080x760) {
 
           // Display widgets: static label, badge, activity spinner, and a PNG image.
           // The demo generates xui-demo-image.png at startup if it is missing (see glfw_demo.cpp).
-          Separator[class: "rule"]
+          Divider[class: "rule"]
           Text("Display widgets")[class: "section-title"]
           Row(gap: 14)[id: "display-row", class: "display-row"] {
             Image("xui-demo-image.png")[fit: Contain, tooltip: "PNG image loaded through the renderer's texture API.",
@@ -138,6 +141,14 @@ Window(title: "Xui GLFW/OpenGL widget showcase", size: 1080x760) {
                 Badge("NEW")[class: "badge", width: 58px, height: 22px]
                 Spinner[class: "spinner", width: 22px, height: 22px]
                 Spinner[disabled: true, class: "spinner", width: 22px, height: 22px]
+              }
+              Toolbar[id: "demo-toolbar", class: "demo-toolbar"] {
+                Label("Toolbar container")[class: "demo-label"]
+                Button(label: "Action")[class: "secondary", width: 96px, height: 32px]
+              }
+              StatusBar[id: "demo-status", class: "demo-status"] {
+                Text("StatusBar container")[class: "help"]
+                Badge("Ready")[class: "badge", width: 64px, height: 22px]
               }
             }
           }

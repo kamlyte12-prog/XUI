@@ -53,11 +53,14 @@ constexpr int kMaxTracks = 8;
 /// All layout inputs for a node. Plain data; set through LayoutTree::setStyle() so caches are invalidated.
 struct LayoutStyle {
     Length width, height;
+    // Percentage constraints resolve against the parent's usable content box. The legacy
+    // minW/minH/maxW/maxH pixel fields remain available to low-level callers.
+    Length minWidth, maxWidth, minHeight, maxHeight;
     Length basis;                             ///< flex base size on the main axis; Auto = use width/height. `grow:1` + `basis:px(0)` is CSS `flex:1` and
                                               ///< avoids measuring the child's content just to size it.
     f32 minW = 0, minH = 0, maxW = kInf, maxH = kInf;
     f32 grow = 0, shrink = 1;                 ///< flex factors (as CSS)
-    Edges margin, padding;
+    Edges margin, padding, border;             ///< border inset participates in the usable content box
     Vec2 gap;                                 ///< gap.x: Row main / Grid columns.  gap.y: Column main / Grid rows.
     Align alignItems = Align::Stretch;        ///< container default for children (both axes in Grid/Stack)
     Align alignSelf = Align::Auto;            ///< per-child override

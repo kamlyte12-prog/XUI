@@ -21,7 +21,7 @@ namespace xui {
 			return a == Align::Auto ? Align::Stretch : a;
 		}
 		// Split solver: sizes proportional to weights, none below its minimum, summing to `total`.
-		void solveSplit(u32 n, const f32* w, const f32* mn, f32 total, f32* out) {
+		void solveSplit(u32 n, const f32* w, const f32* mn, const f32* mx, f32 total, f32* out) {
 			f32 sumMin = 0; for (u32 k = 0; k < n; ++k) sumMin += mn[k];
 			if (sumMin >= total) { for (u32 k = 0; k < n; ++k) out[k] = sumMin > 0 ? mn[k] * total / sumMin : total / f32(n); return; }
 			for (u32 k = 0; k < n; ++k) out[k] = -1;
@@ -30,7 +30,11 @@ namespace xui {
 				for (u32 k = 0; k < n; ++k) { if (out[k] >= 0) frozen += out[k]; else { wsum += w[k]; ++open; } }
 				if (!open) return;
 				f32 rem = total - frozen; bool viol = false;
-				for (u32 k = 0; k < n; ++k) if (out[k] < 0 && rem * w[k] / wsum < mn[k]) { out[k] = mn[k]; viol = true; }
+				for (u32 k = 0; k < n; ++k) if (out[k] < 0) {
+					const f32 share = rem * w[k] / wsum;
+					if (share < mn[k]) { out[k] = mn[k]; viol = true; }
+					else if (share > mx[k]) { out[k] = mx[k]; viol = true; }
+				}
 				if (!viol) { for (u32 k = 0; k < n; ++k) if (out[k] < 0) out[k] = rem * w[k] / wsum; return; }
 			}
 		}
@@ -50,21 +54,24 @@ namespace xui {
 		if (cacheLookup(i, c, out)) { ++m_stats.measureCacheHits; return out; }
 		const u32 taint0 = m_taint;
 		const LayoutStyle& st = m_style[i];
-		const f32 padX = st.padding.l + st.padding.r, padY = st.padding.t + st.padding.b;
+		const f32 minW = layoutMin(st, true, c.w), maxW = layoutMax(st, true, c.w);
+		const f32 minH = layoutMin(st, false, c.h), maxH = layoutMax(st, false, c.h);
+		const Edges insetEdges = contentInsets(st);
+		const f32 padX = insetEdges.l + insetEdges.r, padY = insetEdges.t + insetEdges.b;
 		bool fw = false, fh = false; f32 W = 0, H = 0;
 		if (c.fw) { fw = true; W = c.w; }
-		else if (st.width.k == LenKind::Px) { fw = true; W = clampv(st.width.v, st.minW, st.maxW); }
+		else if (st.width.k == LenKind::Px) { fw = true; W = clampv(st.width.v, minW, maxW); }
 		else if (st.width.k == LenKind::Percent) ++m_taint;      // the parent's resolver resolves percentages and passes a fixed constraint; here: auto
 		if (c.fh) { fh = true; H = c.h; }
-		else if (st.height.k == LenKind::Px) { fh = true; H = clampv(st.height.v, st.minH, st.maxH); }
+		else if (st.height.k == LenKind::Px) { fh = true; H = clampv(st.height.v, minH, maxH); }
 		else if (st.height.k == LenKind::Percent) ++m_taint;
 		const f32 cw = fw ? std::max(0.f, W - padX) : sub(c.w, padX), ch = fh ? std::max(0.f, H - padY) : sub(c.h, padY);
 		Size content = contentFor(i, cw, ch, fw, fh, false);
 		// A min/max clamp applied to a content-derived size means the box no longer matches what the content was laid out for:
 		// taint the result (and, through cache hits and this counter, every ancestor's).
-		if (!fw) { const f32 raw = content.w + padX; out.w = clampv(raw, st.minW, st.maxW); if (out.w != raw) ++m_taint; }
+		if (!fw) { const f32 raw = content.w + padX; out.w = clampv(raw, minW, maxW); if (out.w != raw) ++m_taint; }
 		else out.w = W;
-		if (!fh) { const f32 raw = content.h + padY; out.h = clampv(raw, st.minH, st.maxH); if (out.h != raw) ++m_taint; }
+		if (!fh) { const f32 raw = content.h + padY; out.h = clampv(raw, minH, maxH); if (out.h != raw) ++m_taint; }
 		else out.h = H;
 		if (m_kind[i] == static_cast<u8>(LayoutKind::Scroll)) {   // a scroller never grows past the space it is offered
 			const bool row = st.scrollX && !st.scrollY;
@@ -96,7 +103,8 @@ namespace xui {
 
 	void LayoutTree::layoutChildren(u32 i, f32 w, f32 h) {
 		const LayoutStyle& st = m_style[i];
-		const f32 padX = st.padding.l + st.padding.r, padY = st.padding.t + st.padding.b;
+		const Edges insetEdges = contentInsets(st);
+		const f32 padX = insetEdges.l + insetEdges.r, padY = insetEdges.t + insetEdges.b;
 		if (m_kind[i] == static_cast<u8>(LayoutKind::Leaf)) { m_content[i] = { w, h }; return; }
 		Size used = contentFor(i, std::max(0.f, w - padX), std::max(0.f, h - padY), true, true, true);
 		(void)used;
@@ -120,6 +128,7 @@ namespace xui {
 	// ---- flex -----------------------------------------------------------------------------------------------
 	Size LayoutTree::flexResolve(u32 i, f32 cw, f32 ch, bool fw, bool fh, bool doArrange) {
 		const LayoutStyle& st = m_style[i];
+		const Edges insetEdges = contentInsets(st);
 		const bool scroll = m_kind[i] == static_cast<u8>(LayoutKind::Scroll);
 		const bool row = m_kind[i] == static_cast<u8>(LayoutKind::Row) || (scroll && st.scrollX && !st.scrollY);
 		const f32 mainAvail = row ? cw : ch, crossAvail = row ? ch : cw;
@@ -136,8 +145,10 @@ namespace xui {
 			it.msM = row ? cs.margin.l : cs.margin.t; it.meM = row ? cs.margin.r : cs.margin.b;
 			it.msC = row ? cs.margin.t : cs.margin.l; it.meC = row ? cs.margin.b : cs.margin.r;
 			it.grow = cs.grow; it.shrink = cs.shrink;
-			it.minMain = row ? cs.minW : cs.minH; it.maxMain = row ? cs.maxW : cs.maxH;
-			it.minCross = row ? cs.minH : cs.minW; it.maxCross = row ? cs.maxH : cs.maxW;
+			it.minMain = row ? layoutMin(cs, true, mainAvail) : layoutMin(cs, false, mainAvail);
+			it.maxMain = row ? layoutMax(cs, true, mainAvail) : layoutMax(cs, false, mainAvail);
+			it.minCross = row ? layoutMin(cs, false, crossAvail) : layoutMin(cs, true, crossAvail);
+			it.maxCross = row ? layoutMax(cs, false, crossAvail) : layoutMax(cs, true, crossAvail);
 			it.align = effAlign(st, cs);
 			const Length lm = cs.basis.k != LenKind::Auto ? cs.basis : (row ? cs.width : cs.height), lc = row ? cs.height : cs.width;
 			it.stretch = it.align == Align::Stretch && lc.k == LenKind::Auto;
@@ -240,8 +251,8 @@ namespace xui {
 			case Justify::SpaceAround: extra = leftover / f32(n); off = extra * 0.5f; break;
 			case Justify::SpaceEvenly: extra = leftover / f32(n + 1); off = extra; break;
 			}
-			f32 pos = (row ? st.padding.l : st.padding.t) + off;
-			const f32 crossStart = row ? st.padding.t : st.padding.l;
+			f32 pos = (row ? insetEdges.l : insetEdges.t) + off;
+			const f32 crossStart = row ? insetEdges.t : insetEdges.l;
 			for (std::size_t k = 0; k < n; ++k) {
 				const FlexItem it = m_flexItems[base + k];
 				f32 co;
@@ -263,6 +274,7 @@ namespace xui {
 	// ---- stack ----------------------------------------------------------------------------------------------
 	Size LayoutTree::stackResolve(u32 i, f32 cw, f32 ch, bool fw, bool fh, bool doArrange) {
 		const LayoutStyle& st = m_style[i];
+		const Edges insetEdges = contentInsets(st);
 		f32 maxW = 0, maxH = 0;
 		for (u32 c = m_first[i]; c != kNone; c = m_next[c]) {
 			const LayoutStyle& cs = m_style[c];
@@ -271,7 +283,9 @@ namespace xui {
 			const Align a = effAlign(st, cs);
 			const bool sw = a == Align::Stretch && cs.width.k == LenKind::Auto && fw, sh = a == Align::Stretch && cs.height.k == LenKind::Auto && fh;
 			const f32 pw = resolvePct(cs.width, cw, fw, m_taint), ph = resolvePct(cs.height, ch, fh, m_taint);
-			Size s = measure(c, Constraint{ std::isnan(pw) ? sub(cw, mW) : clampv(pw, cs.minW, cs.maxW), std::isnan(ph) ? sub(ch, mH) : clampv(ph, cs.minH, cs.maxH),
+			const f32 childMinW = layoutMin(cs, true, cw), childMaxW = layoutMax(cs, true, cw);
+			const f32 childMinH = layoutMin(cs, false, ch), childMaxH = layoutMax(cs, false, ch);
+			Size s = measure(c, Constraint{ std::isnan(pw) ? sub(cw, mW) : clampv(pw, childMinW, childMaxW), std::isnan(ph) ? sub(ch, mH) : clampv(ph, childMinH, childMaxH),
 										   sw || !std::isnan(pw), sh || !std::isnan(ph) });
 			maxW = std::max(maxW, s.w + mW); maxH = std::max(maxH, s.h + mH);
 			if (doArrange) {
@@ -280,8 +294,8 @@ namespace xui {
 					return a == Align::Center ? ms + (room - ms - me - size) * 0.5f : a == Align::End ? room - me - size : ms;
 					};
 				Rect& r = m_rect[c];
-				r.x = st.padding.l + place(cw, s.w, cs.margin.l, cs.margin.r);
-				r.y = st.padding.t + place(ch, s.h, cs.margin.t, cs.margin.b);
+				r.x = insetEdges.l + place(cw, s.w, cs.margin.l, cs.margin.r);
+				r.y = insetEdges.t + place(ch, s.h, cs.margin.t, cs.margin.b);
 				arrange(c, s.w, s.h);
 			}
 		}
@@ -292,6 +306,7 @@ namespace xui {
 	// ---- grid -----------------------------------------------------------------------------------------------
 	Size LayoutTree::gridResolve(u32 i, f32 cw, f32 ch, bool fw, bool fh, bool doArrange) {
 		const LayoutStyle& st = m_style[i];
+		const Edges insetEdges = contentInsets(st);
 		const u32 ncols = std::min<u32>(kMaxTracks, std::max<u32>(1, st.colCount));
 		const std::size_t ibase = m_gridItems.size();
 		// 1. place children (auto-placement is a simple row-major cursor; explicit cells are honoured, overlap is allowed)
@@ -364,7 +379,7 @@ namespace xui {
 			const f32 cellW = spanSum(CS, u32(g.col), g.cs, gx) - g.ml - g.mr;
 			const bool stretchW = effAlign(st, cs) == Align::Stretch && cs.width.k == LenKind::Auto;
 			const f32 pw = resolvePct(cs.width, cellW, true, m_taint);          // percentages are of the grid cell
-			Size s = measure(g.node, Constraint{ std::isnan(pw) ? std::max(0.f, cellW) : clampv(pw, cs.minW, cs.maxW), kInf, stretchW || !std::isnan(pw), false });
+			Size s = measure(g.node, Constraint{ std::isnan(pw) ? std::max(0.f, cellW) : clampv(pw, layoutMin(cs, true, cellW), layoutMax(cs, true, cellW)), kInf, stretchW || !std::isnan(pw), false });
 			RM(u32(g.row)) = std::max(RM(u32(g.row)), s.h + g.mt + g.mb);
 		}
 		sizeTracks(nrows, rowTrack, RS, RM, ch, fh, gy);
@@ -382,11 +397,11 @@ namespace xui {
 				const Align a = effAlign(st, cs);
 				const bool sw = a == Align::Stretch && cs.width.k == LenKind::Auto, sh = a == Align::Stretch && cs.height.k == LenKind::Auto;
 				const f32 pw = resolvePct(cs.width, cellW, true, m_taint), ph = resolvePct(cs.height, cellH, true, m_taint);
-				Size s = measure(g.node, Constraint{ std::isnan(pw) ? std::max(0.f, cellW) : clampv(pw, cs.minW, cs.maxW), std::isnan(ph) ? std::max(0.f, cellH) : clampv(ph, cs.minH, cs.maxH),
+				Size s = measure(g.node, Constraint{ std::isnan(pw) ? std::max(0.f, cellW) : clampv(pw, layoutMin(cs, true, cellW), layoutMax(cs, true, cellW)), std::isnan(ph) ? std::max(0.f, cellH) : clampv(ph, layoutMin(cs, false, cellH), layoutMax(cs, false, cellH)),
 													sw || !std::isnan(pw), sh || !std::isnan(ph) });
 				auto off = [&](f32 room, f32 size) { return a == Align::Center ? (room - size) * 0.5f : a == Align::End ? room - size : 0.f; };
 				Rect& r = m_rect[g.node];
-				r.x = st.padding.l + x + g.ml + off(cellW, s.w); r.y = st.padding.t + y + g.mt + off(cellH, s.h);
+				r.x = insetEdges.l + x + g.ml + off(cellW, s.w); r.y = insetEdges.t + y + g.mt + off(cellH, s.h);
 				arrange(g.node, s.w, s.h);
 			}
 		}
@@ -398,6 +413,7 @@ namespace xui {
 	// ---- split ----------------------------------------------------------------------------------------------
 	Size LayoutTree::splitResolve(u32 i, f32 cw, f32 ch, bool fw, bool fh, bool doArrange) {
 		const LayoutStyle& st = m_style[i];
+		const Edges insetEdges = contentInsets(st);
 		const bool horiz = st.splitDir == SplitDir::Horizontal;
 		u32 n = 0; for (u32 c = m_first[i]; c != kNone; c = m_next[c]) if (m_style[c].position != Position::Absolute) ++n;
 		const f32 gutters = n > 1 ? st.gutter * f32(n - 1) : 0.f;
@@ -417,23 +433,25 @@ namespace xui {
 		}
 		if (doArrange && n) {
 			const std::size_t fbase = m_scratchF.size();
-			m_scratchF.resize(fbase + 3 * n);
-			f32* w = &m_scratchF[fbase], * mn = w + n, * out = mn + n;
+			m_scratchF.resize(fbase + 4 * n);
+			f32* w = &m_scratchF[fbase], * mn = w + n, * mx = mn + n, * out = mx + n;
 			u32 k = 0;
 			for (u32 c = m_first[i]; c != kNone; c = m_next[c]) {
 				if (m_style[c].position == Position::Absolute) continue;
 				w[k] = std::max(1e-6f, m_style[c].splitWeight);
-				mn[k] = std::max(m_style[c].splitMin, horiz ? m_style[c].minW : m_style[c].minH);
+				const f32 contentMain = std::max(0.f, mainSize - gutters);
+				mn[k] = std::max(m_style[c].splitMin, horiz ? layoutMin(m_style[c], true, contentMain) : layoutMin(m_style[c], false, contentMain));
+				mx[k] = std::max(mn[k], horiz ? layoutMax(m_style[c], true, contentMain) : layoutMax(m_style[c], false, contentMain));
 				++k;
 			}
-			solveSplit(n, w, mn, std::max(0.f, mainSize - gutters), out);
-			f32 pos = horiz ? st.padding.l : st.padding.t, ext = 0;
+			solveSplit(n, w, mn, mx, std::max(0.f, mainSize - gutters), out);
+			f32 pos = horiz ? insetEdges.l : insetEdges.t, ext = 0;
 			k = 0;
 			for (u32 c = m_first[i]; c != kNone; c = m_next[c]) {
 				if (m_style[c].position == Position::Absolute) continue;
-				const f32 sz = m_scratchF[fbase + 2 * n + k];   // re-read: arrange() may grow m_scratchF
+				const f32 sz = m_scratchF[fbase + 3 * n + k];   // re-read: arrange() may grow m_scratchF
 				Rect& r = m_rect[c];
-				r.x = horiz ? pos : st.padding.l; r.y = horiz ? st.padding.t : pos;
+				r.x = horiz ? pos : insetEdges.l; r.y = horiz ? insetEdges.t : pos;
 				arrange(c, horiz ? sz : crossSize, horiz ? crossSize : sz);
 				pos += sz + st.gutter; ext += sz + st.gutter; ++k;
 			}
@@ -446,25 +464,28 @@ namespace xui {
 	// ---- absolute children ----------------------------------------------------------------------------------
 	void LayoutTree::arrangeAbsolute(u32 i, f32 w, f32 h) {
 		const LayoutStyle& st = m_style[i];
+		const Edges insetEdges = contentInsets(st);
 		for (u32 c = m_first[i]; c != kNone; c = m_next[c]) {
 			const LayoutStyle& cs = m_style[c];
 			if (cs.position != Position::Absolute) continue;
 			const f32 l = inset(cs.left, w), r = inset(cs.right, w), t = inset(cs.top, h), b = inset(cs.bottom, h);
 			const f32 mW = cs.margin.l + cs.margin.r, mH = cs.margin.t + cs.margin.b;
 			f32 W, H;
+			const f32 contentW = std::max(0.f, w - insetEdges.l - insetEdges.r);
+			const f32 contentH = std::max(0.f, h - insetEdges.t - insetEdges.b);
 			if (cs.width.k == LenKind::Px) W = cs.width.v;
-			else if (cs.width.k == LenKind::Percent) W = cs.width.v * 0.01f * w;
+			else if (cs.width.k == LenKind::Percent) W = cs.width.v * 0.01f * contentW;
 			else if (!std::isnan(l) && !std::isnan(r)) W = std::max(0.f, w - l - r - mW);
 			else W = measure(c, Constraint{ std::max(0.f, w - mW), kInf, false, false }).w;
-			W = clampv(W, cs.minW, cs.maxW);
+			W = clampv(W, layoutMin(cs, true, contentW), layoutMax(cs, true, contentW));
 			if (cs.height.k == LenKind::Px) H = cs.height.v;
-			else if (cs.height.k == LenKind::Percent) H = cs.height.v * 0.01f * h;
+			else if (cs.height.k == LenKind::Percent) H = cs.height.v * 0.01f * contentH;
 			else if (!std::isnan(t) && !std::isnan(b)) H = std::max(0.f, h - t - b - mH);
 			else H = measure(c, Constraint{ W, std::max(0.f, h - mH), true, false }).h;
-			H = clampv(H, cs.minH, cs.maxH);
+			H = clampv(H, layoutMin(cs, false, contentH), layoutMax(cs, false, contentH));
 			Rect& rc = m_rect[c];
-			rc.x = !std::isnan(l) ? l + cs.margin.l : !std::isnan(r) ? w - r - W - cs.margin.r : st.padding.l + cs.margin.l;
-			rc.y = !std::isnan(t) ? t + cs.margin.t : !std::isnan(b) ? h - b - H - cs.margin.b : st.padding.t + cs.margin.t;
+			rc.x = !std::isnan(l) ? l + cs.margin.l : !std::isnan(r) ? w - r - W - cs.margin.r : insetEdges.l + cs.margin.l;
+			rc.y = !std::isnan(t) ? t + cs.margin.t : !std::isnan(b) ? h - b - H - cs.margin.b : insetEdges.t + cs.margin.t;
 			arrange(c, W, H);
 		}
 	}

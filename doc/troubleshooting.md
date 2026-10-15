@@ -75,8 +75,10 @@ Start with the actual error string from `Xui::lastError()`, then confirm the run
 
 - Check that each property uses the value kinds/arities in [the style reference](styling-reference.md).
 - Arithmetic requires compatible units; for example `8px + 4px` is valid while `8px + 4%` is not.
-- `@theme`, transitions, and keyframes compile, but runtime theme switching/animation is not available yet.
+- `Xui::setTheme("name")` selects a named `@theme` palette after `.xss` loading. Palette-backed visual properties update at runtime; layout-affecting tokens are not fully re-applied yet. Transitions and keyframes compile but are not animated.
 
 ## Still stuck?
 
 Record the exact backend, OS, build configuration, `.xui`/`.xss` snippet, font path/family, window size/DPI, and whether the failure occurs with `SoftRenderer` or OpenGL. Reduce the document to a root `Window`, one `Text`, and one style rule, then add controls back until the failure returns.
+
+For apparent overlap, first distinguish authored layering from flow: explicit `Position::Absolute`, `Stack`, tab-page stacking, and explicit grid cells can overlap by design. `Row`/`Column` children are placed sequentially; if they overflow their parent, inspect width/height, margins, `%`, and min/max constraints. Content outside a `ScrollView` viewport is intentionally clipped. A visible FPS overlay runs continuous redraw and reports actual frame cadence; disable it with F3 for event-driven idle behavior.

@@ -27,8 +27,10 @@ public:
 	void setClipboardText(std::string_view) override;
 	std::string clipboardText() const override;
 	void requestRedraw(xui::WindowHandle) override;
+	void setLiveResizeHook(xui::WindowHandle, void (*fn)(void*), void*) override;
 private:
-	struct Window { GLFWwindow* native = nullptr; xui::WindowHandle handle; GlfwPlatform* owner = nullptr; };
+	struct Window { GLFWwindow* native = nullptr; xui::WindowHandle handle; GlfwPlatform* owner = nullptr;
+	                void (*liveResizeFn)(void*) = nullptr; void* liveResizeContext = nullptr; };
 	static Window* record(GLFWwindow* window);
 	static void push(GLFWwindow* window, const xui::Event& event);
 	static void onSize(GLFWwindow*, int, int);
@@ -47,4 +49,7 @@ private:
 	xui::CursorShape m_cursorShape = xui::CursorShape::Arrow;
 	bool m_cursorShapeSet = false;
 	GLFWwindow* m_activeWindow = nullptr;
+	// glfwPollEvents() invokes callbacks synchronously. Poll at most once while the caller
+	// drains this batch so continuous native resize events cannot starve the next redraw.
+	bool m_polledForCurrentDrain = false;
 };

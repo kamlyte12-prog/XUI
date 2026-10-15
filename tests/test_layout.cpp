@@ -101,6 +101,27 @@ TEST(layout_percent_sizes) {
 	NodeId c = t.create(LayoutKind::Leaf, s); t.append(root, c); t.layout(root, 200, 100);
 	CHECK_RECT(t, c, 0, 0, 100, 25);
 }
+
+TEST(layout_percent_min_max_constraints_resolve_in_parent_content_box) {
+	LayoutTree t;
+	LayoutStyle parentStyle = box(240, 120);
+	parentStyle.padding = Edges::all(10);
+	parentStyle.border = Edges::all(2);
+	NodeId parent = t.create(LayoutKind::Column, parentStyle);
+	LayoutStyle childStyle; childStyle.width = Length::pct(35); childStyle.height = Length::px(20);
+	childStyle.minWidth = Length::pct(50); childStyle.maxWidth = Length::pct(60);
+	NodeId child = t.create(LayoutKind::Leaf, childStyle);
+	t.append(parent, child); t.layout(parent, 240, 120);
+	CHECK(std::abs(t.rect(child).w - 108.f) < 0.01f); // 35% clamps to 50% of content width (216)
+	childStyle.width = Length::pct(80);
+	t.setStyle(child, childStyle); t.layout(parent, 240, 120);
+	CHECK(std::abs(t.rect(child).w - 129.6f) < 0.01f); // 80% clamps to 60%
+	childStyle.width = Length::pct(80);
+	childStyle.minWidth = Length::px(140);
+	childStyle.maxWidth = Length::px(150);
+	t.setStyle(child, childStyle); t.layout(parent, 240, 120);
+	CHECK(std::abs(t.rect(child).w - 150.f) < 0.01f);
+}
 TEST(layout_absolute_children_use_insets) {
 	LayoutTree t; NodeId root = t.create(LayoutKind::Stack, box(200, 100));
 	auto abs = [&](Length l, Length tp, Length r, Length b, Length w, Length h) {
@@ -169,6 +190,14 @@ TEST(layout_split_minimums_win_over_weights) {
 	CHECK_RECT(t, a, 0, 0, 70, 10); CHECK_RECT(t, b, 70, 0, 30, 10);
 	t.layout(sp, 50, 10);      // minimums no longer fit: scaled down, never negative
 	CHECK(t.rect(a).w >= 0 && t.rect(b).w >= 0 && near(t.rect(a).w + t.rect(b).w, 50));
+}
+TEST(layout_split_maximum_clamps_weighted_pane) {
+	LayoutTree t; LayoutStyle ss = box(300, 40); ss.gutter = 0; NodeId sp = t.create(LayoutKind::Split, ss);
+	LayoutStyle capped; capped.splitWeight = 1; capped.maxWidth = Length::px(100);
+	LayoutStyle flexible; flexible.splitWeight = 1;
+	NodeId a = t.create(LayoutKind::Leaf, capped), b = t.create(LayoutKind::Leaf, flexible);
+	t.append(sp, a); t.append(sp, b); t.layout(sp, 300, 40);
+	CHECK_RECT(t, a, 0, 0, 100, 40); CHECK_RECT(t, b, 100, 0, 200, 40);
 }
 TEST(layout_split_gutter_drag_moves_only_the_adjacent_pair_and_clamps) {
 	LayoutTree t; LayoutStyle ss = box(1000, 100); ss.gutter = 4; NodeId sp = t.create(LayoutKind::Split, ss); NodeId k[3];

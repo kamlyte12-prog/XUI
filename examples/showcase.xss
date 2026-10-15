@@ -1,53 +1,66 @@
-// Blender-inspired grey theme: flat surfaces, dark outlines, a single selection blue.
+// Blue reference theme: deep navy surfaces, one vivid blue accent, consistent 4/6/8 px radii.
 tokens {
-  color.canvas = #1d1d1d        // editor background
-  color.panel = #303030          // panels and tab bodies
-  color.raised = #545454         // widget resting surface
-  color.hover = #656565          // widget hover surface
-  color.fg = #d8d8d8
-  color.muted = #999999
-  color.accent = #4772b3         // Blender selection blue
-  color.accent-hover = #5684c7
-  color.outline = #212121        // dark edge lines
-  color.disabled = #747474
+  color.canvas = #0e1a2e
+  color.panel = #14243d
+  color.panel-raised = #1a2f4f
+  color.raised = #213858
+  color.hover = #2a4770
+  color.fg = #e9f1fc
+  color.muted = #9db4d0
+  color.accent = #4d9fff
+  color.accent-hover = #79b8ff
+  color.outline = #0a1322
+  color.disabled = #69809c
+  color.border = #2c4265
+  color.border-soft = #37527a
+  color.input-hover = #24405f
+  color.input-focus = #1e3a5c
+  color.pressed = #1b3452
+  color.readout = #cfe6ff
+  color.placeholder = #89a1bf
+  color.disabled-bg = color.raised
+  color.scroll-thumb = #3d5a82
+  color.scroll-thumb-hover = #54759f
 }
 
 Window { resting: { bg: color.canvas } }
-Text.title { resting: { fg: color.fg, font-size: 24px, font-weight: 700 } }
-Text.subtitle { resting: { fg: color.muted, font-size: 13px } }
-Text.section-title { resting: { fg: color.muted, font-size: 13px, font-weight: 600 } }
-Text.help { resting: { fg: color.muted, font-size: 13px, margin: 0px 0px 4px } }
-Text.value-readout { resting: { fg: #9ec2ee, font-size: 13px } }
-Text.panel-title { resting: { fg: color.fg, font-size: 15px, font-weight: 600, margin: 0px 0px 8px } }
-Text.body { resting: { fg: color.muted, font-size: 14px, pad: 0px 0px 10px } }
+Column.app { resting: { gap: 14px } }
+Column.page { resting: { bg: color.panel, pad: 20px, gap: 12px, border: 1px solid color.border, radius: 8px } }
+Text.title { resting: { fg: color.fg, font-size: 26px, font-weight: 700, margin: 0px 0px 2px } }
+Text.subtitle { resting: { fg: color.muted, font-size: 14px } }
+Text.section-title { resting: { fg: color.fg, font-size: 16px, font-weight: 650, margin: 4px 0px 2px } }
+Text.help { resting: { fg: color.muted, font-size: 13px, margin: 0px 0px 5px } }
+Text.value-readout { resting: { bg: color.panel-raised, fg: color.readout, font-size: 13px, pad: 8px, radius: 6px, border: 1px solid color.border } }
+Text.panel-title { resting: { fg: color.fg, font-size: 16px, font-weight: 650, margin: 0px 0px 8px } }
+Text.body { resting: { fg: color.muted, font-size: 14px, pad: 0px 0px 8px } }
 
-FpsCounter.fps { resting: { bg: color.panel, fg: color.fg, font-size: 12px, radius: 3px, border: 1px solid color.outline } }
-Tabs.tabs { resting: { bg: color.panel, radius: 4px, border: 1px solid color.outline } focus: { border: 1px solid color.accent } }
+FpsCounter.fps { resting: { bg: color.panel-raised, fg: color.fg, font-size: 12px, radius: 6px, border: 1px solid color.border, pad: 5px } }
+Tabs.tabs { resting: { bg: color.panel, radius: 8px, border: 1px solid color.border } focus: { border: 1px solid color.accent } }
 Tab {
-  resting: { bg: #232323, fg: color.muted, font-size: 13px }
-  hover: { bg: #3d3d3d, fg: color.fg }
-  selected: { bg: color.panel, fg: color.fg, border: 1px solid color.accent }
+  resting: { bg: color.canvas, fg: color.muted, font-size: 13px }
+  hover: { bg: color.panel-raised, fg: color.fg }
+  selected: { bg: color.panel, fg: color.accent, border: 1px solid color.accent }
   disabled: { opacity: 0.4 }
 }
-Column.page { resting: { bg: color.panel } }
+Row.field-row, Row.checks, Row.actions, Row.picker-row, Row.selection-row, Row.radio-row { resting: { gap: 12px } }
 
 TextBox.field, TextArea.field {
-  resting: { bg: color.raised, fg: color.fg, border: 1px solid color.outline, radius: 3px, pad: 8px, font-size: 14px }
-  hover: { bg: color.hover }
-  focus: { bg: color.hover, border: 1px solid color.accent }
-  readonly: { bg: #3a3a3a, fg: #b8b8b8 }
-  placeholder: { fg: #8d8d8d }
-  disabled: { opacity: 0.4 }
+  resting: { bg: color.panel-raised, fg: color.fg, border: 1px solid color.border-soft, radius: 6px, pad: 8px, font-size: 14px }
+  hover: { bg: color.input-hover }
+  focus: { bg: color.input-focus, border: 1px solid color.accent }
+  readonly: { bg: color.panel, fg: color.muted }
+  placeholder: { fg: color.placeholder }
+  disabled: { opacity: 0.46 }
 }
 TextBox.picker-channel, TextBox.picker-hex {
-  resting: { bg: color.raised, fg: color.fg, border: 1px solid color.outline, radius: 3px, font-size: 12px }
+  resting: { bg: color.raised, fg: color.fg, border: 1px solid color.outline, radius: 4px, font-size: 12px }
   hover: { bg: color.hover }
   focus: { border: 1px solid color.accent }
-  readonly: { bg: #3a3a3a, fg: #b8b8b8 }
+  readonly: { bg: color.panel, fg: color.muted }
   disabled: { opacity: 0.4 }
 }
 CheckBox.checkbox {
-  resting: { bg: color.raised, fg: color.fg, radius: 3px, border: 1px solid color.outline }
+  resting: { bg: color.raised, fg: color.fg, radius: 4px, border: 1px solid color.outline }
   hover: { bg: color.hover }
   focus: { border: 1px solid color.accent }
   checked: { fg: color.accent }
@@ -56,17 +69,17 @@ CheckBox.checkbox {
 CheckBox.disabled-check { resting: { fg: color.disabled } }
 
 Button.action, Button.secondary {
-  resting: { bg: color.raised, fg: color.fg, radius: 3px, font-size: 14px, border: 1px solid color.outline }
+  resting: { bg: color.raised, fg: color.fg, radius: 6px, pad: 8px, font-size: 14px, border: 1px solid color.border-soft }
   hover: { bg: color.hover }
-  pressed: { bg: #3f3f3f }
+  pressed: { bg: color.pressed }
   focus: { border: 1px solid color.accent }
-  disabled: { bg: #3a3a3a, fg: color.disabled, opacity: 0.5 }
+  disabled: { bg: color.disabled-bg, fg: color.disabled, opacity: 0.5 }
 }
-Button.disabled-action { resting: { bg: #3a3a3a, fg: color.disabled, opacity: 0.5 } }
+Button.disabled-action { resting: { bg: color.disabled-bg, fg: color.disabled, opacity: 0.5 } }
 Slider.slider { resting: { bg: color.outline, fg: color.accent } hover: { fg: color.accent-hover } focus: { border: 1px solid color.fg } disabled: { opacity: 0.4 } }
 ProgressBar.progress { resting: { bg: color.outline, fg: color.accent, radius: 4px } }
 Dropdown.dropdown, ColorPicker.color-picker, DatePicker.date, KeybindField.keybind {
-  resting: { bg: color.raised, fg: color.fg, radius: 3px, border: 1px solid color.outline }
+  resting: { bg: color.panel-raised, fg: color.fg, radius: 6px, pad: 8px, border: 1px solid color.border-soft }
   hover: { bg: color.hover }
   open: { border: 1px solid color.accent }
   focus: { border: 1px solid color.accent }
@@ -74,19 +87,19 @@ Dropdown.dropdown, ColorPicker.color-picker, DatePicker.date, KeybindField.keybi
 }
 DatePicker.date { resting: { pad: 6px, font-size: 14px } }
 KeybindField.keybind { resting: { pad: 6px, font-size: 14px } }
-Split.split { resting: { fg: #3d3d3d } }
-Panel.panel { resting: { bg: color.panel, border: 1px solid color.outline, radius: 4px } }
+Split.split { resting: { fg: color.border-soft } }
+Panel.panel { resting: { bg: color.panel-raised, border: 1px solid color.border, radius: 8px, pad: 12px } }
 CheckItem.check-item {
-  resting: { fg: color.fg, font-size: 13px, radius: 3px }
+  resting: { fg: color.fg, font-size: 13px, radius: 4px }
   hover: { bg: color.hover }
   focus: { border: 1px solid color.accent }
   checked: { fg: color.accent }
   disabled: { opacity: 0.4 }
 }
-Tooltip { resting: { bg: #1a1a1a, fg: color.fg, font-size: 13px, pad: 6px, radius: 3px, border: 1px solid #3d3d3d } }
+Tooltip { resting: { bg: color.panel-raised, fg: color.fg, font-size: 13px, pad: 8px, radius: 6px, border: 1px solid color.accent } }
 
 // Phase 1 widgets.
-Separator.rule { resting: { fg: #3d3d3d, margin: 8px 0px } }
+Separator.rule, Divider.rule { resting: { fg: color.border, margin: 8px 0px } }
 Switch.switch {
   resting: { fg: color.accent, font-size: 14px }
   hover: { fg: color.accent-hover }
@@ -94,10 +107,10 @@ Switch.switch {
   disabled: { opacity: 0.4 }
 }
 ToggleButton.toggle {
-  resting: { bg: color.raised, fg: color.fg, radius: 3px, font-size: 13px, border: 1px solid color.outline }
+  resting: { bg: color.raised, fg: color.fg, radius: 4px, font-size: 13px, border: 1px solid color.outline }
   hover: { bg: color.hover }
-  pressed: { bg: #3f3f3f }
-  checked: { bg: color.accent, fg: #ffffff }
+  pressed: { bg: color.pressed }
+  checked: { bg: color.accent, fg: color.canvas }
   focus: { border: 1px solid color.accent }
   disabled: { opacity: 0.4 }
 }
@@ -108,23 +121,23 @@ RadioGroup.radio {
   disabled: { opacity: 0.4 }
 }
 NumberField.number {
-  resting: { bg: color.raised, fg: color.fg, border: 1px solid color.outline, radius: 3px, pad: 8px, font-size: 14px }
+  resting: { bg: color.raised, fg: color.fg, border: 1px solid color.outline, radius: 4px, pad: 8px, font-size: 14px }
   hover: { bg: color.hover }
   focus: { border: 1px solid color.accent }
-  readonly: { bg: #3a3a3a, fg: #b8b8b8 }
+  readonly: { bg: color.panel, fg: color.muted }
   disabled: { opacity: 0.4 }
 }
 SearchField.search {
-  resting: { bg: color.raised, fg: color.fg, border: 1px solid color.outline, radius: 3px, pad: 8px, font-size: 14px }
+  resting: { bg: color.raised, fg: color.fg, border: 1px solid color.outline, radius: 4px, pad: 8px, font-size: 14px }
   hover: { bg: color.hover }
   focus: { border: 1px solid color.accent }
-  placeholder: { fg: #8d8d8d }
+  placeholder: { fg: color.placeholder }
   disabled: { opacity: 0.4 }
 }
 Label.demo-label { resting: { fg: color.fg, font-size: 14px } }
-Badge.badge { resting: { bg: color.accent, fg: #ffffff, radius: 3px, font-size: 12px, align: Center } }
+Badge.badge { resting: { bg: color.accent, fg: color.canvas, radius: 4px, font-size: 12px, align: Center } }
 Spinner.spinner { resting: { fg: color.accent } disabled: { opacity: 0.4 } }
-Image.demo-image { resting: { radius: 3px } }
+Image.demo-image { resting: { radius: 6px } }
 
 // Second-wave widgets.
 SegmentedControl.segmented {
@@ -134,15 +147,21 @@ SegmentedControl.segmented {
   disabled: { opacity: 0.4 }
 }
 Rating.rating { resting: { fg: color.accent } hover: { fg: color.accent-hover } focus: { border: 1px solid color.accent } disabled: { opacity: 0.4 } }
-Stepper.stepper { resting: { bg: color.raised, fg: color.fg, border: 1px solid color.outline, radius: 3px, font-size: 14px } hover: { bg: color.hover } focus: { border: 1px solid color.accent } disabled: { opacity: 0.4 } }
-Breadcrumb.crumbs { resting: { fg: color.fg, font-size: 13px } hover: { fg: #ffffff } focus: { border: 1px solid color.accent } disabled: { opacity: 0.4 } }
+Stepper.stepper { resting: { bg: color.raised, fg: color.fg, border: 1px solid color.outline, radius: 4px, font-size: 14px } hover: { bg: color.hover } focus: { border: 1px solid color.accent } disabled: { opacity: 0.4 } }
+Breadcrumb.crumbs { resting: { fg: color.fg, font-size: 13px } hover: { fg: color.accent-hover } focus: { border: 1px solid color.accent } disabled: { opacity: 0.4 } }
 
 ScrollView.scroll-demo {
-  resting: { bg: #242424, border: 1px solid color.outline, radius: 5px, pad: 8px, scroll-track: #171717, scroll-thumb: #777777, scrollbar-size: 12px, scrollbar-visibility: always, scroll-behavior: smooth, scroll-speed: 42 }
-  hover: { scroll-thumb: #9a9a9a }
+  resting: { bg: color.panel, border: 1px solid color.outline, radius: 6px, pad: 8px, scroll-track: color.canvas, scroll-thumb: color.scroll-thumb, scrollbar-size: 12px, scrollbar-visibility: always, scroll-behavior: smooth, scroll-speed: 42 }
+  hover: { scroll-thumb: color.scroll-thumb-hover }
   pressed: { scroll-thumb: color.accent }
   focus: { border: 1px solid color.accent }
 }
 ScrollView.scroll-hidden { resting: { scrollbar-visibility: never } }
-Text.scroll-item { resting: { fg: color.fg, bg: #393939, pad: 6px, radius: 3px, margin: 0px 0px 4px } }
-Button.scroll-action { resting: { bg: color.raised, fg: color.fg, radius: 3px, pad: 6px, margin: 0px 0px 4px } hover: { bg: color.hover } pressed: { bg: color.accent } }
+Text.scroll-item { resting: { fg: color.fg, bg: color.panel-raised, pad: 8px, radius: 4px, margin: 0px 0px 4px } }
+Button.scroll-action { resting: { bg: color.raised, fg: color.fg, radius: 4px, pad: 8px, margin: 0px 0px 4px } hover: { bg: color.hover } pressed: { bg: color.accent } }
+
+// Readout groups and repeated rows share the same rhythm throughout the showcase.
+Column.readouts { resting: { gap: 8px, align: Start } }
+Row.toolbar { resting: { gap: 12px, align: Center } }
+Row.selection-row, Row.radio-row { resting: { margin: 2px 0px 4px } }
+Toolbar.demo-toolbar, StatusBar.demo-status { resting: { gap: 8px, align: Center } }

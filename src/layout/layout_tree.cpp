@@ -231,7 +231,10 @@ namespace xui {
 		u32 a = flowKid(i, d.left), b = flowKid(i, d.right);
 		if (a == kNone || b == kNone) return;
 		const bool horiz = m_style[i].splitDir == SplitDir::Horizontal;
-		auto minOf = [&](u32 c) { return std::max(m_style[c].splitMin, horiz ? m_style[c].minW : m_style[c].minH); };
+		const Edges insetEdges = contentInsets(m_style[i]);
+		const f32 innerMain = std::max(0.f, (horiz ? m_rect[i].w - insetEdges.l - insetEdges.r
+			: m_rect[i].h - insetEdges.t - insetEdges.b) - m_style[i].gutter * f32(gutterCount(d.split)));
+		auto minOf = [&](u32 c) { return std::max(m_style[c].splitMin, horiz ? layoutMin(m_style[c], true, innerMain) : layoutMin(m_style[c], false, innerMain)); };
 		f32 minA = minOf(a), minB = minOf(b), total = d.startA + d.startB, A;
 		if (total <= minA + minB) A = (minA + minB) > 0 ? total * minA / (minA + minB) : total * 0.5f;
 		else A = std::min(std::max(d.startA + delta, minA), total - minB);

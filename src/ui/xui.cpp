@@ -71,6 +71,16 @@ namespace xui {
 		return true;
 	}
 
+	bool Xui::setTheme(std::string_view name) {
+		if (!m_hasXss || name.empty()) { setError("Load a .xss stylesheet and provide a theme name before selecting a theme."); return false; }
+		const auto index = m_assets.styles.themeIndex(m_strings.intern(name));
+		if (!index) { setError("The loaded .xss file has no theme named '" + std::string(name) + "'."); return false; }
+		m_themeName.assign(name);
+		if (m_attached && !m_runtime.setTheme(name)) { setError("Could not activate the requested .xss theme."); return false; }
+		m_error.clear();
+		return true;
+	}
+
 	bool Xui::attach(Renderer& renderer, Platform& platform) {
 		if (m_attached) { setError("Xui is already attached."); return false; }
 		if (!m_hasXui || !m_hasXss) { setError("Load both a .xui document and a .xss stylesheet before attach()."); return false; }
@@ -100,6 +110,7 @@ namespace xui {
 		}
 		m_rendererReady = true;
 		m_runtime.setRenderer(&renderer);
+		m_platform->setLiveResizeHook(m_window, renderFrameThunk, this);
 		m_widthPixels = u32(pixels.x); m_heightPixels = u32(pixels.y);
 		if (!m_text.initAtlas(m_renderer, m_options.atlasSize)) {
 			setError("Could not initialize the glyph atlas."); shutdown(); return false;
@@ -115,6 +126,9 @@ namespace xui {
 					shutdown(); return false;
 				}
 			}
+		}
+		if (!m_themeName.empty() && !m_runtime.setTheme(m_themeName)) {
+			setError("Could not activate the requested .xss theme."); shutdown(); return false;
 		}
 		m_runtime.setEventHandler(m_eventHandler, m_eventContext);
 		m_attached = true;
@@ -165,7 +179,9 @@ namespace xui {
 				}
 			}
 			if (!running) break;
-			if (options.redrawContinuously) redraw = true;
+			// Enabling the FPS overlay opts into continuous rendering so it measures actual
+			// throughput instead of counting its own 250 ms idle refresh timer as 4 FPS.
+			if (options.redrawContinuously || m_runtime.fpsCounterEnabled()) redraw = true;
 			redraw |= m_runtime.updateTimers();
 
 			const Vec2 logical = m_platform->windowSizeLogical(m_window);
@@ -178,15 +194,7 @@ namespace xui {
 				redraw = true;
 			}
 			if (redraw && pixels.x > 0 && pixels.y > 0) {
-				m_runtime.layout(logical.x, logical.y);
-				m_text.beginFrame();
-				m_painter.begin(u32(pixels.x), u32(pixels.y), dpi);
-				m_runtime.paint(m_painter, dpi);
-				const DrawList draw = m_painter.finish();
-				m_renderer->beginFrame({ u32(pixels.x), u32(pixels.y), dpi, Color{0.04f, 0.05f, 0.08f, 1}, m_stats.frames });
-				m_renderer->submit(draw);
-				m_renderer->endFrame(); m_renderer->present(); m_platform->swapBuffers(m_window);
-				++m_stats.frames;
+				renderFrame();
 				redraw = false;
 			}
 
@@ -209,6 +217,31 @@ namespace xui {
 		return 0;
 	}
 
+	/// One full layout/paint/present pass at the window's current size. Called from the normal
+	/// loop when a redraw is pending and from the platform's live-resize hook, which fires from
+	/// inside the modal sizing loop on Windows — the only place that can still draw mid-drag.
+	/// Reading sizes every call keeps renderer backbuffer, DPI, and layout in step per step.
+	void Xui::renderFrame() {
+		if (!m_attached || !m_renderer || !m_platform || !m_window.valid()) return;
+		const Vec2 logical = m_platform->windowSizeLogical(m_window);
+		const Vec2i pixels = m_platform->windowSizePixels(m_window);
+		const f32 dpi = m_platform->dpiScale(m_window);
+		if (pixels.x <= 0 || pixels.y <= 0) return;
+		if (u32(pixels.x) != m_widthPixels || u32(pixels.y) != m_heightPixels) {
+			m_renderer->resize(u32(pixels.x), u32(pixels.y), dpi);
+			m_widthPixels = u32(pixels.x); m_heightPixels = u32(pixels.y);
+		}
+		m_runtime.layout(logical.x, logical.y);
+		m_text.beginFrame();
+		m_painter.begin(u32(pixels.x), u32(pixels.y), dpi);
+		m_runtime.paint(m_painter, dpi);
+		const DrawList draw = m_painter.finish();
+		m_renderer->beginFrame({ u32(pixels.x), u32(pixels.y), dpi, Color{0.04f, 0.05f, 0.08f, 1}, m_stats.frames });
+		m_renderer->submit(draw);
+		m_renderer->endFrame(); m_renderer->present(); m_platform->swapBuffers(m_window);
+		++m_stats.frames;
+	}
+
 	void Xui::setEventHandler(UiEventFn handler, void* context) {
 		m_eventHandler = handler; m_eventContext = context;
 		if (m_attached) m_runtime.setEventHandler(handler, context);
@@ -220,6 +253,7 @@ namespace xui {
 
 	void Xui::shutdown() {
 		m_runtime.setRenderer(nullptr);
+		if (m_platform && m_window.valid()) m_platform->setLiveResizeHook(m_window, nullptr, nullptr);
 		if (m_rendererReady && m_text.atlas()->ready()) m_text.atlas()->shutdown();
 		if (m_rendererReady && m_renderer) m_renderer->shutdown();
 		m_rendererReady = false;

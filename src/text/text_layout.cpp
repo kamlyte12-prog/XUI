@@ -85,6 +85,10 @@ namespace xui {
 			if (cp == '\n') { words.push_back({ u32(tg.size()), 0, 0, 0 }); words.back().width = -1.f; prevG = 0; pendingSpace = false; continue; }
 			u32 g = f->glyphIndex(cp);
 			f32 adv = f->advance(g) * scale;
+			// A literal tab is non-rendering whitespace with a predictable four-space indent.
+			// Measure it from the actual space glyph (some fonts give control glyphs a nonzero advance).
+			// TextArea key input expands tabs to the configured number of spaces before shaping.
+			if (cp == '\t') adv = f->advance(f->glyphIndex(' ')) * scale * 4.f;
 			if (isSpaceChar(cp)) {
 				pendingSpace = true;                 // widths resolve when the next word starts
 				if (!words.empty()) words.back().spaceAfter += adv;
@@ -128,14 +132,17 @@ namespace xui {
 		// line stays open until the loop ends (no phantom empty line for text not ending in '\n').
 		out.glyphs.reserve(tg.size());
 		out.lineStarts.push_back(0);
+		out.lineWidths.push_back(0.f);
 		f32 pen = 0, widest = 0, lineY = 0;
 		bool lineHasContent = false;
 		auto breakLine = [&] {
 			widest = std::max(widest, pen);
+			out.lineWidths.back() = pen;
 			pen = 0;
 			lineY += out.lineHeight;
 			lineHasContent = false;
 			out.lineStarts.push_back(u32(out.glyphs.size()));
+			out.lineWidths.push_back(0.f);
 			};
 		for (u32 wi = 0; wi < words.size(); ++wi) {
 			const Word& w = words[wi];
@@ -169,6 +176,7 @@ namespace xui {
 			lineHasContent = true;
 		}
 		widest = std::max(widest, pen);
+		out.lineWidths.back() = pen;
 		out.width = widest;
 		out.height = out.lineHeight * f32(out.lineStarts.size());
 

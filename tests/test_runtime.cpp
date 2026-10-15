@@ -39,6 +39,66 @@ namespace {
 		return {};
 	}
 
+	TEST(auto_sized_empty_widgets_keep_intrinsic_space_for_content) {
+		constexpr std::string_view xuiSource = R"(
+Window(size: 520x640) {
+  Column(gap: 4) {
+    TextBox[placeholder: "Name"]
+    TextArea[placeholder: "Notes"]
+    Slider[value: 0.5]
+    ProgressBar[value: 0.5]
+    ColorPicker[value: #336699]
+    Dropdown[options: "One|Two", value: "One"]
+    Row { TextBox[id: "growing-field", placeholder: "Short"] }
+    CheckBox(label: "Enable feature")
+    Switch[label: "Synchronize changes"]
+    Button(label: "")
+  }
+}
+)";
+		StringInterner strings;
+		auto document = parseXui(xuiSource, "intrinsic-controls.xui", strings);
+		CHECK(document.has_value()); if (!document) return;
+		auto styles = compileXss("", "intrinsic-controls.xss", strings);
+		CHECK(styles.has_value()); if (!styles) return;
+		SoftRenderer renderer;
+		CHECK(renderer.init({ 520, 640, 1.f, nullptr, false }));
+		TextSystem text; CHECK(text.initAtlas(&renderer)); UiRuntime ui; std::string error;
+		const std::string fontBytes = readTestFont();
+		const FontHandle font = fontBytes.empty() ? FontHandle{} : text.loadFont(fontBytes, &error);
+		CHECK(ui.build(*document, *styles, strings, text, font, error));
+		if (!error.empty()) return;
+		ui.layout(520.f, 640.f);
+		const Rect name = ui.bounds({ 2, 1 });
+		const Rect notes = ui.bounds({ 3, 1 });
+		const Rect slider = ui.bounds({ 4, 1 });
+		const Rect progress = ui.bounds({ 5, 1 });
+		const Rect picker = ui.bounds({ 6, 1 });
+		const Rect dropdown = ui.bounds({ 7, 1 });
+		const Rect column = ui.bounds({ 1, 1 });
+		const Rect growingBefore = ui.bounds({ 9, 1 });
+		const Rect checkbox = ui.bounds({ 10, 1 });
+		const Rect switchControl = ui.bounds({ 11, 1 });
+		const Rect emptyButton = ui.bounds({ 12, 1 });
+		CHECK(name.w >= 160.f); CHECK(name.h >= 28.f);
+		CHECK(notes.w >= 240.f); CHECK(notes.h >= 96.f);
+		CHECK(slider.w >= 160.f); CHECK(slider.h >= 24.f);
+		CHECK(progress.w >= 160.f); CHECK(progress.h >= 16.f);
+		CHECK(picker.w >= 156.f); CHECK(picker.h >= 34.f);
+		CHECK(dropdown.w >= 156.f); CHECK(dropdown.h >= 34.f);
+		CHECK(checkbox.w >= 40.f); CHECK(checkbox.h >= 20.f);
+		CHECK(switchControl.w >= 46.f); CHECK(switchControl.h >= 24.f);
+		CHECK(emptyButton.w >= 96.f); CHECK(emptyButton.h >= 36.f);
+		CHECK(dropdown.bottom() <= column.bottom() + 0.01f);
+		CHECK(notes.y >= name.bottom());
+		CHECK(slider.y >= notes.bottom());
+		if (font.valid()) {
+			CHECK(ui.setValue("growing-field", std::string("A much longer field value that must grow intrinsically")));
+			ui.layout(520.f, 640.f);
+			CHECK(ui.bounds({ 9, 1 }).w > growingBefore.w);
+		}
+	}
+
 	TEST(ui_runtime_checklist_and_splitter_are_file_driven_and_interactive) {
 		constexpr std::string_view xuiSource = R"(
 Window(title: "Controls", size: 600x360) {
@@ -322,11 +382,14 @@ Button.primary {
 TEST(ui_runtime_resolves_stylesheet_percent_lengths_once) {
 	constexpr std::string_view xuiSource = R"(
 Window(title: "Percent", size: 400x200) {
-  Button(label: "Full width")[class: "full"]
+  Column[class: "sized"] {
+    Button(label: "Clamped")[class: "full", width: 80%, minWidth: 50%, height: 40px]
+  }
 }
 )";
 	constexpr std::string_view xssSource = R"(
-Button.full { resting: { size: 100% 40px } }
+Column.sized { resting: { size: 240px 120px, pad: 10px, border: 2px solid #334455 } }
+Button.full { resting: { max-width: 60% } }
 )";
 	StringInterner strings; UiAssetBundle assets; std::string error;
 	CHECK(loadUiAssets(xuiSource, xssSource, strings, assets, error));
@@ -335,8 +398,8 @@ Button.full { resting: { size: 100% 40px } }
 	CHECK(ui.build(assets.document, assets.styles, strings, text, {}, error));
 	if (!error.empty()) return;
 	ui.layout(400, 200);
-	const Rect button = ui.bounds({ 1, 1 });
-	CHECK_NEAR(button.w, 400.f, 0.01f);
+	const Rect button = ui.bounds({ 2, 1 });
+	CHECK_NEAR(button.w, 129.6f, 0.01f); // XUI 80% width, min 50%, XSS max 60% of content width (216)
 	CHECK_NEAR(button.h, 40.f, 0.01f);
 }
 
@@ -450,24 +513,24 @@ ColorPicker.control { resting: { size: 220px 36px, bg: #223344, fg: #ffffff } ho
 	const Rect picker = ui.bounds({ 3, 1 });
 	CHECK(ui.pointerDown({ picker.x + 8, picker.y + 8 }));
 	ui.pointerUp({ picker.x + 8, picker.y + 8 });
-	CHECK(ui.pointerDown({ picker.x + 10, picker.y + picker.h + 10 }));
+	const f32 popupY = picker.y + picker.h + 352.f <= 400.f ? picker.y + picker.h : std::max(0.f, picker.y - 352.f);
+	CHECK(ui.pointerDown({ picker.x + 150.f, popupY + 90.f }));
 	CHECK(ui.controlColor("accent") != before);
 	CHECK(events.back() == "onAccent");
 	const Color clickedColor = ui.controlColor("accent");
-	CHECK(ui.pointerMove({ picker.x + 150, picker.y + picker.h + 70 }));
+	CHECK(ui.pointerMove({ picker.x + 220.f, popupY + 110.f }));
 	CHECK(ui.controlColor("accent") != clickedColor);
-	ui.pointerUp({ picker.x + 150, picker.y + picker.h + 70 });
-	const f32 popupY = picker.y + picker.h;
-	CHECK(ui.pointerDown({ picker.x + 20.f,popupY + 240.f }));
+	ui.pointerUp({ picker.x + 220.f, popupY + 110.f });
+	CHECK(ui.pointerDown({ picker.x + 90.f,popupY + 315.f }));
 	CHECK(ui.keyDown(Key::A, static_cast<u8>(Mod::Ctrl), nullptr));
 	CHECK(ui.textInput("#ff00ff80"));
 	CHECK(ui.controlColor("accent").r > 0.99f && ui.controlColor("accent").b > 0.99f);
 	CHECK(ui.controlColor("accent").a > 0.49f && ui.controlColor("accent").a < 0.51f);
-	CHECK(ui.pointerDown({ picker.x + 10.f,popupY + 200.f }));
+	CHECK(ui.pointerDown({ picker.x + 30.f,popupY + 280.f }));
 	CHECK(ui.keyDown(Key::A, static_cast<u8>(Mod::Ctrl), nullptr));
 	CHECK(ui.textInput("0"));
 	CHECK(ui.controlColor("accent").r < 0.01f);
-	CHECK(ui.pointerDown({ picker.x + 10.f,popupY + 170.f }));
+	CHECK(ui.pointerDown({ picker.x + 200.f,popupY + 225.f }));
 	CHECK(ui.controlText("accent").starts_with("rgba("));
 	CHECK(std::get<Color>(*ui.value("accent")) == ui.controlColor("accent"));
 	ui.pointerUp({ picker.x + 10.f,popupY + 170.f });
@@ -500,7 +563,7 @@ TEST(ui_runtime_text_fields_check_box_tabs_and_delayed_tooltips) {
 Window(title: "Inputs", size: 480x360) {
   Column {
     TextBox[id: "name", value: "A", placeholder: "Name", maxLength: 6, tooltip: "Type a short name", tooltipShowDelay: 100, tooltipHideDelay: 200, tooltipTrigger: "hover", change: onChange]
-    TextArea[id: "notes", value: "", placeholder: "Notes", maxLength: 20, tooltip: "Use multiple lines", tooltipDisabled: true, change: onChange]
+  TextArea[id: "notes", value: "", placeholder: "Notes", maxLength: 20, tabSize: 2, tooltip: "Use multiple lines", tooltipDisabled: true, change: onChange]
     CheckBox(label: "Enabled")[id: "enabled", checked: true, change: onChange]
     Tabs[id: "pages", selected: 0, change: onChange] {
       Tab(title: "First") { Button(label: "First page action")[press: onFirst, width: 180px, height: 34px] }
@@ -599,6 +662,14 @@ Tooltip { resting: { bg: #202a40, fg: #ffffff, pad: 6px, radius: 4px } }
 	CHECK_EQ(std::get<std::string>(*ui.value("notes")), "firstsecond");
 	CHECK(ui.keyDown(Key::Enter));
 	CHECK_EQ(std::get<std::string>(*ui.value("notes")), "first\nsecond");
+	CHECK(ui.setValue("notes", std::string("a")));
+	CHECK(ui.keyDown(Key::Home));
+	CHECK(ui.keyDown(Key::Tab));
+	CHECK_EQ(std::get<std::string>(*ui.value("notes")), "  a");
+	CHECK(ui.keyDown(Key::Backspace));
+	CHECK_EQ(std::get<std::string>(*ui.value("notes")), " a");
+	CHECK(!ui.textInput('\b'));
+	CHECK_EQ(std::get<std::string>(*ui.value("notes")), " a");
 
 	const Rect tabs = ui.bounds({ 5, 1 });
 	CHECK(ui.pointerDown({ tabs.x + tabs.w * 0.75f, tabs.y + 12.f }));
@@ -765,7 +836,8 @@ TEST(showcase_example_assets_parse_validate_and_build) {
 	const Rect color = rectFor("accent-color");
 	CHECK(ui.pointerDown({ color.x + 20.f, color.y + color.h * 0.5f }));
 	const Color beforeColor = std::get<Color>(*ui.value("accent-color"));
-	CHECK(ui.pointerDown({ color.x + 100.f, color.y + color.h + 55.f }));
+	const f32 colorPopupY = color.y + color.h + 352.f <= 760.f ? color.y + color.h : std::max(0.f, color.y - 352.f);
+	CHECK(ui.pointerDown({ color.x + 150.f, colorPopupY + 90.f }));
 	CHECK(std::get<Color>(*ui.value("accent-color")) != beforeColor);
 
 	const Vec2 layoutHeader{ tabs.x + tabs.w * 0.5f, tabs.y + 12.f };   // center of the third of five equal tabs
@@ -839,4 +911,25 @@ ScrollView { resting: { scroll-behavior: instant, scrollbar-visibility: always, 
 	CHECK(ui.scrollOffset("outer").y > 0.f);
 	CHECK(ui.pointerUp({outer.right() - 5.f, outer.y + 35.f}));
 	CHECK(ui.scrollTo("outer", {0.f, 10000.f}, false)); CHECK(ui.scrollOffset("outer").y < 10000.f);
+}
+
+TEST(ui_runtime_can_activate_stylesheet_themes) {
+	StringInterner strings;
+	auto document = parseXui("Window { Button(label: \"Theme\") }", "theme.xui", strings);
+	auto styles = compileXss(R"(
+	tokens { color.surface = #ffffff }
+	@theme dark { tokens { color.surface = #101010 } }
+	Window { resting: { bg: color.surface } }
+	)", "theme.xss", strings);
+	CHECK(document.has_value()); CHECK(styles.has_value());
+	if (!document || !styles) return;
+	TextSystem text; UiRuntime ui; std::string error;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error));
+	CHECK_EQ(ui.theme(), 0u);
+	CHECK(ui.setTheme("dark")); CHECK_EQ(ui.theme(), 1u);
+	CHECK(!ui.setTheme("missing"));
+	Painter painter; painter.begin(100, 80, 1.f); ui.layout(100, 80); ui.paint(painter);
+	const DrawList draw = painter.finish();
+	CHECK(draw.nVerts >= 4u);
+	if (draw.nVerts >= 4u) CHECK_EQ(draw.verts[0].c0, Color::fromRGBA8(0x101010FFu).toRGBA8());
 }

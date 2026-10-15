@@ -32,6 +32,7 @@ struct ShapedGlyph {
 struct TextLayout {
     std::vector<ShapedGlyph> glyphs;
     std::vector<u32> lineStarts;
+    std::vector<f32> lineWidths;       ///< pen advance per line, including trailing whitespace
     f32 width = 0, height = 0;      ///< tight bounds of the laid-out text (px)
     f32 lineHeight = 0;             ///< line height used
     u32 sizePx = 0;

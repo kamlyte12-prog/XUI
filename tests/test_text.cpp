@@ -198,6 +198,12 @@ TEST(text_wrap_produces_expected_lines) {
 	// explicit newlines are respected
 	const TextLayout& nl = ts.layout(fh, "a\nb", 14);
 	CHECK(nl.lineStarts.size() == 2);
+	CHECK_EQ(nl.lineWidths.size(), 2u);
+	CHECK(nl.lineWidths[0] > 0.f && nl.lineWidths[1] > 0.f);
+	const TextLayout& trailingNewline = ts.layout(fh, "a\n", 14);
+	CHECK_EQ(trailingNewline.lineWidths.size(), 2u);
+	CHECK_NEAR(trailingNewline.lineWidths[1], 0.f, 0.01f);
+	CHECK_NEAR(ts.layout(fh, "a\tb", 14).width, ts.layout(fh, "a    b", 14).width, 0.1f);
 	nr.shutdown();
 }
 

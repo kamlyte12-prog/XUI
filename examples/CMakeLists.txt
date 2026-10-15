@@ -20,21 +20,15 @@ if(XUI_BUILD_GLFW_EXAMPLE)
   endif()
   add_executable(xui_glfw_demo glfw_demo.cpp glfw_platform.cpp gl_drawlist_renderer.cpp)
   target_link_libraries(xui_glfw_demo PRIVATE xui_widgets ${XUI_GLFW_TARGET} OpenGL::GL xui_warnings)
+  # The runtime demo loads only the unified showcase pair. The smaller
+  # cross_platform/controls fixtures remain source-tree references for tests/docs.
   add_custom_command(TARGET xui_glfw_demo POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/cross_platform.xui" "$<TARGET_FILE_DIR:xui_glfw_demo>/cross_platform.xui"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/cross_platform.xss" "$<TARGET_FILE_DIR:xui_glfw_demo>/cross_platform.xss"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/controls.xui" "$<TARGET_FILE_DIR:xui_glfw_demo>/controls.xui"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/controls.xss" "$<TARGET_FILE_DIR:xui_glfw_demo>/controls.xss"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/showcase.xui" "$<TARGET_FILE_DIR:xui_glfw_demo>/showcase.xui"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/showcase.xss" "$<TARGET_FILE_DIR:xui_glfw_demo>/showcase.xss")
   if(WIN32)
     add_executable(xui_hello glfw_demo.cpp glfw_platform.cpp gl_drawlist_renderer.cpp)
     target_link_libraries(xui_hello PRIVATE xui_widgets ${XUI_GLFW_TARGET} OpenGL::GL xui_warnings)
     add_custom_command(TARGET xui_hello POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/cross_platform.xui" "$<TARGET_FILE_DIR:xui_hello>/cross_platform.xui"
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/cross_platform.xss" "$<TARGET_FILE_DIR:xui_hello>/cross_platform.xss"
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/controls.xui" "$<TARGET_FILE_DIR:xui_hello>/controls.xui"
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/controls.xss" "$<TARGET_FILE_DIR:xui_hello>/controls.xss"
       COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/showcase.xui" "$<TARGET_FILE_DIR:xui_hello>/showcase.xui"
       COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/showcase.xss" "$<TARGET_FILE_DIR:xui_hello>/showcase.xss")
   endif()

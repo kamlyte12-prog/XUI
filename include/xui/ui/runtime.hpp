@@ -50,6 +50,10 @@ public:
     bool setFont(FontHandle font, std::string& error);
     /// Register a loaded font face for the `.xss` font-family and font-weight properties.
     bool registerFont(std::string_view family, u16 weight, FontHandle font, std::string& error);
+    /// Activate a named .xss palette theme. Existing controls keep their matched selectors and
+    /// resolve palette slots against this theme on the next draw.
+    bool setTheme(std::string_view name);
+    u32 theme() const { return m_theme; }
 
     /// Lay out the retained tree in logical pixels.
     void layout(f32 width, f32 height);
@@ -146,18 +150,22 @@ private:
         bool hasXuiPadding = false;
         Edges xuiPadding;
         f32 splitRatio = 0.5f, value = 0.5f, minValue = 0.f, maxValue = 1.f;
-        u32 maxLength = 0, selectedTab = 0, tooltipShowDelayMs = 500, tooltipHideDelayMs = 120;
+        u32 maxLength = 0, selectedTab = 0, tooltipShowDelayMs = 500, tooltipHideDelayMs = 120, tabSize = 4;
         std::size_t caret = 0, selectionAnchor = 0;
         Color pickerColor{0.2f, 0.5f, 0.9f, 1.f};
         std::string pickerFormat = "hex";
         std::vector<std::string> pickerFormats{"hex", "rgb", "hsl"};
         u32 pickerPrecision = 0;
-        f32 pickerWidth = 240.f, pickerHeight = 264.f;
+        f32 pickerWidth = 300.f, pickerHeight = 352.f;
         u32 pickerOwner = 0xFFFFFFFFu;
         u8 pickerSlot = 0;
         std::vector<std::string> options;
         u32 selectedOption = 0;
         i32 hoveredOption = -1;
+    };
+    struct PickerGeometry {
+        Rect popup, saturationValue, hue, alpha, format, channelLabels, hexLabel, hexValue;
+        Rect channels[4];
     };
 
     static Size measureLeaf(void* context, NodeId node, Constraint constraint);
@@ -167,6 +175,7 @@ private:
     void updateSlider(Node& node, Vec2 point);
     bool updateColorPicker(Node& node, Vec2 point);
     Rect pickerEditorRect(const Node& node) const;
+    PickerGeometry pickerGeometry(const Node& node) const;
     void syncPickerEditors(u32 ownerIndex, u32 preserveIndex = 0xFFFFFFFFu);
     bool updatePickerFromEditor(Node& editor);
     bool isNodeVisible(u32 index) const;
@@ -225,6 +234,7 @@ private:
     f32 m_dragScrollStart = 0, m_dragPointerStart = 0;
     f32 m_dpiScale = 1.f;
     bool m_fpsEnabled = false;
+    u32 m_theme = 0;
     f64 m_fpsElapsed = 0;
     u32 m_fpsFrames = 0;
     f32 m_fpsValue = 0;

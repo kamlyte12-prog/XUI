@@ -29,7 +29,7 @@ Run the examples with `--profile` to measure their actual shared assets and loop
 
 - Use a GPU renderer for interactive full-window redraws. The CPU `SoftRenderer` is deterministic but full-frame software rasterization is much slower.
 - Let the facade's event loop sleep when idle. Continuous redraw is intended for animation/profile use, not normal static UI.
-- Enable the FPS counter only while needed; in idle event-driven mode its display refreshes every 250 ms (up to four overlay redraws per second), and platform input/resize events still wake the loop and redraw promptly. Continuous profile mode does not wait on the FPS timer, so reported loop throughput is not capped by the widget.
+- Enabling the FPS counter opts into continuous redraw so the displayed FPS measures actual rendered frame cadence instead of the event-driven idle refresh rate. This intentionally raises CPU/GPU use while visible; turn it off with F3 for normal event-driven idle behavior. Continuous profile mode and the overlay use the same render loop.
 - Keep glyph atlases reusable and load fonts before `attach()` so atlas setup and glyph upload happen through the normal renderer lifecycle.
 - Avoid very large shadows or thousands of separately styled objects. Painter batches compatible draw commands, but each visible object still contributes geometry and style/layout work.
 - Do not force `vsync = false` in shipped applications unless uncapped throughput is intentional. Vsync can cap frame rate at display refresh and reduce tearing.
@@ -45,3 +45,11 @@ Measure separately before changing architecture:
 5. Profile layout separately; same-size layout should be cached and a splitter move should only invalidate affected geometry.
 
 For reproducible results, note whether the process ran alongside other GPU-heavy apps. Concurrent profiles can distort elapsed time and throughput.
+
+## Live resize and the GLFW event drain
+
+The GLFW platform drains callbacks that were queued by its last `glfwPollEvents()` call before polling again. Polling repeatedly inside one drain loop can keep the UI run loop servicing resize callbacks without reaching its frame submission point when the OS produces a continuous stream. `GlfwPlatform::pumpEvents()` therefore polls once per drain cycle; after the current callback queue empties it returns control to the frame loop, which lays out and paints before the next poll. This keeps redraw scheduling in the framework loop rather than deferring layout until resize ends.
+
+`Xui::run()` reads the latest logical client size and framebuffer pixel size every iteration. On a resize/DPI event it resizes the renderer in physical pixels, then runs retained layout with logical client dimensions before painting. Flex/stack/grid children follow the changed parent rectangle; `ScrollView` clips descendants through the backend-neutral painter clip stack. The audit verified this source path and a visible GLFW frame; a successful manual drag-resize could not be completed in the desktop helper session, so interactive resize remains unverified here.
+
+The Release `--profile` run is a hidden/uncapped loop measurement, not a visible interaction benchmark. The latest 2026-10-15 showcase sizing/theme run measured 572.588 FPS for `xui_hello` (4,137 frames / 7.22509 s) and 583.659 FPS for `xui_glfw_demo` (4,216 frames / 7.2234 s). These exceed 60 FPS in that hidden loop but do not prove visible presentation, resize pacing, or interaction latency. Both example targets use the GLFW/OpenGL backend in this checkout. A visible resize/input pass and a distinct Win32 backend run still require an interactive environment.

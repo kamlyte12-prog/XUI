@@ -16,7 +16,8 @@ namespace xui {
 	const std::vector<std::string_view>& XuiSchema::genericProps() {
 		static const std::vector<std::string_view> g = { "id", "class", "key", "slot", "grow", "shrink", "visible", "disabled", "tooltip",
 			"tooltipShowDelay", "tooltipHideDelay", "tooltipTrigger", "tooltipHideOnClick", "tooltipDisabled",
-			"align", "justify", "pad", "margin", "size", "minSize", "maxSize", "width", "height", "opacity" };
+			"align", "justify", "pad", "margin", "size", "minSize", "maxSize", "width", "height",
+			"minWidth", "maxWidth", "minHeight", "maxHeight", "opacity" };
 		return g;
 	}
 
@@ -42,7 +43,7 @@ namespace xui {
 		W("RadioGroup", {}, { "value", "options" });
 		W("Switch", {}, { "checked", "label" });
 		W("TextBox", {}, { "placeholder", "value", "maxLength", "password", "readOnly" });
-		W("TextArea", {}, { "placeholder", "value", "maxLength", "readOnly", "rows" });
+		W("TextArea", {}, { "placeholder", "value", "maxLength", "readOnly", "rows", "tabSize" });
 		W("NumberField", {}, { "value", "min", "max", "step", "precision", "unit", "label", "readOnly" });
 		W("Slider", {}, { "value", "min", "max", "step" });  W("RangeSlider", {}, { "low", "high", "min", "max", "step" });
 		W("Dropdown", {}, { "value", "options", "placeholder" });  W("ComboBox", {}, { "value", "options", "placeholder" });

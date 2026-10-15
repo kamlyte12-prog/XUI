@@ -67,6 +67,10 @@ namespace {
 				app.setWindowTitle(value->empty() ? "Xui showcase" : "Search: " + *value);
 			}
 		}
+		else if (name == "onPassphraseChange") {
+			// Password field: the value API reads the stored text; the demo only shows its length.
+			if (const auto value = valueAs<std::string>(app, "passphrase")) app.setWindowTitle("Passphrase length: " + std::to_string(value->size()));
+		}
 		else if (name == "onNumberChange") {
 			// NumberField: committed f64 by id, clamped to min/max and stepped by Up/Down or the steppers.
 			if (const auto value = valueAs<xui::f64>(app, "delay"))
@@ -159,7 +163,7 @@ int main(int argc, char** argv) {
 	options.appName = "xui-glfw-demo";
 	options.windowTitle = "Xui GLFW/OpenGL widget showcase";
 	options.width = 1080; options.height = 760;
-	options.minWidth = 760; options.minHeight = 560;
+	options.minWidth = 900; options.minHeight = 640;   // keeps the three-field input row unclipped
 	options.visible = !profile;
 	options.glContext = true;
 	options.vsync = false;

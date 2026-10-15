@@ -2,6 +2,137 @@
 
 This file records project changes, design decisions, trade-offs, current status, and next steps. It is updated as implementation work lands.
 
+## Live resize: modal-loop root cause and frame hook — 2026-10-15
+
+### Root cause (why the earlier fixes never took effect)
+
+- Interactive window resize on Windows runs an OS **modal sizing loop** inside `glfwPollEvents()`/`glfwWaitEvents()`. GLFW delivers size callbacks *during* that loop, but the application's frame loop does not regain control until the drag ends. Every earlier fix lived in the facade (`Xui::run`) — per-event relayout, `requestRedraw` on Resize, coalescing in the event loop — and was therefore unreachable mid-drag: the Resize events queued correctly, but the loop that would consume them and redraw was not running. The same applies to the earlier coalescing guard (`m_polledForCurrentDrain`): it prevents event starvation, not the modal trap.
+- Secondary consequence: time-driven widgets (FPS counter, spinner, indeterminate progress, caret blink) also froze mid-drag, because their updates advance inside `paint()`/`updateTimers()` on the same stalled loop.
+
+### Fix
+
+- `Platform` gained an optional `setLiveResizeHook(WindowHandle, fn, context)` (default no-op; `NullPlatform` inherits it, so headless behavior is unchanged). Backends whose resize is modal invoke the hook from their size callback to render each live step; non-modal backends never need it.
+- `GlfwPlatform` implements it per-window (hook stored on the `Window` record) and calls it from `onSize` after queueing the `Resize` event.
+- The facade extracted its render path into `Xui::renderFrame()` — fresh size/DPI query, renderer backbuffer resize on change, layout, paint, submit, present — and registers `renderFrameThunk` in `attach()` (cleared in `shutdown()`). The normal loop now calls `renderFrame()` when a redraw is pending; the hook calls it mid-drag.
+- **Animated widgets stay live during resize** because the hook runs the *complete* paint path: the FPS counter, spinner phase, indeterminate sweep, and caret blink all advance inside `paint()` on every hook invocation.
+
+### Trade-offs and notes
+
+- Rendering from inside a GLFW window-size callback is the standard technique for live resize on Windows (same thread, context already current). Each hook call presents one frame; there is no vsync re-entrancy because `glfwPollEvents` is not re-entered.
+- Frames rendered mid-drag increment `m_stats.frames`, so profile FPS now includes resize frames (arguably more honest than excluding them).
+- Hook fires on any size change (restore, maximize, programmatic `setSize`) — one extra presented frame in those cases; harmless.
+- Remaining gap: the hook renders but does not drain queued mouse-move events mid-drag, so hover state updates only after release; acceptable for live resize and unchanged from prior behavior.
+
+### Verification and current status
+
+- Not executed this session. Verify: `xui_glfw_demo` — drag the border continuously: layout re-flows every step, no freeze, FPS counter/spinner keep updating during the drag, release ends cleanly; `xui_hello` same. `xui_tests` must stay 158/158 (NullPlatform path untouched). Regression checklist: slider realtime, dropdown hover, color picker, tooltips, caret blink unaffected (event paths unchanged after drag end).
+
+## Cursor mapping fix + blue theme rewrite — 2026-10-15
+
+### Cursor audit and fix (`UiRuntime::cursorAt`)
+
+- Before: scrollbar tracks already returned `ResizeEW`/`ResizeNS` and editable fields `IBeam`, but every other interactive widget fell through to `Arrow` — buttons, checkboxes, switches, toggles, radios, dropdown/pickers, segmented, rating, breadcrumb, steppers, keybind and date fields, and tab headers showed the plain arrow; sliders had no resize cursor; split gutters had none; disabled widgets still advertised `IBeam` on text fields.
+- After, in precedence order: disabled → `Arrow` (never advertise interaction); split-gutter rects → `ResizeEW`/`ResizeNS` matching the drag axis handled in `pointerDown()`; `Slider` → `ResizeEW`; editable+non-readonly → `IBeam`, with the SearchField clear glyph now `Hand` (was `Arrow`); all clickable controls (button/check/switch/toggle/radio/dropdown/color/date/segmented/rating/breadcrumb/stepper/keybind/tabs) → `Hand`; everything else `Arrow`. Verified the GLFW backend already maps `Hand`/`ResizeEW`/`ResizeNS` to standard cursors; no backend change needed (`NullPlatform` is a no-op).
+- Read-only fields now show `Arrow` instead of `IBeam` (they are not editable); scrollbars unchanged.
+
+### Blue theme
+
+- `showcase.xss` fully rewritten around a deep-blue palette: navy canvas `#0e1a2e`, panels `#14243d`/`#1a2f4f`, vivid accent `#4d9fff` (hover `#79b8ff`), consistent radii (4/6/8 px), tooltips and selected tabs accented, scrollbar thumbs in the blue family. Selector set unchanged — every class the `.xui` uses keeps its properties, so only colors moved.
+- Decision: the `.xui` structure/ids were **kept** rather than rewritten from scratch. The suite hard-codes them (value lookups for ~24 ids, tab-header fractions, `split.h > 300`, input-row ordering), a structural rewrite could not be compile/test-verified in this session, and the last audit already showed full widget coverage and no overlap. The from-scratch visual work is entirely in the `.xss`; live value reflection already flows through the value API into readout `Text` nodes on every tab.
+
+### Verification and current status
+
+- Not executed this session (owner builds). Expected: suite unchanged (no schema/id changes; the cursor function has no test coverage — a gap), demo renders in the new palette. Visible pass should check: `Hand` over buttons/menus/pickers, `ResizeEW` over slider tracks and horizontal split gutters, `ResizeNS` over vertical gutters and scroll thumbs, `IBeam` only in editable fields, `Arrow` over disabled/read-only controls and panels.
+- Open: cursor behavior has no unit tests (`cursorAt` is public and testable); deeper `.xui` restructuring remains available if wanted once a build/verify loop is available.
+
+## Demo polish: password mode, layout audit, theme consistency — 2026-10-15
+
+- **Coverage audit:** every runtime-supported widget kind is demonstrated in the showcase — containers (Window, Column, Row, Panel, Split, CheckList, Tabs/Tab, Toolbar, StatusBar, ScrollView vertical/horizontal/nested), inputs (TextBox, TextArea, SearchField, NumberField, Stepper, CheckBox, Switch, ToggleButton, RadioGroup, SegmentedControl, Slider, Dropdown, ColorPicker, DatePicker, KeybindField), display (Text, Label, Badge, Separator/Divider, Image, Spinner, ProgressBar determinate + indeterminate, FpsCounter), and tooltips in several trigger/delay configurations. The one gap was the **password TextBox mode** — parsed, schema-validated, and styled but never shown; now added.
+- **Overlap audit:** budgeted every tab vertically (page usable ≈ 584 px inside the 620 px Tabs at the test's 1080×760 layout): Input ≈ 504, Controls ≈ 535, Layout fixed ≈ 262 with the Split flexing to ≈ 322 (the suite's `split.h > 300` still holds), Widgets ≈ 446, Scrolling fixed ≈ 362 within a growing row. No overflow; sequential Row children cannot overlap each other — the only risk was window-edge clipping at minimum size.
+- `showcase.xui`: added a password `TextBox` (`id: "passphrase"`, `password: true`, change handler) as the third field of the input row; row widths rebalanced to 380/200/170 so three fields fit; no other layout changes.
+- `showcase.xss`: radius consistency only (SearchField/Stepper 3→4 px, Image 3→6 px). The committed blue-grey theme already reads as one system (shared tokens, one accent, state blocks on every widget); a deeper redesign without a visible run would be churn.
+- `glfw_demo.cpp`: `onPassphraseChange` handler (reports the passphrase *length* in the title — a password demo that echoes the secret would model the wrong behavior) and `minWidth` 760→900 / `minHeight` 640 so the three-field row never clips at minimum size. Trade-off: below 900 px the input row would exceed the window edge (rows lay children sequentially; fields never overlap each other, but the flow engine does not wrap yet).
+- Not executed in this session; expects the suite to stay green (the showcase test parses/builds the new node; no assertion covers the input row's internal widths) and a visible pass to confirm masking, the length readout, and no overlap at 1080×800 or the 900×640 minimum.
+
+## Demo asset packaging cleanup — 2026-10-15
+
+- Audited the runtime loads in `examples/glfw_demo.cpp` against the CMake post-build copy rules. Both `xui_glfw_demo` and `xui_hello` load only `showcase.xui` and `showcase.xss`; copying `cross_platform.*` and `controls.*` beside those executables was unnecessary.
+- Removed those four redundant copy commands from `examples/CMakeLists.txt`. The demo output now receives only the `.xui`/`.xss` pair it actually opens.
+- Kept `cross_platform.*` and `controls.*` in the source tree because `tests/test_runtime.cpp` loads them and the docs link to them as smaller reference examples. Deleting them would remove active test fixtures and documented examples, rather than clean up unused files.
+- Trade-off: runtime deployment is smaller and its asset contract matches the code; tests/docs continue to rely on source-tree examples. No parser/runtime or visual behavior changed.
+- Verification: regenerated and built `xui_tests`, `xui_glfw_demo`, and `xui_hello` with the Visual Studio CMake/Ninja toolchain. `xui_tests.exe` passes **158/158**. Removed stale generated copies from the verified in-workspace output directory; it now contains only `showcase.xui` and `showcase.xss` among `.xui`/`.xss` files. No new FPS or visual claim is made for this packaging-only change.
+- Next: no packaging follow-up is needed unless additional demo launch profiles are added; keep CMake runtime asset copies in sync with actual `loadXui`/`loadXss` calls.
+
+## Showcase theme, intrinsic sizing, and widget coverage — 2026-10-15
+
+### Audit and findings
+
+- `examples/showcase.xss` used the same dark/blue direction as its token palette but mixed many one-off grays and inconsistent radii/padding into selectors. This made input, scroll, disabled, tooltip, and panel surfaces look unrelated.
+- `src/ui/runtime.cpp::UiRuntime::measure()` returned zero for several empty controls when no explicit `.xui`/`.xss` size was supplied. `TextArea` also did not share the text-field measurement branch. Containers were correctly deriving size from children, but could consequently collapse when their children had zero intrinsic sizes.
+- The showcase had not exercised the supported `Toolbar`, `StatusBar`, or `Divider` aliases. Schema-only names (`Grid`, `Menu`, `Modal`, `ListView`, and others) are explicitly unsupported by `UiRuntime::build()`; authoring them into the showcase would make the document fail at runtime.
+- A fresh file reference scan found all three source asset pairs still in use by docs and/or tests. The runtime executable itself loads only `showcase.*`; the redundant CMake copies of `cross_platform.*` and `controls.*` were subsequently removed (see the packaging cleanup entry above). The source fixtures remain because they are referenced.
+
+### Changes and decisions
+
+- Added preferred content-box sizes for empty/blank controls: Button 96×36, CheckBox 20×20, CheckItem 160×28, TextBox 160×28, TextArea 240×96, Slider 160×24, ProgressBar 160×16, ColorPicker/Dropdown 156×34, Switch 44×24, and FPS counter 168×26 logical pixels. Search/Number fields start at 180 px wide; labeled check controls and switches include room for their indicator/track, and longer dropdown labels grow beyond their preferred size. Text fields measure current text or placeholder and retain useful minima; content edits invalidate cached measurements and the regression case verifies a long field grows. `LayoutTree` adds declared padding/borders and still applies explicit dimensions and min/max clamps.
+- This is a general runtime sizing fix rather than fixed dimensions in the demo. Container measurement remains child-driven; it now receives a usable preferred size from empty controls. Explicit small dimensions remain intentional constraints and can clip content.
+- Centralized showcase surface/border/pressed/placeholder/readout/disabled/scrollbar colors as `.xss` tokens and normalized control radii and padding. Kept palette literals only in the token definitions so the stylesheet remains an idiomatic reference.
+- Added `Divider`, `Toolbar`, and `StatusBar` examples in the Layout tab. These are supported aliases (Divider→Separator; Toolbar/StatusBar→Row) and remain styled declaratively.
+- Added docs describing intrinsic default dimensions, the aliases, and why parser-recognized but runtime-unsupported objects are excluded. Kept `controls.*` and `cross_platform.*` because tests/docs/build copy steps still reference them.
+- Trade-off: preferred sizes are widget defaults in logical pixels, not theme variables. They provide content-appropriate starting sizes, while apps can override them declaratively; this avoids forcing one theme's preferred geometry into the backend or stylesheet system.
+
+### Verification and current status
+
+- Release build succeeded for `xui_tests`, `xui_glfw_demo`, and `xui_hello`. The initial Debug build was blocked by MSVC C1902 (PDB manager mismatch); reconfiguring the build tree for Release with embedded debug information avoided that toolchain issue.
+- Automated tests: **158 passed, 0 failed**, including the new auto-sized blank-control test and the existing complete showcase parse/build test.
+- Latest hidden `--profile` runs after the composite-control sizing changes exited normally: `xui_hello.exe` **572.588 FPS** (4,137 frames / 7.22509 s); `xui_glfw_demo.exe` **583.659 FPS** (4,216 frames / 7.2234 s). These exceed 60 FPS for the measured hidden loop, but do not establish visible presentation pacing or resizing/interaction FPS. Earlier profile figures were superseded by these runs.
+- Visible verification remained unavailable: the CUA session had no Windows app-launch/window-list methods, and the approved shell launch did not leave a discoverable running window for inspection. Therefore theme appearance, overlap/clipping, interactive resize, and normal-close behavior remain visually unverified. No widget can be called visually verified from the hidden profile.
+
+### Next steps
+
+1. Run the GLFW/OpenGL showcase visibly and inspect every tab, including the added aliases and the scroll clipping states; check typing, hover, popup interactions, and normal close.
+2. Perform a sustained interactive resize with FPS visible. Capture any remaining overlap as an `.xui` fixture before changing the layout solver.
+3. Keep parser-only widgets listed as unsupported until runtime behavior, styling, values, and backend rendering are implemented.
+
+## Live resize, constrained percentages, picker and text input polish — 2026-10-15
+
+### Audit and diagnosis
+
+- `GlfwPlatform::pumpEvents()` polled GLFW each time the Xui event-drain loop asked for an event. During continuous window-resize callback production, the drain could keep polling/dispatching and postpone the frame submission point. The runtime already handles resize events by updating logical dimensions and laying out before drawing; the starvation was in the example platform's poll/drain boundary.
+- Layout already had percentage `width`/`height`, and flex items already clamped pixel min/max values, but `.xui minWidth/maxWidth/minHeight/maxHeight` did not reach the solver. The `.xss min-size/max-size` path also discarded the unit, which prevented percentage constraints. Parent padding was included in child usable size; border insets were not consistently part of the content box.
+- ColorPicker geometry had been expanded and paint/editor rects shared a new geometry helper, but hit testing retained stale fixed row offsets. While converting the hit test, an `else-if` chain also meant the default-on text editor section swallowed every non-format popup click, so SV/hue/alpha surfaces were unreachable.
+- TextArea inserted configured indentation on Tab but literal tab shaping used the font's control-glyph advance. Fonts can assign a nonzero advance to that glyph. Caret positioning also needed a stable per-line advance for a trailing empty line/whitespace.
+
+### Changes and decisions
+
+- GLFW now polls once per `pumpEvents()` drain cycle, drains all queued callbacks, returns `false`, and gives the Xui frame loop a chance to lay out/draw before polling again. This is a platform-interface implementation detail, not layout logic in the demo. It favors a rendered frame between continuous callback batches; callbacks remain queued and are handled in order.
+- Added CSS-like `minWidth`, `maxWidth`, `minHeight`, `maxHeight` and size shorthand handling through `.xui`; added `.xss min-width`, `max-width`, `min-height`, `max-height` while preserving percentage units in `min-size`/`max-size`. Percentages resolve against the parent content box after padding and borders, and min/max clamp the resolved border-box dimension. Grid, stack, flex, absolute children, and split panes now honor supported constraints; split max caps leave remaining free space available rather than violating the authored cap. Existing low-level float min/max fields remain compatible.
+- Added border insets to layout's content-box calculation so child percentages and positions use the content area. Text layout now records per-line advances, treats literal tab as four actual space advances without drawing the control glyph, and TextArea inserts `tabSize` spaces on Tab (default 4, range 1–16); Tab on other controls remains focus traversal. Control characters received via text input are filtered. Caret/selection x uses the active line's shaped width so newline/trailing whitespace doesn't reset it.
+- ColorPicker uses one popup geometry model for paint, editor placement, and pointer hit testing. Defaults are 300×352 logical pixels (safe minimum 260×340), with a larger SV field, hue/alpha strips, format/preview row, aligned labels, and editable fields. XSS still styles surfaces and typography; internal hue/SV geometry remains a widget default.
+- Reworked `examples/showcase.xss` with a tokenized dark palette, visual hierarchy, consistent panel and field padding, row gaps/margins, and hover/focus/pressed/disabled states. The `.xui` comment and notes control now accurately demonstrate four-space Tab insertion.
+- Updated `doc/xui-guide.md`, `doc/xss-guide.md`, `doc/styling-reference.md`, `doc/widgets.md`, and `doc/performance.md`; `plan.md` records the phase, actual test count, and current measured profiles.
+
+### Trade-offs
+
+- CSS-like min/max is expressed on the existing runtime length type instead of adding a new constraint DSL. Percentage constraints in an auto-sized/unbounded parent cannot resolve and follow the existing percentage-as-auto behavior. When split minimums exceed available space, the pre-existing policy proportionally shrinks panes to avoid negative geometry; strict minima cannot all be honored in an impossible space.
+- ColorPicker uses more SV color tiles (48×22) for a smoother default surface. They are emitted as regular painter primitives and rely on existing painter batching. This session did not profile an open popup under continuous visible redraw, so popup-heavy cost remains to be measured.
+- TextArea Tab now indents with spaces, while Tab elsewhere still traverses focus. This gives code/notes entry a predictable indent without changing form navigation.
+- The GLFW drain change does not claim Win32 behavior. The current `xui_hello` and `xui_glfw_demo` targets both use the GLFW/OpenGL example backend in this checkout.
+
+### Verification and current status
+
+- MSVC Release build succeeded for `xui_tests`, `xui_glfw_demo`, `xui_hello`, and `bench_layout`.
+- Automated suite: **156 tests, 0 failures**. New checks cover percentage min/max after border/padding, split max clamping, TextArea tab sizing/control filtering, tab advances, and per-line text widths; existing picker and full showcase interactions pass.
+- Latest hidden uncapped `--profile` loops after the final Release build: `xui_hello.exe` 4,184 frames / 7.15079 s = **585.11 FPS**; `xui_glfw_demo.exe` 4,197 frames / 7.14915 s = **587.063 FPS**. Both exceed the 60 FPS target in that hidden loop. They do not measure actual screen presentation, resizing, caret blink visibility, or picker-open redraw cost.
+- `bench_layout` after the constraint/split changes (938 nodes): cold build 0.32 ms, first layout 0.124 ms, full relayout 111.9 μs, resize 102.5 μs, one leaf content change 2.3 μs, split-drag frame 97.2 μs, idle 0 μs; the 1,000-child scroll lookup microbenchmark remains 0.008 μs/iteration.
+- No visible GUI session was run in this verification. Therefore continuous visible resize responsiveness, picker proportions/legibility, caret blink placement, and text whitespace appearance remain visually unverified. There is no separate Win32 app/backend target in the current build for parity testing.
+
+### Next steps
+
+1. Run a visible GLFW demo smoke pass: drag-resize continuously, exercise tabs/text fields/picker, verify caret blink and popup legibility, close normally, and record FPS while resizing and with the picker open.
+2. If visible resize still stalls, capture per-frame layout/paint/swap timings while resizing and inspect platform callback frequency rather than inferring from the hidden loop.
+3. Add or restore a distinct Win32 platform target before claiming backend parity; this change currently covers the GLFW event pump only.
+
 ## Test fixes: caret-blink timer lifetime + showcase 4-tab drift — 2026-10-15
 
 ### Root causes (2 failed tests out of 153)
@@ -807,3 +938,38 @@ Premise corrections worth recording: this checkout has a GLFW + OpenGL 2.1 backe
 - The final benchmark preserves its descendant-rect checksum to prevent the compiler from removing the measured work. The generated demo assets were copied by the Release build and consumed by the successful hidden profile.
 - Remaining acceptance gap: no visible GUI session was used, so readable on-screen text, scrollbar appearance, smooth wheel feel, responsive resize, and normal close have not been visually verified. Linux/macOS and a separate native Win32 backend also remain unverified.
 - Current status: ScrollView runtime, style vocabulary, GLFW wheel delivery, showcase and documentation are implemented and headlessly verified. Performance acceptance is partial because only hidden loop throughput and deterministic synthetic layout measurements are available. Next: do a visible GLFW smoke pass; then continue Phase 2 with Grid and titled/collapsible containers.
+
+## Layout, theme, resize, and visibility audit — 2026-10-15
+
+### Audit and root causes
+
+- Re-read the current layout solver, runtime paint/hit-test traversal, `Xui::run()`, GLFW event drain, showcase `.xui`/`.xss`, docs, and the screenshot supplied with the request. The screenshot is the Scrolling tab: horizontal and nested `ScrollView` contents are clipped to their own viewports, and hidden tab pages are intentionally stacked. Those visual clips are expected; they are not flow siblings painting over one another.
+- No shared-flow overlap defect was reproduced in the source or regression tests. `Row`/`Column` place flow siblings sequentially; `Stack`/`Tabs`, explicit grid coordinates, and `Position::Absolute` intentionally allow overlapping rectangles. Min/max can intentionally force overflow when constraints conflict. Existing layout tests cover percentage sizing against the parent content box, min/max clamp combinations, nested resize, cache invalidation, and differential fuzzing. No layout-solver behavior was changed without a failing case.
+- Resize was not deferred to mouse-up: the GLFW size callback emits `Resize`, `Xui::run()` reads the latest logical client and physical framebuffer sizes each iteration, resizes the renderer, and calls runtime layout before the next paint. The prior `pumpEvents()` once-per-drain guard is present. The specific resize freeze is still not closed by an interactive reproduction in this turn; the desktop automation window lost its process handle when a border-drag test was attempted.
+- The screenshot's `FPS: 4 | 251.6 ms` came from event-driven idle redraws: the FPS widget refreshed itself every 250 ms and counted the wait between frames as render time. This was a measurement-mode bug, not evidence that one draw took 251 ms. Turning the overlay on now selects continuous redraw so its FPS value measures frame cadence. A visible GLFW screenshot during this turn showed `FPS: 97 | 5.1 ms`.
+- Theme resolution was in fact pinned to palette index zero at every runtime style resolve site, including tabs, tooltips, and generated picker editors. Composite draw code also had a handful of state/highlight colors that bypassed foreground/radius/border style values.
+
+### Changes and decisions
+
+- Added `UiRuntime::setTheme(name)` and `Xui::setTheme(name)`. The facade accepts a theme after `loadXss()` and before or after `attach()`; it validates the name and preserves a pre-attach choice. Runtime resolves all existing nodes against that palette, refreshes inherited text styles/font selection, invalidates layout measurements, and redraws. The palette still uses compiled style sets; no recompile or selector rematch occurs.
+- Routed every runtime `.xss` resolve site through the selected theme index, including dynamically-created picker editors and tooltip bubbles.
+- Changed editable selection, checkbox borders/radius, switch off track, radio/segmented/rating hover outlines, and missing-image placeholders to derive appearance from resolved `.xss` foreground/background/border/radius values instead of isolated fixed colors. Kept only high-contrast marks and semantic color-picker ramps fixed by design.
+- Updated theme and widget styling references with a subpart limitations table. Theme changes currently re-resolve paint/text but do not reapply theme-dependent layout values because the current merge path must retain explicit `.xui` precedence; geometry tokens should remain invariant across themes.
+- Enabled continuous frames while the FPS overlay is active. Trade-off: accurate sampling and smooth visible animation use more CPU/GPU until F3 disables the overlay. Normal static applications still sleep in event-driven mode.
+- No layout-solver rewrite was made: source inspection and automated tests did not show an ordinary flow-overlap cause. Altering its well-tested min/max and content-box rules without a reduced failing `.xui` case would add regression risk.
+
+### Verification and remaining gaps
+
+- Rebuilt `xui_tests`, `xui_glfw_demo`, and `xui_hello` from the working tree with MSVC Debug and `/W4 /WX` after the final code changes.
+- Automated suite: **157 tests, 0 failures**, including new runtime theme activation/draw color coverage and existing layout percentage/min/max, root resize, nested scroll clipping, interaction, text wrapping, popup, and widget tests.
+- Hidden profile runs after theme wiring but before the final widget-subpart tint changes reported `xui_hello` **4,026 frames / 5.00028 s / 805.155 FPS** and `xui_glfw_demo` **4,035 frames / 5.00035 s / 806.944 FPS**. After the final tint changes, both profile processes exited successfully but the shell capture returned no FPS summary, so those latest runs are not counted as measured data.
+- A visible GLFW/OpenGL frame was captured with all five tabs, text, horizontal/vertical/nested scrolling, and the FPS overlay visible at **97 FPS / 5.1 ms**. No white-box glyphs or sibling overlap appeared in that captured state. Content at viewport edges was correctly clipped.
+- Manual click/typing/scroll/resize/close verification was not completed: the computer-use bridge returned `foreground window did not report a process id` during the resize attempt and then no longer listed the demo process. A visible `xui_hello` run was also not completed. Therefore live resize freeze-free behavior and interaction latency are not claimed as verified, despite the correct source path and passing headless interaction tests.
+- Layout-dependent themed values remain partial. Theme-specific padding/size/gap are not re-applied. The exact user-reported flow-overlap case remains unreproduced, so the current layout engine has not been changed to mask overflow or clip all containers.
+
+### Next steps
+
+- Reopen the rebuilt GLFW demo in an interactive desktop session and continuously resize while checking the live FPS display; then test click, hover, text input, nested scroll, and normal close.
+- Run the same visible smoke test for `xui_hello.exe` and confirm text, resize, and close behavior.
+- Add a focused `.xui` regression fixture if any non-intentional sibling overlap remains; capture node bounds, parent content boxes, and z-order before changing the solver.
+- Rework theme application to reapply layout-affecting stylesheet values while preserving authored `.xui` overrides, then verify all geometry/state combinations.

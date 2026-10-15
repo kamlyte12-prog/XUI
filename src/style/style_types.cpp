@@ -16,6 +16,10 @@ namespace xui {
 			{"size", Expand::Pair, 1, 2, NUM | ID},
 			{"min-size", Expand::Pair, 1, 2, NUM | ID},
 			{"max-size", Expand::Pair, 1, 2, NUM | ID},
+			{"min-width", Expand::None, 1, 1, NUM},
+			{"max-width", Expand::None, 1, 1, NUM},
+			{"min-height", Expand::None, 1, 1, NUM},
+			{"max-height", Expand::None, 1, 1, NUM},
 			{"opacity", Expand::None, 1, 1, NUM},
 			{"shadow", Expand::None, 1, 6, NUM | COL | ID},
 			{"blur", Expand::None, 1, 1, NUM},
@@ -41,7 +45,7 @@ namespace xui {
 			{"scroll-speed", Expand::None, 1, 1, NUM},
 		};
 		constexpr std::string_view kPropNames[kPropCount] = {
-			"bg", "fg", "border", "radius", "pad", "margin", "gap", "size", "min-size", "max-size", "opacity", "shadow", "blur",
+			"bg", "fg", "border", "radius", "pad", "margin", "gap", "size", "min-size", "max-size", "min-width", "max-width", "min-height", "max-height", "opacity", "shadow", "blur",
 			"transform", "font", "font-size", "font-weight", "letter-spacing", "align", "justify", "grow", "shrink", "cursor",
 			"z-index", "clip", "overflow", "animation", "scroll-track", "scroll-thumb", "scrollbar-size",
 			"scrollbar-visibility", "scroll-behavior", "scroll-speed" };

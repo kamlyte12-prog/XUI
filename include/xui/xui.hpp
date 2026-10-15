@@ -26,7 +26,8 @@ struct XuiOptions {
 struct XuiRunOptions {
     /// Zero runs until the platform reports close. A positive value bounds the run (for demos/tools).
     f64 maxSeconds = 0;
-    /// Redraw every loop iteration; normally only changed UI and events trigger a frame.
+    /// Redraw every loop iteration. Enabling the FPS overlay also opts into continuous rendering
+    /// until the overlay is disabled, so its sample measures frame throughput instead of idle waits.
     bool redrawContinuously = false;
 };
 
@@ -45,6 +46,8 @@ public:
     bool loadFont(std::string_view path, std::string_view family = "default", u16 weight = 400);
     bool loadXui(std::string_view path);
     bool loadXss(std::string_view path);
+    /// Select an @theme declared by the loaded .xss file (defaults to its base theme).
+    bool setTheme(std::string_view name);
     void setWindowOptions(XuiOptions options) { m_options = std::move(options); }
 
     /// Initializes the platform, creates its window, initializes the renderer and connects the UI.
@@ -66,6 +69,10 @@ private:
     struct FontFace { std::string family; u16 weight = 400; FontHandle handle; };
     bool readFile(std::string_view path, std::string& output);
     void setError(std::string message);
+    /// One full layout/paint/present pass. Also invoked by the platform's live-resize hook so
+    /// interactive resize (a modal loop inside pumpEvents on Windows) redraws every step.
+    void renderFrame();
+    static void renderFrameThunk(void* context) { static_cast<Xui*>(context)->renderFrame(); }
 
     XuiOptions m_options;
     StringInterner m_strings;
@@ -82,6 +89,7 @@ private:
     void* m_eventContext = nullptr;
     XuiRunStats m_stats;
     std::string m_error;
+    std::string m_themeName;
     bool m_hasXui = false, m_hasXss = false;
     bool m_platformReady = false, m_rendererReady = false, m_attached = false;
     u32 m_widthPixels = 0, m_heightPixels = 0;

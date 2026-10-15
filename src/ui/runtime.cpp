@@ -386,7 +386,7 @@ namespace xui {
 				editor.caret = editor.text.size();
 				MatchInput input; input.type = editor.type; input.classes = editor.classes;
 				editor.styleSet = m_styles->match(input);
-				m_styles->resolve(editor.styleSet, stateBit(State::Resting), 0, editor.style);
+				m_styles->resolve(editor.styleSet, stateBit(State::Resting), m_theme, editor.style);
 				const PropId inherited[] = { PropId::Font, PropId::FontSize, PropId::Fg, PropId::Align, PropId::LetterSpacing };
 				for (u8 i = 0; i < std::size(inherited); ++i) {
 					const PropId property = inherited[i];
@@ -428,6 +428,38 @@ namespace xui {
 			node.font = selectFont(node.style);
 			if (!node.text.empty()) m_layout.markContentChanged(node.layout);
 		}
+		return true;
+	}
+
+	bool UiRuntime::setTheme(std::string_view name) {
+		if (!m_styles || !m_strings || name.empty()) return false;
+		const auto index = m_styles->themeIndex(m_strings->intern(name));
+		if (!index) return false;
+		if (m_theme == *index) return true;
+		m_theme = *index;
+		for (u32 i = 0; i < m_nodes.size(); ++i) {
+			Node& node = m_nodes[i];
+			const StateMask states = activeStates(node);
+			m_styles->resolve(node.styleSet, states, m_theme, node.style);
+			node.resolvedStates = states;
+			node.styleResolved = true;
+			node.inheritedTextMask = 0;
+			if (node.parentIndex < i) {
+				const PropId inherited[] = { PropId::Font, PropId::FontSize, PropId::Fg, PropId::Align, PropId::LetterSpacing };
+				const PropTable& parentStyle = m_nodes[node.parentIndex].style;
+				for (u8 propertyIndex = 0; propertyIndex < std::size(inherited); ++propertyIndex) {
+					const PropId property = inherited[propertyIndex];
+					if (!node.style.has(property) && parentStyle.has(property)) {
+						node.style.v[static_cast<int>(property)] = parentStyle.get(property);
+						node.style.mask |= u64{ 1 } << static_cast<int>(property);
+						node.inheritedTextMask |= u8(1u << propertyIndex);
+					}
+				}
+			}
+			node.font = selectFont(node.style);
+		}
+		m_layout.markAllDirty(m_root);
+		addDamage({ 0, 0, m_lastLayoutWidth, m_lastLayoutHeight });
 		return true;
 	}
 
@@ -572,7 +604,7 @@ namespace xui {
 				node.pickerPrecision = static_cast<u32>(std::clamp(document.exprs[prop.expr].num, 0.f, 4.f));
 			else if (node.colorPicker && name == "popupSize" && prop.role == XPropRole::Value && prop.expr < document.exprs.size() && document.exprs[prop.expr].kind == XExprKind::Size) {
 				const XExpr& size = document.exprs[prop.expr];
-				node.pickerWidth = std::max(220.f, size.num); node.pickerHeight = std::max(264.f, size.num2);
+				node.pickerWidth = std::max(260.f, size.num); node.pickerHeight = std::max(340.f, size.num2);
 			}
 			else if (node.colorPicker && (name == "alpha" || name == "showAlpha" || name == "showInputs" || name == "showFormatSwitcher" || name == "showHue" || name == "showSaturationValue") && prop.role == XPropRole::Value && prop.expr < document.exprs.size()) {
 				const bool enabled = document.exprs[prop.expr].kind != XExprKind::Bool || document.exprs[prop.expr].bval;
@@ -605,6 +637,8 @@ namespace xui {
 			}
 			else if (name == "maxLength" && prop.role == XPropRole::Value && prop.expr < document.exprs.size() && document.exprs[prop.expr].kind == XExprKind::Number)
 				node.maxLength = static_cast<u32>(std::max(0.f, document.exprs[prop.expr].num));
+			else if (name == "tabSize" && node.textArea && prop.role == XPropRole::Value && prop.expr < document.exprs.size() && document.exprs[prop.expr].kind == XExprKind::Number)
+				node.tabSize = static_cast<u32>(std::clamp(document.exprs[prop.expr].num, 1.f, 16.f));
 			else if ((name == "tooltipShowDelay" || name == "tooltipHideDelay") && prop.role == XPropRole::Value &&
 				prop.expr < document.exprs.size() && document.exprs[prop.expr].kind == XExprKind::Number) {
 				const u32 delay = static_cast<u32>(std::clamp(document.exprs[prop.expr].num, 0.f, 60000.f));
@@ -702,7 +736,7 @@ namespace xui {
 		match.id = node.id;
 		match.classes = node.classes;
 		node.styleSet = m_styles->match(match);
-		m_styles->resolve(node.styleSet, stateBit(State::Resting), 0, node.style);
+		m_styles->resolve(node.styleSet, stateBit(State::Resting), m_theme, node.style);
 		if (node.scrollView) {
 			if (node.style.has(PropId::ScrollbarSize)) node.scrollBarSize = std::clamp(number(node.style.get(PropId::ScrollbarSize), 0, 10.f), 4.f, 24.f);
 			if (!node.xuiScrollSpeed && node.style.has(PropId::ScrollSpeed)) node.scrollSpeed = std::clamp(number(node.style.get(PropId::ScrollSpeed), 0, 42.f), 1.f, 400.f);
@@ -804,6 +838,14 @@ namespace xui {
 				Length value;
 				if (!layoutLength(expression, value)) return failLayout(name);
 				if (name == "width") authoredLayout.width = value; else authoredLayout.height = value;
+			}
+			else if (name == "minWidth" || name == "maxWidth" || name == "minHeight" || name == "maxHeight") {
+				Length value;
+				if (!layoutLength(expression, value)) return failLayout(name);
+				if (name == "minWidth") authoredLayout.minWidth = value;
+				else if (name == "maxWidth") authoredLayout.maxWidth = value;
+				else if (name == "minHeight") authoredLayout.minHeight = value;
+				else authoredLayout.maxHeight = value;
 			}
 			else if (name == "pad" || name == "margin") {
 				Edges value;
@@ -1022,15 +1064,24 @@ namespace xui {
 		setSize(PropId::Size, layoutStyle.width, layoutStyle.height);
 		if (node.style.has(PropId::MinSize)) {
 			const StyleValue& v = node.style.get(PropId::MinSize);
-			layoutStyle.minW = number(v, 0); layoutStyle.minH = number(v, 1);
+			layoutStyle.minWidth = length(v, 0); layoutStyle.minHeight = length(v, 1);
 		}
 		if (node.style.has(PropId::MaxSize)) {
 			const StyleValue& v = node.style.get(PropId::MaxSize);
-			layoutStyle.maxW = number(v, 0, kInf); layoutStyle.maxH = number(v, 1, kInf);
+			layoutStyle.maxWidth = length(v, 0); layoutStyle.maxHeight = length(v, 1);
 		}
+		if (node.style.has(PropId::MinWidth)) layoutStyle.minWidth = length(node.style.get(PropId::MinWidth), 0);
+		if (node.style.has(PropId::MaxWidth)) layoutStyle.maxWidth = length(node.style.get(PropId::MaxWidth), 0);
+		if (node.style.has(PropId::MinHeight)) layoutStyle.minHeight = length(node.style.get(PropId::MinHeight), 0);
+		if (node.style.has(PropId::MaxHeight)) layoutStyle.maxHeight = length(node.style.get(PropId::MaxHeight), 0);
 		if (node.style.has(PropId::Pad)) {
 			const StyleValue& v = node.style.get(PropId::Pad);
 			layoutStyle.padding = { number(v, 3), number(v, 0), number(v, 1), number(v, 2) };
+		}
+		if (node.style.has(PropId::Border)) {
+			const StyleValue& v = node.style.get(PropId::Border);
+			const f32 border = v.count && v.atoms[0].kind == AtomKind::Number ? std::max(0.f, v.atoms[0].num) : 0.f;
+			layoutStyle.border = Edges::all(border);
 		}
 		if (node.style.has(PropId::Margin)) {
 			const StyleValue& v = node.style.get(PropId::Margin);
@@ -1133,7 +1184,7 @@ namespace xui {
 				if (m_nodes[parent].scrollView) { painter.pushClip(m_layout.absRect(m_nodes[parent].layout)); ++scrollClips.count; }
 			const StateMask states = activeStates(node);
 			if (!node.styleResolved || node.resolvedStates != states) {
-				m_styles->resolve(node.styleSet, states, 0, node.style);
+				m_styles->resolve(node.styleSet, states, m_theme, node.style);
 				node.inheritedTextMask = 0;
 				node.resolvedStates = states;
 				node.styleResolved = true;
@@ -1206,12 +1257,14 @@ namespace xui {
 				const Rect box{ rect.x + 2.f, rect.y + (rect.h - boxSize) * 0.5f, boxSize, boxSize };
 				RectStyle check;
 				check.fill = node.checked ? color(node.style, PropId::Fg, Color::fromRGBA8(0x60A5FAFFu)) : Color{ 0, 0, 0, 0 };
-				check.border = Color::fromRGBA8(0x94A3B8FFu); check.borderWidth = 1.f;
+				const Color checkFg = color(node.style, PropId::Fg, Color::fromRGBA8(0x94A3B8FFu));
+				check.border = checkFg.withAlpha(0.65f); check.borderWidth = 1.f;
 				if (node.style.has(PropId::Border) && node.style.get(PropId::Border).count >= 3) {
 					const Atom& borderColor = node.style.get(PropId::Border).atoms[2];
 					if (borderColor.kind == AtomKind::Color) check.border = Color::fromRGBA8(borderColor.bits);
 				}
-				check.radius = CornerRadii::all(3.f);
+				const f32 checkRadius = node.style.has(PropId::Radius) ? number(node.style.get(PropId::Radius), 0, 3.f) : 3.f;
+				check.radius = CornerRadii::all(checkRadius);
 				painter.roundRect(box, check);
 				if (node.checked) {
 					const Color mark = Color::fromRGBA8(0x0F172AFFu);
@@ -1266,8 +1319,10 @@ namespace xui {
 				const f32 trackWidth = std::clamp(trackHeight * 1.8f, 36.f, 58.f);
 				const Rect track{ rect.x, rect.y + (rect.h - trackHeight) * 0.5f, trackWidth, trackHeight };
 				RectStyle trackStyle;
-				trackStyle.fill = node.checked ? color(node.style, PropId::Fg, Color::fromRGBA8(0x2563EBFFu)) : Color::fromRGBA8(0x334155FFu);
-				trackStyle.radius = CornerRadii::all(trackHeight * 0.5f);
+				const Color switchFg = color(node.style, PropId::Fg, Color::fromRGBA8(0x2563EBFFu));
+				trackStyle.fill = node.checked ? switchFg : switchFg.withAlpha(0.28f);
+				const f32 switchRadius = node.style.has(PropId::Radius) ? number(node.style.get(PropId::Radius), 0, trackHeight * 0.5f) : trackHeight * 0.5f;
+				trackStyle.radius = CornerRadii::all(switchRadius);
 				if (node.style.has(PropId::Border) && node.style.get(PropId::Border).count >= 3) {
 					const Atom& borderColor = node.style.get(PropId::Border).atoms[2];
 					if (borderColor.kind == AtomKind::Color) { trackStyle.border = Color::fromRGBA8(borderColor.bits); trackStyle.borderWidth = number(node.style.get(PropId::Border), 0); }
@@ -1343,10 +1398,15 @@ namespace xui {
 				else {
 					// Placeholder while the source is missing, unreadable, or there is no renderer for textures.
 					RectStyle frame;
-					frame.border = Color::fromRGBA8(0x475569FFu); frame.borderWidth = 1.f;
+					frame.border = color(node.style, PropId::Fg, Color::fromRGBA8(0x475569FFu)).withAlpha(0.75f);
+					frame.borderWidth = node.style.has(PropId::Border) ? number(node.style.get(PropId::Border), 0, 1.f) : 1.f;
+					if (node.style.has(PropId::Border) && node.style.get(PropId::Border).count >= 3 && node.style.get(PropId::Border).atoms[2].kind == AtomKind::Color)
+						frame.border = Color::fromRGBA8(node.style.get(PropId::Border).atoms[2].bits);
+					if (node.style.has(PropId::Radius)) frame.radius = CornerRadii::all(number(node.style.get(PropId::Radius), 0));
 					painter.roundRect(rect, frame);
-					painter.line({ rect.x + 2.f, rect.y + 2.f }, { rect.right() - 2.f, rect.bottom() - 2.f }, 1.f, Color::fromRGBA8(0x47556980u));
-					painter.line({ rect.right() - 2.f, rect.y + 2.f }, { rect.x + 2.f, rect.bottom() - 2.f }, 1.f, Color::fromRGBA8(0x47556980u));
+					const Color cross = color(node.style, PropId::Fg, Color::fromRGBA8(0x475569FFu)).withAlpha(0.45f);
+					painter.line({ rect.x + 2.f, rect.y + 2.f }, { rect.right() - 2.f, rect.bottom() - 2.f }, 1.f, cross);
+					painter.line({ rect.right() - 2.f, rect.y + 2.f }, { rect.x + 2.f, rect.bottom() - 2.f }, 1.f, cross);
 				}
 				painter.popOpacity(); continue;
 			}
@@ -1361,7 +1421,7 @@ namespace xui {
 					const f32 cy = rect.y + rowHeight * (f32(i) + 0.5f);
 					const Rect ring{ rect.x + 2.f, cy - diameter * 0.5f, diameter, diameter };
 					RectStyle ringStyle;
-					ringStyle.border = i == node.selectedOption ? accent : Color::fromRGBA8(0x94A3B8FFu);
+					ringStyle.border = i == node.selectedOption ? accent : accent.withAlpha(0.55f);
 					ringStyle.borderWidth = i == node.selectedOption ? 2.f : 1.f;
 					ringStyle.radius = CornerRadii::all(diameter * 0.5f);
 					painter.roundRect(ring, ringStyle);
@@ -1381,7 +1441,7 @@ namespace xui {
 					RectStyle cellStyle;
 					cellStyle.radius = CornerRadii::all(4.f);
 					if (i == node.selectedOption) { cellStyle.fill = accent; cellStyle.border = accent; cellStyle.borderWidth = 1.f; }
-					else if (static_cast<i32>(i) == node.hoveredOption && !node.disabled) { cellStyle.fill = Color::fromRGBA8(0x4772B333u); }
+					else if (static_cast<i32>(i) == node.hoveredOption && !node.disabled) { cellStyle.fill = accent.withAlpha(0.2f); }
 					if (cellStyle.fill.a > 0 || cellStyle.borderWidth > 0) painter.roundRect(cell, cellStyle);
 					drawLabel(node.options[i], cell, node.font, node.style,
 						i == node.selectedOption ? Color::fromRGBA8(0xFFFFFFFFu) : accent, 6.f, false);
@@ -1421,7 +1481,7 @@ namespace xui {
 							filled ? accent : accent.withAlpha(0.35f), CornerRadii::all(radius));
 					else
 						painter.roundRect({ cx - radius, cy - radius, radius * 2.f, radius * 2.f },
-							RectStyle{ Color{0,0,0,0}, Color::fromRGBA8(0x808080FFu), 1.f, CornerRadii::all(radius) });
+							RectStyle{ Color{0,0,0,0}, accent.withAlpha(0.45f), 1.f, CornerRadii::all(radius) });
 				}
 				painter.popOpacity(); continue;
 			}
@@ -1491,10 +1551,12 @@ namespace xui {
 			const Edges textPadding = node.hasXuiPadding ? node.xuiPadding : node.style.has(PropId::Pad)
 				? Edges{ number(node.style.get(PropId::Pad), 3), number(node.style.get(PropId::Pad), 0),
 						number(node.style.get(PropId::Pad), 1), number(node.style.get(PropId::Pad), 2) } : Edges{};
-			const f32 padTop = textPadding.t;
-			const f32 padBottom = textPadding.b;
-			const f32 textLeft = textPadding.l;
-			const f32 textRight = textPadding.r + ((node.dropdown || node.colorPicker) ? 30.f : (node.numberField ? 44.f : (node.searchField && !node.text.empty() ? 18.f : 0.f)));
+			const f32 borderInset = node.style.has(PropId::Border) && node.style.get(PropId::Border).count
+				? number(node.style.get(PropId::Border), 0) : 0.f;
+			const f32 padTop = textPadding.t + borderInset;
+			const f32 padBottom = textPadding.b + borderInset;
+			const f32 textLeft = textPadding.l + borderInset;
+			const f32 textRight = textPadding.r + borderInset + ((node.dropdown || node.colorPicker) ? 30.f : (node.numberField ? 44.f : (node.searchField && !node.text.empty() ? 18.f : 0.f)));
 			const f32 switchTrackWidth = node.switchToggle ? std::clamp(std::clamp(rect.h - 8.f, 18.f, 26.f) * 1.8f, 36.f, 58.f) : 0.f;
 			const f32 checkOffset = (node.checkItem || node.checkBox) ? 26.f : (node.switchToggle ? switchTrackWidth + 10.f : 0.f);
 			const f32 contentWidth = std::max(0.f, rect.w - textLeft - textRight - checkOffset);
@@ -1542,8 +1604,8 @@ namespace xui {
 					const TextLayout& prefix = m_text->layout(node.font, prefixText, rasterSize, node.textArea ? contentWidth * m_dpiScale : 0.f);
 					const u32 line = prefix.lineStarts.empty() ? 0u : static_cast<u32>(prefix.lineStarts.size() - 1);
 					const u32 lineFirst = prefix.lineStarts.empty() ? 0u : prefix.lineStarts.back();
-					const f32 cx = prefix.glyphs.size() > lineFirst
-						? (prefix.glyphs.back().x + prefix.glyphs.back().advance) / m_dpiScale : 0.f;
+					const f32 cx = prefix.lineWidths.empty() ? 0.f : prefix.lineWidths.back() / m_dpiScale;
+					(void)lineFirst;
 					return std::pair<u32, f32>{line, cx};
 					};
 				const auto [firstLine, firstX] = caretAt(begin);
@@ -1553,7 +1615,7 @@ namespace xui {
 				for (u32 line = firstLine; line <= lastLine; ++line) {
 					const f32 left = line == firstLine ? firstX : 0.f;
 					const f32 right = line == lastLine ? lastX : contentWidth;
-					painter.fillRect({ x + left, textTop + f32(line) * lineHeight, std::max(2.f, right - left), lineHeight }, Color::fromRGBA8(0x4F7DE080u));
+					painter.fillRect({ x + left, textTop + f32(line) * lineHeight, std::max(2.f, right - left), lineHeight }, fg.withAlpha(0.28f));
 				}
 			}
 			painter.glyphRun(atlas->texture(), m_glyphScratch.data(), static_cast<u32>(m_glyphScratch.size()), { x, baseline }, fg);
@@ -1568,13 +1630,8 @@ namespace xui {
 				const std::string prefix = caretPrefixText(node.caret);
 				const TextLayout& caretRun = m_text->layout(node.font, prefix, rasterSize, node.textArea ? contentWidth * m_dpiScale : 0.f);
 				f32 caretX = 0.f, caretY = 0.f;
-				if (!caretRun.glyphs.empty()) {
-					const u32 lineStart = caretRun.lineStarts.empty() ? 0 : caretRun.lineStarts.back();
-					const ShapedGlyph& previous = caretRun.glyphs.back();
-					caretX = (previous.x + previous.advance) / m_dpiScale;
-					caretY = f32(caretRun.lineStarts.size() - 1) * caretRun.lineHeight / m_dpiScale;
-					(void)lineStart;
-				}
+				if (!caretRun.lineWidths.empty()) caretX = caretRun.lineWidths.back() / m_dpiScale;
+				if (!caretRun.lineStarts.empty()) caretY = f32(caretRun.lineStarts.size() - 1) * caretRun.lineHeight / m_dpiScale;
 				if (node.textBox) {
 					const f32 caretPosition = caretRun.width / m_dpiScale;
 					const f32 offset = std::clamp(caretPosition - contentWidth, 0.f, std::max(0.f, runWidth - contentWidth));
@@ -1624,7 +1681,7 @@ namespace xui {
 					(ordinal == tabs.selectedTab ? stateBit(State::Selected) : 0) |
 					(header.contains(m_pointerPosition) ? stateBit(State::Hover) : 0) |
 					(tabs.disabled ? stateBit(State::Disabled) : 0);
-				m_styles->resolve(tab.styleSet, state, 0, tabStyle);
+				m_styles->resolve(tab.styleSet, state, m_theme, tabStyle);
 				const Color background = color(tabStyle, PropId::Bg,
 					ordinal == tabs.selectedTab ? Color::fromRGBA8(0x24334FFFu) : Color::fromRGBA8(0x151E32FFu));
 				painter.fillRect(header, background);
@@ -1690,7 +1747,8 @@ namespace xui {
 				}
 			}
 			else {
-				constexpr u32 columns = 14, rows = 8;
+				const PickerGeometry geometry = pickerGeometry(node);
+				constexpr u32 columns = 48, rows = 22;
 				f32 hue = 0.f;
 				const f32 hi = std::max({ node.pickerColor.r,node.pickerColor.g,node.pickerColor.b }), lo = std::min({ node.pickerColor.r,node.pickerColor.g,node.pickerColor.b }), delta = hi - lo;
 				f32 saturation = hi > 0.f ? delta / hi : 0.f, value = hi;
@@ -1700,40 +1758,51 @@ namespace xui {
 					else hue = ((node.pickerColor.r - node.pickerColor.g) / delta + 4.f) / 6.f;
 					if (hue < 0.f) hue += 1.f;
 				}
-				if (node.pickerShowSaturationValue) for (u32 row = 0; row < rows; ++row) for (u32 col = 0; col < columns; ++col) {
+				if (!geometry.saturationValue.empty()) for (u32 row = 0; row < rows; ++row) for (u32 col = 0; col < columns; ++col) {
 					const f32 svSaturation = f32(col) / f32(columns - 1), svValue = 1.f - f32(row) / f32(rows - 1);
-					const Rect cell{ popup.x + popup.w * f32(col) / columns, popup.y + 4.f + 116.f * f32(row) / rows, popup.w / columns + 0.5f, 116.f / rows + 0.5f };
+					const Rect cell{ geometry.saturationValue.x + geometry.saturationValue.w * f32(col) / columns,
+						geometry.saturationValue.y + geometry.saturationValue.h * f32(row) / rows,
+						geometry.saturationValue.w / columns + 0.5f, geometry.saturationValue.h / rows + 0.5f };
 					painter.fillRect(cell, hsv(hue, svSaturation, svValue));
 				}
 				const Color indicator = color(node.style, PropId::Fg, Color::fromRGBA8(0xFFFFFFFFu));
-				const f32 markerX = popup.x + std::clamp(saturation, 0.f, 1.f) * popup.w;
-				const f32 markerY = popup.y + 4.f + std::clamp(1.f - value, 0.f, 1.f) * 116.f;
-				if (node.pickerShowSaturationValue) painter.roundRect({ markerX - 5.f,markerY - 5.f,10.f,10.f }, RectStyle{ Color{0,0,0,0},indicator,1.5f,CornerRadii::all(5.f) });
-				constexpr u32 hues = 14;
-				if (node.pickerShowHue) for (u32 col = 0; col < hues; ++col) {
-					const Rect cell{ popup.x + popup.w * f32(col) / hues, popup.y + 124.f, popup.w / hues + 0.5f, 18.f };
+				const f32 markerX = geometry.saturationValue.x + std::clamp(saturation, 0.f, 1.f) * geometry.saturationValue.w;
+				const f32 markerY = geometry.saturationValue.y + std::clamp(1.f - value, 0.f, 1.f) * geometry.saturationValue.h;
+				if (!geometry.saturationValue.empty()) painter.roundRect({ markerX - 6.f,markerY - 6.f,12.f,12.f }, RectStyle{ Color{0,0,0,0},Color::fromRGBA8(0x101010FFu),3.f,CornerRadii::all(6.f) });
+				if (!geometry.saturationValue.empty()) painter.roundRect({ markerX - 4.f,markerY - 4.f,8.f,8.f }, RectStyle{ Color{0,0,0,0},indicator,2.f,CornerRadii::all(4.f) });
+				constexpr u32 hues = 48;
+				if (!geometry.hue.empty()) for (u32 col = 0; col < hues; ++col) {
+					const Rect cell{ geometry.hue.x + geometry.hue.w * f32(col) / hues, geometry.hue.y, geometry.hue.w / hues + 0.5f, geometry.hue.h };
 					painter.fillRect(cell, hsv(f32(col) / hues, 1.f, 1.f));
 				}
-				const f32 hueX = popup.x + std::clamp(hue, 0.f, 1.f) * popup.w;
-				if (node.pickerShowHue) painter.fillRect({ hueX - 1.f,popup.y + 123.f,2.f,20.f }, indicator);
-				if (node.pickerShowAlpha && node.pickerAlpha) {
-					constexpr u32 alphaSteps = 28;
+				const f32 hueX = geometry.hue.x + std::clamp(hue, 0.f, 1.f) * geometry.hue.w;
+				if (!geometry.hue.empty()) painter.roundRect({ hueX - 3.f,geometry.hue.y - 2.f,6.f,geometry.hue.h + 4.f }, RectStyle{ Color::fromRGBA8(0xFFFFFFFFu),Color::fromRGBA8(0x151E32FFu),1.f,CornerRadii::all(3.f) });
+				if (!geometry.alpha.empty()) {
+					for (f32 cy = 0; cy < geometry.alpha.h; cy += 6.f) for (f32 cx = 0; cx < geometry.alpha.w; cx += 8.f) {
+						const bool alternate = (static_cast<u32>(cx / 8.f) + static_cast<u32>(cy / 6.f)) % 2u != 0;
+						painter.fillRect({ geometry.alpha.x + cx, geometry.alpha.y + cy, 8.f, 6.f }, alternate ? Color::fromRGBA8(0x697386FFu) : Color::fromRGBA8(0x374151FFu));
+					}
+					constexpr u32 alphaSteps = 48;
 					for (u32 step = 0;step < alphaSteps;++step) {
 						Color sample = node.pickerColor; sample.a = f32(step) / f32(alphaSteps - 1);
-						painter.fillRect({ popup.x + f32(step) * popup.w / alphaSteps,popup.y + 146.f,popup.w / alphaSteps + 0.5f,10.f }, sample);
+						painter.fillRect({ geometry.alpha.x + f32(step) * geometry.alpha.w / alphaSteps,geometry.alpha.y,
+							geometry.alpha.w / alphaSteps + 0.5f,geometry.alpha.h }, sample);
 					}
-					painter.roundRect({ popup.x,popup.y + 146.f,popup.w,10.f }, RectStyle{ Color{0,0,0,0},foreground.withAlpha(0.4f),1.f,CornerRadii::all(3.f) });
+					const f32 alphaX = geometry.alpha.x + node.pickerColor.a * geometry.alpha.w;
+					painter.roundRect({ alphaX - 2.f,geometry.alpha.y - 2.f,4.f,geometry.alpha.h + 4.f }, RectStyle{ Color::fromRGBA8(0xFFFFFFFFu),Color::fromRGBA8(0x151E32FFu),1.f,CornerRadii::all(2.f) });
 				}
-				painter.fillRect({ popup.x + 4.f,popup.y + 162.f,18.f,10.f }, node.pickerColor, CornerRadii::all(2.f));
-				if (node.pickerShowFormatSwitcher) drawLabel(std::string(node.pickerFormat).append("  ▾"), { popup.x + 27.f,popup.y + 159.f,72.f,18.f }, node.font, node.style, foreground, 0.f, false);
-				else drawLabel(node.pickerFormat, { popup.x + 27.f,popup.y + 159.f,72.f,18.f }, node.font, node.style, foreground, 0.f, false);
+				painter.fillRect({ geometry.format.x,geometry.format.y + 3.f,24.f,22.f }, node.pickerColor, CornerRadii::all(4.f));
+				if (node.pickerShowFormatSwitcher) {
+					const Rect switcher{ geometry.format.x + 34.f,geometry.format.y,110.f,geometry.format.h };
+					painter.fillRect(switcher, foreground.withAlpha(0.08f), CornerRadii::all(5.f));
+					drawLabel(std::string(node.pickerFormat).append("  ▾"), switcher, node.font, node.style, foreground, 12.f, false);
+				} else drawLabel(node.pickerFormat, geometry.format, node.font, node.style, foreground, 0.f, false);
 				if (node.pickerShowInputs) {
-					const bool rgb = node.pickerFormat == "rgb" || node.pickerFormat == "hex";
-					const char* labels = rgb ? (node.pickerAlpha ? "R       G       B       A" : "R       G       B") :
-						node.pickerFormat == "hsv" ? (node.pickerAlpha ? "H       S       V       A" : "H       S       V") :
-						(node.pickerAlpha ? "H       S       L       A" : "H       S       L");
-					drawLabel(labels, { popup.x + 5.f,popup.y + 180.f,popup.w - 10.f,13.f }, node.font, node.style, foreground, 0.f, false);
-					drawLabel("HEX", { popup.x + 5.f,popup.y + 221.f,40.f,13.f }, node.font, node.style, foreground, 0.f, false);
+					const char* labels = (node.pickerFormat == "rgb" || node.pickerFormat == "hex") ? "RGBA" :
+						node.pickerFormat == "hsv" ? "HSVA" : "HSLA";
+					for (u32 channel = 0; channel < (node.pickerAlpha ? 4u : 3u); ++channel)
+						drawLabel(std::string_view(labels + channel, 1), geometry.channels[channel], node.font, node.style, foreground.withAlpha(0.72f), 0.f, false);
+					drawLabel("HEX", geometry.hexLabel, node.font, node.style, foreground.withAlpha(0.72f), 0.f, false);
 				}
 			}
 		}
@@ -1756,7 +1825,7 @@ namespace xui {
 				const std::size_t begin = std::min(editor.caret, editor.selectionAnchor), end = std::max(editor.caret, editor.selectionAnchor);
 				const f32 x1 = m_text->layout(editor.font, std::string_view(editor.text).substr(0, begin), fontSize * m_dpiScale).width / m_dpiScale;
 				const f32 x2 = m_text->layout(editor.font, std::string_view(editor.text).substr(0, end), fontSize * m_dpiScale).width / m_dpiScale;
-				painter.fillRect({ rect.x + 5.f + x1,rect.y + 3.f,std::max(1.f,x2 - x1),rect.h - 6.f }, Color::fromRGBA8(0x4F7DE088u));
+				painter.fillRect({ rect.x + 5.f + x1,rect.y + 3.f,std::max(1.f,x2 - x1),rect.h - 6.f }, foreground.withAlpha(0.28f));
 			}
 			drawLabel(editor.text, rect, editor.font, editor.style, foreground, 5.f, false);
 			if (editor.focused && !editor.disabled && !editor.readOnly && m_caretVisible && m_text && editor.font.valid()) {
@@ -1768,7 +1837,7 @@ namespace xui {
 		if (m_tooltipVisible && !popupOpen && m_tooltipOwner < m_nodes.size()) {
 			const Node& owner = m_nodes[m_tooltipOwner];
 			PropTable tooltipStyle;
-			m_styles->resolve(m_tooltipStyleSet, stateBit(State::Resting), 0, tooltipStyle);
+			m_styles->resolve(m_tooltipStyleSet, stateBit(State::Resting), m_theme, tooltipStyle);
 			const FontHandle selectedTooltipFont = selectFont(tooltipStyle);
 			const FontHandle tooltipFont = selectedTooltipFont.valid() ? selectedTooltipFont : owner.font;
 			const f32 fontSize = tooltipStyle.has(PropId::FontSize) ? number(tooltipStyle.get(PropId::FontSize), 0, 13.f) : 13.f;
@@ -1908,10 +1977,28 @@ namespace xui {
 		const u32 target = hitTestNode(point);
 		if (target < m_nodes.size()) {
 			const Node& node = m_nodes[target];
-			if ((node.textBox || node.textArea) && !node.disabled && !node.readOnly) {
-				if (node.searchField && !node.text.empty() && searchClearRect(node).contains(point)) return CursorShape::Arrow;
+			// Disabled controls never advertise interaction; the plain arrow keeps that honest.
+			if (node.disabled) return CursorShape::Arrow;
+			// Split gutters resize along the drag axis, matching the drag handling in pointerDown().
+			if (node.split) {
+				const Rect bounds = m_layout.absRect(node.layout);
+				const u32 gutters = m_layout.gutterCount(node.layout);
+				for (u32 gutter = 0; gutter < gutters; ++gutter) {
+					Rect rect = m_layout.gutterRect(node.layout, gutter);
+					rect.x += bounds.x; rect.y += bounds.y;
+					if (rect.contains(point))
+						return m_layout.style(node.layout).splitDir == SplitDir::Horizontal ? CursorShape::ResizeEW : CursorShape::ResizeNS;
+				}
+			}
+			if (node.slider) return CursorShape::ResizeEW;
+			if ((node.textBox || node.textArea) && !node.readOnly) {
+				if (node.searchField && !node.text.empty() && searchClearRect(node).contains(point)) return CursorShape::Hand;
 				return CursorShape::IBeam;
 			}
+			const bool clickable = node.button || node.checkItem || node.checkBox || node.switchToggle || node.toggleButton ||
+				node.dropdown || node.colorPicker || node.datePicker || node.segmented || node.rating || node.breadcrumb ||
+				node.stepper || node.keybindField || node.radioGroup || node.tabs;
+			return clickable ? CursorShape::Hand : CursorShape::Arrow;
 		}
 		return CursorShape::Arrow;
 	}
@@ -2019,16 +2106,16 @@ namespace xui {
 				if (node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
 			}
 			else {
-				const f32 localY = point.y - popup.y;
-				if (localY >= 160.f && localY < 182.f) {
-					if (node.pickerShowFormatSwitcher && point.x < popup.x + 76.f && !node.pickerFormats.empty()) {
+				const PickerGeometry geometry = pickerGeometry(node);
+				if (geometry.format.contains(point)) {
+					if (node.pickerShowFormatSwitcher && !node.pickerFormats.empty()) {
 						auto format = std::find(node.pickerFormats.begin(), node.pickerFormats.end(), node.pickerFormat);
 						const std::size_t next = format == node.pickerFormats.end() ? 0 : (static_cast<std::size_t>(format - node.pickerFormats.begin()) + 1) % node.pickerFormats.size();
 						node.pickerFormat = node.pickerFormats[next]; node.text = colorText(node.pickerColor, node.pickerFormat, node.pickerAlpha, node.pickerPrecision);
 						syncPickerEditors(index); addDamage(popup); addDamage(anchor);
 					}
 				}
-				else if (node.pickerShowInputs) {
+				if (!geometry.format.contains(point) && node.pickerShowInputs) {
 					u32 editorIndex = 0xFFFFFFFFu;
 					for (u32 candidate = 0; candidate < m_nodes.size(); ++candidate) {
 						const Node& editor = m_nodes[candidate];
@@ -2063,14 +2150,9 @@ namespace xui {
 						return true;
 					}
 				}
-				if (localY >= 146.f && localY < 158.f && node.pickerShowAlpha && node.pickerAlpha) {
-					node.pressed = true; (void)updateColorPicker(node, point);
-				}
-				else if (localY < 124.f) {
-					node.pressed = true; (void)updateColorPicker(node, point);
-				}
-				else if (localY >= 124.f && localY < 146.f) {
-					node.pressed = true; (void)updateColorPicker(node, point);
+				if (geometry.saturationValue.contains(point) || geometry.hue.contains(point) || geometry.alpha.contains(point)) {
+					node.pressed = true;
+					(void)updateColorPicker(node, point);
 				}
 			}
 			return true;
@@ -2351,6 +2433,19 @@ namespace xui {
 				field.caret = end == std::string::npos ? field.text.size() : end;
 				if (!shift) field.selectionAnchor = field.caret;
 			}
+			else if (!field.readOnly && field.textArea && key == Key::Tab) {
+				const u32 currentCount = codepointCount(field.text);
+				const u32 selectedCount = hasSelection
+					? codepointCount(std::string_view(field.text).substr(selectionBegin, selectionEnd - selectionBegin)) : 0u;
+				const u32 room = field.maxLength ? field.maxLength - std::min(field.maxLength, currentCount - selectedCount) : field.tabSize;
+				const u32 spaces = std::min(field.tabSize, room);
+				if (spaces) {
+					if (hasSelection) field.text.erase(selectionBegin, selectionEnd - selectionBegin);
+					field.text.insert(selectionBegin, spaces, ' ');
+					field.caret = field.selectionAnchor = selectionBegin + spaces;
+					edited = true;
+				}
+			}
 			else if (!field.readOnly && field.textArea && key == Key::Enter) {
 				const std::size_t countAfterSelection = codepointCount(field.text) - (hasSelection ? codepointCount(std::string_view(field.text).substr(selectionBegin, selectionEnd - selectionBegin)) : 0u);
 				if (!field.maxLength || countAfterSelection < field.maxLength) {
@@ -2560,6 +2655,9 @@ namespace xui {
 	}
 
 	bool UiRuntime::textInput(u32 codepoint) {
+		// Control characters are editing/navigation commands, never printable glyphs. Tab is
+		// handled by keyDown (which inserts the TextArea's configured indentation).
+		if (codepoint < 0x20u || codepoint == 0x7Fu) return false;
 		for (u32 index : m_interactiveNodes) {
 			Node& field = m_nodes[index];
 			if (!(field.textBox || field.textArea) || !field.focused || field.disabled || field.readOnly || !codepoint || codepoint == '\r' || codepoint == '\n') continue;
@@ -2627,7 +2725,8 @@ namespace xui {
 
 	bool UiRuntime::updateColorPicker(Node& node, Vec2 point) {
 		const Rect anchor = m_layout.absRect(node.layout);
-		const Rect popup = popupBounds(anchor, false, 0, m_lastLayoutHeight, node.pickerWidth, node.pickerHeight);
+		const PickerGeometry geometry = pickerGeometry(node);
+		const Rect popup = geometry.popup;
 		if (!popup.contains(point)) return false;
 		f32 hue = 0.f, saturation = 0.f, value = 0.f;
 		const f32 hi = std::max({ node.pickerColor.r, node.pickerColor.g, node.pickerColor.b });
@@ -2639,21 +2738,18 @@ namespace xui {
 			else hue = ((node.pickerColor.r - node.pickerColor.g) / delta + 4.f) / 6.f;
 			if (hue < 0.f) hue += 1.f;
 		}
-		if (point.y >= popup.y + 158.f) return false;
-		if (point.y >= popup.y + 146.f && (!node.pickerShowAlpha || !node.pickerAlpha)) return false;
 		Color selected = node.pickerColor;
-		if (point.y >= popup.y + 146.f && node.pickerShowAlpha && node.pickerAlpha)
-			selected.a = std::clamp((point.x - popup.x) / popup.w, 0.f, 1.f);
-		else if (point.y >= popup.y + 124.f) {
-			if (!node.pickerShowHue) return false;
-			hue = std::clamp((point.x - popup.x) / popup.w, 0.f, 1.f);
+		if (geometry.alpha.contains(point))
+			selected.a = std::clamp((point.x - geometry.alpha.x) / geometry.alpha.w, 0.f, 1.f);
+		else if (geometry.hue.contains(point)) {
+			hue = std::clamp((point.x - geometry.hue.x) / geometry.hue.w, 0.f, 1.f);
 			selected = hsv(hue, saturation, value).withAlpha(node.pickerAlpha ? node.pickerColor.a : 1.f);
 		}
-		else {
-			if (!node.pickerShowSaturationValue) return false;
-			saturation = std::clamp((point.x - popup.x) / popup.w, 0.f, 1.f); value = 1.f - std::clamp((point.y - popup.y) / 118.f, 0.f, 1.f);
+		else if (geometry.saturationValue.contains(point)) {
+			saturation = std::clamp((point.x - geometry.saturationValue.x) / geometry.saturationValue.w, 0.f, 1.f);
+			value = 1.f - std::clamp((point.y - geometry.saturationValue.y) / geometry.saturationValue.h, 0.f, 1.f);
 			selected = hsv(hue, saturation, value).withAlpha(node.pickerAlpha ? node.pickerColor.a : 1.f);
-		}
+		} else return false;
 		if (selected == node.pickerColor) return false;
 		node.pickerColor = selected;
 		node.text = colorText(selected, node.pickerFormat, node.pickerAlpha, node.pickerPrecision);
@@ -2668,13 +2764,42 @@ namespace xui {
 	Rect UiRuntime::pickerEditorRect(const Node& editor) const {
 		if (!editor.pickerEditor || editor.pickerOwner >= m_nodes.size()) return {};
 		const Node& owner = m_nodes[editor.pickerOwner];
-		const Rect popup = popupBounds(m_layout.absRect(owner.layout), false, 0, m_lastLayoutHeight, owner.pickerWidth, owner.pickerHeight);
-		if (editor.pickerSlot < 4) {
-			const u32 count = owner.pickerAlpha ? 4u : 3u;
-			const f32 gap = 4.f, left = 5.f, width = (popup.w - left * 2.f - gap * (count - 1)) / count;
-			return { popup.x + left + editor.pickerSlot * (width + gap), popup.y + 194.f, width, 24.f };
+		const PickerGeometry geometry = pickerGeometry(owner);
+		if (editor.pickerSlot < 4) return geometry.channels[editor.pickerSlot];
+		return geometry.hexValue;
+	}
+
+	UiRuntime::PickerGeometry UiRuntime::pickerGeometry(const Node& node) const {
+		PickerGeometry g;
+		g.popup = popupBounds(m_layout.absRect(node.layout), false, 0, m_lastLayoutHeight, node.pickerWidth, node.pickerHeight);
+		const f32 inset = 12.f, width = std::max(0.f, g.popup.w - inset * 2.f);
+		f32 top = g.popup.y + inset;
+		if (node.pickerShowSaturationValue) {
+			g.saturationValue = { g.popup.x + inset, top, width, 148.f };
+			top = g.saturationValue.bottom() + 10.f;
 		}
-		return { popup.x + 5.f, popup.y + 235.f, popup.w - 10.f, 24.f };
+		if (node.pickerShowHue) {
+			g.hue = { g.popup.x + inset, top, width, 14.f };
+			top = g.hue.bottom() + 8.f;
+		}
+		if (node.pickerShowAlpha && node.pickerAlpha) {
+			g.alpha = { g.popup.x + inset, top, width, 12.f };
+			top = g.alpha.bottom() + 10.f;
+		}
+		g.format = { g.popup.x + inset, top, width, 28.f };
+		top = g.format.bottom() + 10.f;
+		if (node.pickerShowInputs) {
+			g.channelLabels = { g.popup.x + inset, top, width, 14.f };
+			const f32 count = node.pickerAlpha ? 4.f : 3.f;
+			const f32 gap = 6.f, fieldWidth = std::max(1.f, (width - gap * (count - 1.f)) / count);
+			const f32 fieldsY = g.channelLabels.bottom() + 3.f;
+			for (u32 i = 0; i < static_cast<u32>(count); ++i)
+				g.channels[i] = { g.popup.x + inset + i * (fieldWidth + gap), fieldsY, fieldWidth, 28.f };
+			const f32 hexY = fieldsY + 36.f;
+			g.hexLabel = { g.popup.x + inset, hexY, 36.f, 28.f };
+			g.hexValue = { g.hexLabel.right() + 8.f, hexY, std::max(1.f, width - 44.f), 28.f };
+		}
+		return g;
 	}
 
 	void UiRuntime::syncPickerEditors(u32 ownerIndex, u32 preserveIndex) {
@@ -3133,10 +3258,55 @@ namespace xui {
 		const Node* runtimeNode = findNode(node);
 		if (!runtimeNode) return {};
 		// Non-text widgets keep usable intrinsic sizes when .xui/.xss leave them auto-sized.
-		if (runtimeNode->switchToggle && runtimeNode->text.empty()) return { 44.f, 24.f };
+		if (runtimeNode->switchToggle) {
+			if (runtimeNode->text.empty() || !m_text || !runtimeNode->font.valid()) return { 44.f, 24.f };
+			const f32 fontSize = runtimeNode->style.has(PropId::FontSize) ? number(runtimeNode->style.get(PropId::FontSize), 0, 16.f) : 16.f;
+			const TextLayout& label = m_text->layout(runtimeNode->font, runtimeNode->text, fontSize, 0.f);
+			return { std::max(44.f, label.width + 46.f), std::max(24.f, label.height) };
+		}
+		if (runtimeNode->checkItem || runtimeNode->checkBox) {
+			const Size emptySize = runtimeNode->checkItem ? Size{ 160.f, 28.f } : Size{ 20.f, 20.f };
+			if (runtimeNode->text.empty() || !m_text || !runtimeNode->font.valid()) return emptySize;
+			const f32 fontSize = runtimeNode->style.has(PropId::FontSize) ? number(runtimeNode->style.get(PropId::FontSize), 0, 16.f) : 16.f;
+			const TextLayout& label = m_text->layout(runtimeNode->font, runtimeNode->text, fontSize, 0.f);
+			return { std::max(emptySize.w, label.width + 26.f), std::max(emptySize.h, label.height) };
+		}
+		if (runtimeNode->button || runtimeNode->toggleButton) {
+			if (runtimeNode->text.empty() || !m_text || !runtimeNode->font.valid()) return { 96.f, 36.f };
+		}
+		if (runtimeNode->fpsCounter) return { 168.f, 26.f };
 		if (runtimeNode->separator) return { 12.f, 1.f };
 		if (runtimeNode->spinner) return { 18.f, 18.f };
 		if (runtimeNode->image) return runtimeNode->imageW ? Size{ f32(runtimeNode->imageW), f32(runtimeNode->imageH) } : Size{ 96.f, 64.f };
+		// Empty controls still need a useful preferred size. Without these defaults, an auto-sized
+		// Slider/ProgressBar or an empty placeholder field measured to 0x0 until the app authored
+		// explicit dimensions. Keep these as content-box sizes; LayoutTree adds XUI/XSS padding and borders.
+		if (runtimeNode->slider) return { 160.f, 24.f };
+		if (runtimeNode->progressBar) return { 160.f, 16.f };
+		if (runtimeNode->colorPicker) return { 156.f, 34.f };
+		if (runtimeNode->dropdown) {
+			Size preferred{ 156.f, 34.f };
+			if (!runtimeNode->text.empty() && m_text && runtimeNode->font.valid()) {
+				const f32 fontSize = runtimeNode->style.has(PropId::FontSize) ? number(runtimeNode->style.get(PropId::FontSize), 0, 16.f) : 16.f;
+				const TextLayout& label = m_text->layout(runtimeNode->font, runtimeNode->text, fontSize, 0.f);
+				preferred.w = std::max(preferred.w, label.width + 32.f);
+				preferred.h = std::max(preferred.h, label.height + 12.f);
+			}
+			return preferred;
+		}
+		if (runtimeNode->textBox || runtimeNode->textArea) {
+			const f32 minWidth = runtimeNode->textArea ? 240.f : (runtimeNode->numberField || runtimeNode->searchField ? 180.f : 160.f);
+			const f32 minHeight = runtimeNode->textArea ? 96.f : 28.f;
+			const std::string& visibleText = runtimeNode->text.empty() ? runtimeNode->placeholder : runtimeNode->text;
+			if (!visibleText.empty() && m_text && runtimeNode->font.valid()) {
+				const f32 fontSize = runtimeNode->style.has(PropId::FontSize) ? number(runtimeNode->style.get(PropId::FontSize), 0, 16.f) : 16.f;
+				const f32 wrapWidth = constraint.fw ? constraint.w : 0.f;
+				const TextLayout& content = m_text->layout(runtimeNode->font, visibleText, fontSize, wrapWidth);
+				const f32 controlInset = runtimeNode->numberField ? 60.f : runtimeNode->searchField ? 24.f : 0.f;
+				return { std::max(minWidth, content.width + controlInset), std::max(minHeight, content.height) };
+			}
+			return { minWidth, minHeight };
+		}
 		if (runtimeNode->radioGroup) {
 			if (!m_text || !runtimeNode->font.valid() || runtimeNode->options.empty()) return { 160.f, 28.f };
 			const f32 fontSize = runtimeNode->style.has(PropId::FontSize) ? number(runtimeNode->style.get(PropId::FontSize), 0, 16) : 16.f;
@@ -3165,7 +3335,9 @@ namespace xui {
 		const f32 wrapWidth = constraint.fw ? constraint.w : 0.f;
 		const TextLayout& run = m_text->layout(runtimeNode->font, runtimeNode->text, fontSize, wrapWidth);
 		const f32 spacing = runtimeNode->style.has(PropId::LetterSpacing) ? number(runtimeNode->style.get(PropId::LetterSpacing), 0) : 0.f;
-		return { run.width + spacing * static_cast<f32>(run.glyphs.size() > 0 ? run.glyphs.size() - 1 : 0), run.height };
+		const f32 contentWidth = run.width + spacing * static_cast<f32>(run.glyphs.size() > 0 ? run.glyphs.size() - 1 : 0);
+		if (runtimeNode->button || runtimeNode->toggleButton) return { std::max(96.f, contentWidth), std::max(36.f, run.height) };
+		return { contentWidth, run.height };
 	}
 
 	f32 UiRuntime::number(const StyleValue& value, std::size_t index, f32 fallback) {

@@ -29,6 +29,16 @@ Row[class: "toolbar"] {
 }
 ```
 
+`Toolbar` and `StatusBar` are runtime-supported aliases for horizontal flow containers; they do not paint a native chrome surface. `Divider` is an alias for `Separator`. These aliases are included in the showcase so applications can use semantic names while `.xss` styles the child controls and their layout.
+
+### Preferred sizes for auto-sized widgets
+
+Widgets with no authored width or height use their measured content plus `.xui`/`.xss` padding and border. Empty controls also have a useful content-box preferred size so they do not collapse while showing a placeholder or an empty value: buttons start at 96×36, checkboxes at 20×20, checklist items at 160×28, single-line fields at 160×28, text areas at 240×96, sliders at 160×24, progress bars at 160×16, dropdowns/color pickers at 156×34, switches at 44×24, and the FPS counter at 168×26 logical pixels. Search and number fields start at 180 px wide to leave room for their auxiliary glyphs. Labeled checkboxes/checklist items reserve 26 px for the mark, and labeled switches reserve 46 px for their track and gap.
+
+These are minimum preferred sizes, not fixed sizes: text fields grow with measured content and text areas grow with wrapped content when the parent allows it. Authored `width`, `height`, `min-width`, and `max-width` still constrain the result; small explicit boxes clip text to their bounds according to the widget's text behavior. Flow containers may flex-shrink auto-sized children when their own size is fixed and too small for all content; set an appropriate `minWidth`/`minHeight`, adjust `shrink`, or use a `ScrollView` when the content must remain fully visible.
+
+Containers measure their in-flow children and include their own padding/border, so a content-sized `Column`, `Row`, or `Panel` grows to fit its children. A fixed size or a parent with insufficient space can still constrain that content; use `ScrollView` for intentionally bounded content.
+
 ### `Panel`
 
 A vertical container commonly used as a styled surface. It is not independently draggable, dockable, or collapsible in the current runtime. The schema accepts `title`, `collapsed`, and `collapsible`, but the runtime does not implement those behaviors or paint the title argument; add a `Text` child for a visible heading.
@@ -108,7 +118,7 @@ An on/off toggle rendered as a track with a sliding knob and an optional label t
 Switch[label: "Wi-Fi", checked: true, change: onWifi][id: "wifi", class: "switch"]
 ```
 
-The on-state track takes the control's `fg`; the unchecked track and the knob are fixed colors. The label uses the normal text properties and is offset clear of the track automatically. Without an explicit size and label the widget measures 44x24; with a label the text adds to the intrinsic width. There is no indeterminate state.
+The on-state track takes the control's `fg`; the unchecked track is a dimmed version of that same color. The knob remains a fixed light contrast mark. `radius` controls the track, and background, border, text, opacity, and states continue to come from `.xss`. The label uses the normal text properties and is offset clear of the track automatically. Without an explicit size and label the widget measures 44x24; with a label the text adds to the intrinsic width. There is no indeterminate state.
 
 ```xss
 Switch.switch { resting: { size: 64px 32px, fg: #2563eb, font-size: 14px } hover: { fg: #3b82f6 } focus: { border: 1px solid #70a7ff } checked: { fg: #2563eb } disabled: { opacity: 0.45 } }
@@ -163,14 +173,14 @@ TextBox.field {
 
 ### `TextArea`
 
-A multiline editable field with the same `.xui` values and state styles as `TextBox`. Text wraps to its styled content width; Enter inserts a newline, and Backspace at the beginning of a line merges it with the previous line. Keyboard selection and clipboard editing follow `TextBox`. Its `id` exposes a `std::string`; user edits invoke `change`. This is a basic text area rather than a rich text editor.
+A multiline editable field with the same `.xui` values and state styles as `TextBox`. Text wraps to its styled content width; Enter inserts a newline, and Backspace at the beginning of a line merges it with the previous line. Tab inserts spaces using `tabSize` (default 4, accepted range 1–16); `tabSize: 2` is useful for compact code or notes. Backspace/Delete operate on the previous/next UTF-8 character or selection, and control codes are never drawn as glyphs. The focused caret blinks and uses the shaped advance of the current line, including after newline and whitespace. Keyboard selection and clipboard editing follow `TextBox`. Its `id` exposes a `std::string`; user edits invoke `change`. This is a basic text area rather than a rich text editor.
 
 ```xui
 TextArea[id: "notes", placeholder: "Add notes…", maxLength: 2000,
         tooltip: "Keep the summary concise", change: onNotesChanged, class: "notes"]
 ```
 
-Style size, padding, font, foreground/background, border, radius, and shared control states in `.xss`; text and selection are clipped to the field. Undo, IME preedit display, drag selection, and mouse caret positioning remain future work.
+Style size, padding, font, foreground/background, border, radius, and shared control states in `.xss`; text, selection, and caret are clipped to the field. The single-line `TextBox` also filters non-printing control characters and retains its horizontal caret tracking. Undo, IME preedit display, drag selection, and mouse caret positioning remain future work.
 
 ```xss
 TextArea.notes { resting: { size: 420px 140px, pad: 10px, bg: #172033, fg: #f5f7ff, border: 1px solid #40506b, radius: 6px, font-size: 14px } focus: { border: 2px solid #70a7ff } placeholder: { fg: #929db1 } }
@@ -361,7 +371,7 @@ ColorPicker[id: "accent", value: #5b8cff, format: "hex", formats: "hex|rgb|hsl|h
   change: onAccent][class: "color-picker"]
 ```
 
-`format` selects the initially displayed format (`hex`, `rgb`, `hsl`, or `hsv`); `formats` is a pipe-separated list used by the switcher and its order. `popupSize: 240x220` requests the popup dimensions (the runtime enforces a minimum of 196x204 for its built-in controls). `precision` rounds decimal components to 0–4 places. `alpha` defaults to true and forces alpha to 1 when false; `showAlpha` controls whether the alpha strip is visible. `showHue` and `showSaturationValue` hide their respective HSV surfaces; `showInputs` and `showFormatSwitcher` control the typed value row and format label. Hex input accepts `#rgb`, `#rgba`, `#rrggbb`, and `#rrggbbaa`; functional input accepts comma-separated `rgb(a)`, `hsl(a)`, and `hsv(a)` values, including percentage components for saturation/lightness/value. Named colors, CSS space-separated syntax, an inline layout, separate numeric fields, custom labels/placeholders, and individually themed hue/alpha sub-controls are not implemented yet. `.xss` controls the widget/popup surface and text through normal `size`, `bg`, `fg`, `border`, `radius`, `pad`, and state declarations; the hue strip remains the standard spectrum.
+`format` selects the initially displayed format (`hex`, `rgb`, `hsl`, or `hsv`); `formats` is a pipe-separated list used by the switcher and its order. The default popup is 300×352 logical pixels, with a larger saturation/value field, hue/alpha bars, a preview/format row, aligned channel labels, and editable channel/hex fields. `popupSize` can enlarge it; the built-in editors require at least 260×340. `precision` rounds decimal components to 0–4 places. `alpha` defaults to true and forces alpha to 1 when false; `showAlpha` controls whether the alpha strip is visible. `showHue` and `showSaturationValue` hide their respective HSV surfaces; `showInputs` and `showFormatSwitcher` control the typed value row and format label. Hex input accepts `#rgb`, `#rgba`, `#rrggbb`, and `#rrggbbaa`; functional input accepts comma-separated `rgb(a)`, `hsl(a)`, and `hsv(a)` values, including percentage components for saturation/lightness/value. Named colors, CSS space-separated syntax, an inline layout, and individually themed hue/alpha sub-controls are not implemented yet. `.xss` controls the widget/popup surface and text through normal `size`, `bg`, `fg`, `border`, `radius`, `pad`, and state declarations; the hue spectrum and picker interaction geometry use consistent framework defaults.
 
 Read the canonical backend-neutral `Color` (RGBA float components) with `ui.runtime().value("accent")` or `controlColor("accent")`. `controlText("accent")` returns the active formatted string. `setValue("accent", Color{...})` and `setValue("accent", std::string("hsl(210, 60%, 50%)"))` are supported; invalid strings return `false` and leave the color unchanged. The optional `change` callback is fired for live pointer changes and live valid typed changes. Clipboard copy/paste uses the platform interface.
 
@@ -383,7 +393,7 @@ Button.primary {
 CheckItem.check-item { resting: { fg: #f8fafc, size: 260px 36px } hover: { bg: #263752 } checked: { fg: #60a5fa } }
 ```
 
-The full property/value table is in the [styling reference](styling-reference.md). The default [showcase](../examples/showcase.xui) and [stylesheet](../examples/showcase.xss) exercise the complete runtime-supported object set: the Input tab covers `TextBox`/`TextArea`/`CheckBox` plus `SearchField`/`NumberField`, the Controls tab covers `Button`/`Slider`/`ProgressBar`/`Dropdown`/`ColorPicker` plus `Switch`/`ToggleButton`/`RadioGroup`, and the Layout tab covers `Split`/`CheckList` plus a display section with `Separator`, `Image`, `Label`, `Badge`, and `Spinner`. The earlier [cross-platform sample](../examples/cross_platform.xui) and focused [controls sample](../examples/controls.xui) remain available as smaller references.
+The full property/value table is in the [styling reference](styling-reference.md). The default [showcase](../examples/showcase.xui) and [stylesheet](../examples/showcase.xss) exercise the complete runtime-supported object set: the Input tab covers `TextBox`/`TextArea`/`CheckBox` plus `SearchField`/`NumberField`, the Controls tab covers `Button`/`Slider`/`ProgressBar`/`Dropdown`/`ColorPicker` plus `Switch`/`ToggleButton`/`RadioGroup`, and the Layout tab covers `Split`/`CheckList` plus `Separator`/`Divider`, `Image`, `Label`, `Badge`, `Spinner`, `Toolbar`, and `StatusBar`. `Tooltip` is exercised as an attached behavior on target controls. The earlier [cross-platform sample](../examples/cross_platform.xui) and focused [controls sample](../examples/controls.xui) remain available as smaller references.
 
 ## Mode pickers, values, and navigation
 

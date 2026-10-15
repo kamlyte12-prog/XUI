@@ -61,11 +61,11 @@ Token expressions support numeric `+`, `-`, `*`, `/` with compatible units; colo
 
 The compiler starts with these palette tokens, which the stylesheet can override: `color.on-primary` (`#ffffff`), `color.primary.active` (`#1d4ed8`), `color.muted` (`#52525b`), `color.border` (`#27272a`), and `color.shadow` (`#00000066`).
 
-The parser/compiler supports `@theme` token sets and `StyleSheet` can resolve by theme index. The current `UiRuntime` always resolves theme index zero and does not expose a theme-switching method. Theme syntax is currently useful to low-level clients.
+The parser/compiler supports `@theme` token sets. The standard facade/runtime can select one by name: call `ui.setTheme("dark")` after `loadXss()`; the choice may be made before or after `attach()`. This changes palette-backed paint and text styles, including generated popup/editor nodes. Layout-affecting theme tokens are not reapplied after the `.xui`/`.xss` layout merge yet; use themes for colors and typography while keeping dimensions, padding, margins, and gaps invariant.
 
 ## Styling versus layout
 
-The `.xss` language carries both visual paint rules and layout inputs. In the runtime, `size`, `min-size`, `max-size`, `pad`, `margin`, `gap`, `grow`, `shrink`, `align`, and `justify` feed `LayoutTree`. Background, foreground, border, radius, shadow, opacity, and text properties feed painting. Layout stays in logical pixels; the painter and text atlas handle output DPI.
+The `.xss` language carries both visual paint rules and layout defaults. In the runtime, `size`, `min-size`, `max-size`, `min-width`, `max-width`, `min-height`, `max-height`, `pad`, `margin`, `gap`, `grow`, `shrink`, `align`, and `justify` feed `LayoutTree`. Background, foreground, border, radius, shadow, opacity, and text properties feed painting. Layout stays in logical pixels; the painter and text atlas handle output DPI. Percent dimensions resolve against the parent content box after its border and padding; min/max clamps apply to the resolved size.
 
 For a fixed centered action:
 

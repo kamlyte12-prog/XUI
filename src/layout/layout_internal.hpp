@@ -3,6 +3,28 @@
 #include <xui/layout/layout.hpp>
 #include <cmath>
 namespace xui {
+	inline Edges contentInsets(const LayoutStyle& style) {
+		return { style.padding.l + style.border.l, style.padding.t + style.border.t,
+			style.padding.r + style.border.r, style.padding.b + style.border.b };
+	}
+	inline f32 layoutMin(const LayoutStyle& style, bool horizontal, f32 basis) {
+		const f32 legacy = horizontal ? style.minW : style.minH;
+		const Length& constraint = horizontal ? style.minWidth : style.minHeight;
+		if (constraint.k == LenKind::Auto) return legacy;
+		const f32 value = constraint.k == LenKind::Percent
+			? (std::isfinite(basis) ? std::max(0.f, basis * constraint.v * 0.01f) : legacy)
+			: std::max(0.f, constraint.v);
+		return std::max(legacy, value);
+	}
+	inline f32 layoutMax(const LayoutStyle& style, bool horizontal, f32 basis) {
+		const f32 legacy = horizontal ? style.maxW : style.maxH;
+		const Length& constraint = horizontal ? style.maxWidth : style.maxHeight;
+		if (constraint.k == LenKind::Auto) return legacy;
+		const f32 value = constraint.k == LenKind::Percent
+			? (std::isfinite(basis) ? std::max(0.f, basis * constraint.v * 0.01f) : legacy)
+			: std::max(0.f, constraint.v);
+		return std::min(legacy, value);
+	}
 	struct LayoutTree::FlexItem {
 		u32 node = 0;
 		f32 basis = 0, hyp = 0, main = 0, tent = 0, raw = 0, cross = 0;

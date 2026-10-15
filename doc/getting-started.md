@@ -12,7 +12,7 @@ cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-The cross-platform demo target is `xui_glfw_demo`. It uses the bundled GLFW source and requires system OpenGL development files. On Windows the same source is also built as `xui_hello`. The default launch loads `showcase.xui` and `showcase.xss`, with Input, Controls, and Layout tabs covering every currently runtime-supported widget. Press F3 to toggle the FPS counter.
+The cross-platform demo target is `xui_glfw_demo`. It uses the bundled GLFW source and requires system OpenGL development files. On Windows the same source is also built as `xui_hello`. The default launch loads `showcase.xui` and `showcase.xss`, with Input, Controls, Layout, Widgets, and Scrolling tabs covering every currently runtime-supported widget, including toolbar/status bar container aliases and the divider alias. Press F3 to toggle the FPS counter.
 
 For a project in the same CMake tree, add Xui as a subdirectory and link its application facade target:
 
@@ -45,6 +45,8 @@ int main() {
         std::cerr << ui.lastError() << '\n';
         return 1;
     }
+    // Optional: activate an @theme declared in main.xss.
+    // if (!ui.setTheme("dark")) { std::cerr << ui.lastError() << '\n'; return 1; }
     if (!ui.attach(renderer, platform)) {
         std::cerr << ui.lastError() << '\n';
         return 1;

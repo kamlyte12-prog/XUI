@@ -52,7 +52,7 @@ ScrollView[id: "results", vertical: true, horizontal: false, scrollSpeed: 42,
 
 Use `ui.runtime().scrollTo("results", {0, 120})` for direct positioning or `scrollIntoView("target", true)` to reveal a descendant. See the [ScrollView widget reference](widgets.md#scrollview) for nested input routing, clipping, keyboard behavior, and current limitations.
 
-The common validator accepts generic names including `id`, `class`, `key`, `slot`, `grow`, `shrink`, `visible`, `disabled`, `tooltip`, `tooltipShowDelay`, `tooltipHideDelay`, `tooltipTrigger`, `tooltipHideOnClick`, `tooltipDisabled`, `align`, `justify`, `pad`, `margin`, `size`, `minSize`, `maxSize`, `width`, `height`, and `opacity`. Tooltip timing/trigger are behavior properties in `.xui`; bubble appearance belongs to `.xss`. The runtime applies structural geometry properties `grow`, `shrink`, `align`, `justify`, `pad`, `margin`, `size`, `minSize`, `maxSize`, `width`, and `height` from `.xui`; Row/Column also accept a named `gap` constructor argument, and CheckList accepts `gap` as a property. `.xui` values override the same `.xss` layout defaults. `visible` and `.xui opacity` are still not implemented as runtime state/paint behavior; use `.xss opacity` for visual opacity.
+The common validator accepts generic names including `id`, `class`, `key`, `slot`, `grow`, `shrink`, `visible`, `disabled`, `tooltip`, `tooltipShowDelay`, `tooltipHideDelay`, `tooltipTrigger`, `tooltipHideOnClick`, `tooltipDisabled`, `align`, `justify`, `pad`, `margin`, `size`, `minSize`, `maxSize`, `width`, `height`, `minWidth`, `maxWidth`, `minHeight`, `maxHeight`, and `opacity`. Tooltip timing/trigger are behavior properties in `.xui`; bubble appearance belongs to `.xss`. The runtime applies structural geometry properties from `.xui`; Row/Column also accept a named `gap` constructor argument, and CheckList accepts `gap` as a property. `.xui` values override the same `.xss` layout defaults. `visible` and `.xui opacity` are still not implemented as runtime state/paint behavior; use `.xss opacity` for visual opacity.
 
 ## Supported layout containers
 
@@ -78,7 +78,22 @@ The backend reports the available window client area in logical pixels. The runt
 - Use `.xui align: Center` on a child to override its parent's cross-axis alignment. On a container, `.xui align` sets the default alignment for its children.
 - `.xss size`, `min-size`, `max-size`, `grow`, `shrink`, `gap`, `pad`, `margin`, `align`, and `justify` remain supported as layout defaults for compatibility; an authored `.xui` layout value takes precedence.
 
-`px`, `%`, and `dp` are supported for `.xui` width/height values; unitless values and `px`/`dp` are logical pixels. Percentages are resolved once against the containing block. For padding and margin, use a scalar logical-pixel value or a unitless horizontal-by-vertical pair. The stylesheet parser accepts more units, but runtime layout does not convert `em`, `rem`, `vw`, `vh`, or `sp`. DPI conversion occurs in text rasterization and painter output, not in authored logical layout sizes.
+`px`, `%`, and `dp` are supported for `.xui` width/height/min/max values; unitless values and `px`/`dp` are logical pixels. Percentages resolve against the parent's usable content box after its border and padding. Min/max constraints clamp the computed border-box size after percentage resolution, so combinations such as `width: 80%`, `minWidth: 50%`, and an `.xss max-width: 60%` work together. Use camelCase names in `.xui`; `.xss` supports `size`, `min-size`, `max-size`, and the longhands `min-width`, `max-width`, `min-height`, and `max-height`. For padding and margin, use a scalar logical-pixel value or a unitless horizontal-by-vertical pair. The stylesheet parser accepts more units, but runtime layout does not convert `em`, `rem`, `vw`, `vh`, or `sp`. DPI conversion occurs in text rasterization and painter output, not in authored logical layout sizes.
+
+Auto-sized widgets use measured content and widget-specific preferred sizes for empty controls; `.xui` and `.xss` padding/borders are added by the layout engine. See [preferred sizes for auto-sized widgets](widgets.md#preferred-sizes-for-auto-sized-widgets) for default content-box dimensions and how explicit constraints interact with them.
+
+```xui
+Column[class: "content", pad: 20px] {
+  Button(label: "Responsive action")[class: "responsive-action", width: 80%, minWidth: 220px, maxWidth: 520px, height: 44px]
+}
+```
+
+```xss
+Column.content { resting: { border: 2px solid #334155 } }
+Button.responsive-action { resting: { min-width: 40%, max-width: 600px } }
+```
+
+Here the button's percentage width and minimum use the column's content width after the 20 px padding and 2 px border on both sides. If minimum and maximum conflict, the minimum wins, matching the layout solver's clamp rule. A percentage cannot resolve against an indefinite auto-sized parent during intrinsic measurement; it behaves as auto until the parent supplies a definite content size.
 
 The native window's title and starting size are configured with `XuiOptions`. `Window(title: ..., size: ...)` is parsed and retained as document metadata, but the `Xui` facade currently creates the native window from `XuiOptions`; set both explicitly if you want matching metadata and window configuration.
 

@@ -52,9 +52,25 @@ f32 GlfwPlatform::dpiScale(WindowHandle h) const {
 	const Vec2 logical = windowSizeLogical(h); const Vec2i pixels = windowSizePixels(h);
 	return logical.x > 0 ? f32(pixels.x) / logical.x : 1.f;
 }
+void GlfwPlatform::setLiveResizeHook(WindowHandle h, void (*fn)(void*), void* context) {
+	if (Window* w = find(h)) { w->liveResizeFn = fn; w->liveResizeContext = context; }
+}
+
 bool GlfwPlatform::pumpEvents(Event& e) {
-	glfwPollEvents();
-	if (m_events.empty()) { e = {}; return false; }
+	if (m_events.empty()) {
+		if (m_polledForCurrentDrain) {
+			m_polledForCurrentDrain = false;
+			e = {};
+			return false;
+		}
+		m_polledForCurrentDrain = true;
+		glfwPollEvents();
+		if (m_events.empty()) {
+			m_polledForCurrentDrain = false;
+			e = {};
+			return false;
+		}
+	}
 	e = m_events.front(); m_events.pop_front(); return true;
 }
 void GlfwPlatform::waitEvents(f64 timeout) { if (timeout > 0) glfwWaitEventsTimeout(timeout); else glfwWaitEvents(); }
@@ -91,7 +107,16 @@ GlfwPlatform::Window* GlfwPlatform::find(WindowHandle h) { return h.index < m_wi
 const GlfwPlatform::Window* GlfwPlatform::find(WindowHandle h) const { return const_cast<GlfwPlatform*>(this)->find(h); }
 GlfwPlatform::Window* GlfwPlatform::record(GLFWwindow* w) { return static_cast<Window*>(glfwGetWindowUserPointer(w)); }
 void GlfwPlatform::push(GLFWwindow* w, const Event& src) { if (Window* r = record(w)) { Event e = src; e.window = r->handle; r->owner->m_events.push_back(e); } }
-void GlfwPlatform::onSize(GLFWwindow* w, int width, int height) { Event e{}; e.type = EventType::Resize; e.w = f32(width); e.h = f32(height); push(w, e); }
+// Interactive resize on Windows runs a modal loop inside glfwPollEvents/glfwWaitEvents; the app
+// loop cannot regain control until the drag ends. The size callback therefore queues the Resize
+// event AND drives one full frame per live step so widgets and layout resize continuously.
+void GlfwPlatform::onSize(GLFWwindow* w, int width, int height) {
+	if (Window* r = record(w)) {
+		Event e{}; e.type = EventType::Resize; e.w = f32(width); e.h = f32(height);
+		push(w, e);
+		if (r->liveResizeFn) r->liveResizeFn(r->liveResizeContext);
+	}
+}
 void GlfwPlatform::onCursor(GLFWwindow* w, double x, double y) { Event e{}; e.type = EventType::MouseMove; e.x = f32(x); e.y = f32(y); push(w, e); }
 void GlfwPlatform::onScroll(GLFWwindow* w, double dx, double dy) {
 	Event e{}; e.type = EventType::Wheel; e.dx = f32(dx); e.dy = f32(dy);

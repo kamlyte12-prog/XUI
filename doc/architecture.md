@@ -100,6 +100,6 @@ For a host-managed loop, the lower-level order is: load/validate the `Program`, 
 
 ## Current runtime scope
 
-The parser/schema has more widget names and language syntax than `UiRuntime` supports. See [UI object reference](widgets.md) for implemented controls and the schema-only list. Dynamic expression evaluation, `if`/`for`, component expansion, text editing, property-filter selector lookup, theme switching, and animation playback are not implemented by the standard runtime.
+The parser/schema has more widget names and language syntax than `UiRuntime` supports. See [UI object reference](widgets.md) for implemented controls and the schema-only list. Dynamic expression evaluation, `if`/`for`, component expansion, property-filter selector lookup, and animation playback are not implemented by the standard runtime. Named `.xss` palette themes can be selected with `Xui::setTheme("dark")` after loading the stylesheet (or before attach); theme-dependent layout geometry such as padding and gap still needs full reapplication support, so keep structural dimensions in `.xui` until that is resolved.
 
 This guide is the current interface reference. Historical implementation notes are recorded in [`tracking.md`](../tracking.md).

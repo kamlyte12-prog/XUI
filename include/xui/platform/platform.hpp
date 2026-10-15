@@ -112,6 +112,11 @@ public:
     virtual std::string clipboardText() const = 0;
     /// Ask for a redraw (delivered as an EventType::Tick on the app loop, coalesced per frame).
     virtual void requestRedraw(WindowHandle) = 0;
+    /// Optional: backends whose interactive resize runs a modal loop (Win32 sizing via GLFW)
+    /// never return from pumpEvents/waitEvents mid-drag, so the app loop cannot redraw.
+    /// Such backends invoke this hook from their size callback to render each live step.
+    /// Default no-op keeps headless and non-modal backends unchanged.
+    virtual void setLiveResizeHook(WindowHandle, void (*)(void*), void*) {}
 };
 
 } // namespace xui

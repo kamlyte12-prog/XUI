@@ -38,7 +38,7 @@ struct StyleValue {
 ///  Pad/Margin/Radius: 4 atoms (top,right,bottom,left | tl,tr,br,bl). Gap: 2 (row,col). Size/MinSize/MaxSize: 2 (w,h).
 ///  Border: [width, style-ident, color] or [none]. Shadow: [x y blur spread? color inset?].
 enum class PropId : u8 {
-    Bg, Fg, Border, Radius, Pad, Margin, Gap, Size, MinSize, MaxSize, Opacity, Shadow, Blur, Transform,
+    Bg, Fg, Border, Radius, Pad, Margin, Gap, Size, MinSize, MaxSize, MinWidth, MaxWidth, MinHeight, MaxHeight, Opacity, Shadow, Blur, Transform,
     Font, FontSize, FontWeight, LetterSpacing, Align, Justify, Grow, Shrink, Cursor, ZIndex, Clip, Overflow,
     Animation, ScrollTrack, ScrollThumb, ScrollbarSize, ScrollbarVisibility, ScrollBehavior, ScrollSpeed, Count
 };

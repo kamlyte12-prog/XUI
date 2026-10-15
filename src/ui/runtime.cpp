@@ -59,7 +59,7 @@ Color hsv(f32 hue, f32 saturation, f32 value) {
     else if (h < 5.f) out = {x, 0, c, 1}; else out = {c, 0, x, 1};
     out.r += m; out.g += m; out.b += m; return out;
 }
-std::string colorHex(Color c) { char text[10]; std::snprintf(text, sizeof(text), "#%08x", c.toRGBA8()); return text; }
+[[maybe_unused]] std::string colorHex(Color c) { char text[10]; std::snprintf(text, sizeof(text), "#%08x", c.toRGBA8()); return text; }
 std::string colorText(Color c, std::string_view format, bool alpha, u32 precision) {
     precision = std::min<u32>(precision, 4);
     char text[96]{};
@@ -554,7 +554,11 @@ bool UiRuntime::buildNode(const Document& document, u32 index, u32 parentIndex, 
             else if (node.tabs && name == "selected" && expression.kind == XExprKind::Number) node.selectedTab = static_cast<u32>(std::max(0.f, expression.num));
             else if (node.colorPicker && name == "value" && expression.kind == XExprKind::Color) node.pickerColor = Color::fromRGBA8(expression.color);
             else if (node.colorPicker && name == "value" && expression.kind == XExprKind::String) { Color parsed; if (parseColorText(value, parsed)) node.pickerColor = parsed; }
-            else if ((node.dropdown || node.radioGroup || node.segmented || node.breadcrumb) && name == "value") for (u32 i = 0; i < node.options.size(); ++i) if (node.options[i] == value) node.selectedOption = i;
+            else if ((node.dropdown || node.radioGroup || node.segmented || node.breadcrumb) && name == "value") {
+                for (u32 i = 0; i < node.options.size(); ++i) {
+                    if (node.options[i] == value) node.selectedOption = i;
+                }
+            }
             else if (node.datePicker && name == "value") {
                 i32 year = 0; u32 month = 0, day = 0;
                 if (std::sscanf(value.data(), "%4d-%2u-%2u", &year, &month, &day) == 3 && month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth(year, month)) {
@@ -1474,7 +1478,7 @@ void UiRuntime::paint(Painter& painter, f32 dpiScale) {
             static const char* const weekdays[7] = {"Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"};
             const Color accent = color(node.style, PropId::Fg, Color::fromRGBA8(0x4772B3FFu));
             const Rect header{popup.x, popup.y, popup.w, 26.f};
-            RectStyle headerDivider;
+            [[maybe_unused]] RectStyle headerDivider;
             painter.fillRect(header, foreground.withAlpha(0.06f));
             drawLabel("‹", {popup.x, popup.y, 26.f, 26.f}, node.font, node.style, foreground, 8.f, false);
             drawLabel("›", {popup.right() - 26.f, popup.y, 26.f, 26.f}, node.font, node.style, foreground, 8.f, false);

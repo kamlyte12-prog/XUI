@@ -41,7 +41,9 @@ jobs:
           fi
           EXTRA=""
           # Build only GLFW's X11 backend on Linux; Wayland needs extra packages.
-          if [ "$RUNNER_OS" = "Linux" ]; then EXTRA="-DGLFW_BUILD_WAYLAND=OFF"; fi
+          if [ "$RUNNER_OS" = "Linux" ]; then EXTRA="$EXTRA -DGLFW_BUILD_WAYLAND=OFF"; fi
+          # Only override CMAKE_CXX_FLAGS when needed; an empty override drops MSVC's /EHsc.
+          if [ -n "${{ matrix.flags }}" ]; then EXTRA="$EXTRA -DCMAKE_CXX_FLAGS=${{ matrix.flags }}"; fi
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Debug \
             -DXUI_BUILD_TESTS=ON \
@@ -49,7 +51,6 @@ jobs:
             -DXUI_BUILD_EXAMPLES=ON \
             -DXUI_WERROR=${{ matrix.werror }} \
             -DXUI_SANITIZE=${{ matrix.san }} \
-            -DCMAKE_CXX_FLAGS="${{ matrix.flags }}" \
             $EXTRA
 
       - name: Build

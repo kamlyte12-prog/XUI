@@ -15,7 +15,7 @@ option(XUI_SANITIZE          "Enable ASan+UBSan (GCC/Clang)" OFF)
 # One place for warning policy; every Xui target links xui_warnings.
 add_library(xui_warnings INTERFACE)
 if(MSVC)
-  target_compile_options(xui_warnings INTERFACE /W4 /permissive- $<$<BOOL:${XUI_WERROR}>:/WX>)
+  target_compile_options(xui_warnings INTERFACE /W4 /permissive- /EHsc $<$<BOOL:${XUI_WERROR}>:/WX>)
   target_compile_definitions(xui_warnings INTERFACE _CRT_SECURE_NO_WARNINGS)
 else()
   target_compile_options(xui_warnings INTERFACE -Wall -Wextra -Wpedantic $<$<BOOL:${XUI_WERROR}>:-Werror>)

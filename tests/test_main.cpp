@@ -16,6 +16,6 @@ void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
 void operator delete(void* p, const std::nothrow_t&) noexcept { std::free(p); }
 void operator delete[](void* p, const std::nothrow_t&) noexcept { std::free(p); }
 int main() {
-    std::setvbuf(stdout, nullptr, _IONBF, 0);   // line-by-line output: a crash cannot hide its victim
-    return xtest::runAll();
+	std::setvbuf(stdout, nullptr, _IONBF, 0);   // line-by-line output: a crash cannot hide its victim
+	return xtest::runAll();
 }

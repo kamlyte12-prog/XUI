@@ -385,8 +385,58 @@ CheckItem.check-item { resting: { fg: #f8fafc, size: 260px 36px } hover: { bg: #
 
 The full property/value table is in the [styling reference](styling-reference.md). The default [showcase](../examples/showcase.xui) and [stylesheet](../examples/showcase.xss) exercise the complete runtime-supported object set: the Input tab covers `TextBox`/`TextArea`/`CheckBox` plus `SearchField`/`NumberField`, the Controls tab covers `Button`/`Slider`/`ProgressBar`/`Dropdown`/`ColorPicker` plus `Switch`/`ToggleButton`/`RadioGroup`, and the Layout tab covers `Split`/`CheckList` plus a display section with `Separator`, `Image`, `Label`, `Badge`, and `Spinner`. The earlier [cross-platform sample](../examples/cross_platform.xui) and focused [controls sample](../examples/controls.xui) remain available as smaller references.
 
+## Mode pickers, values, and navigation
+
+### `SegmentedControl`
+An inline mode picker: pipe-separated `options` in equal cells, `value` selects one. Click a segment or focus and press Left/Right. The selected cell fills with the control's `fg`; hovered cells get a row-local tint (the control's own `hover` style still applies to the group). `value()`/`setValue()` take the option string; `change` fires on selection. Style the surface with the shared properties; the selected fill always uses `fg`.
+
+```xui
+SegmentedControl[id: "shading", options: "Solid|Wireframe|Rendered", value: "Solid", change: onShading][class: "segmented"]
+```
+
+### `Stepper`
+A compact numeric value with visible `−`/`+` buttons: `value`, `min` (default 0), `max` (default 100), `step` (default 1), `precision`, `unit`. Clicking a button or pressing Up/Down while focused applies `step` within bounds; the formatted value is drawn left of the buttons. It exposes the committed `f64` through the value API and fires `change` on every step; there is no typed entry (use `NumberField` for that).
+
+```xui
+Stepper[id: "subdivisions", value: 2, min: 0, max: 7, step: 1, change: onSubdiv][class: "stepper"]
+```
+
+### `Rating`
+A row of pips (`max`, default 5, clamped 1–10). Click a pip to set the value; clicking the last lit pip clears to zero; Left/Right adjust when focused. Hover previews the pip under the pointer. `value()` returns the `f64` count; `change` fires on change.
+
+```xui
+Rating[id: "priority", value: 3, max: 5, change: onPriority][class: "rating"]
+```
+
+### `Breadcrumb`
+A clickable path of pipe-separated segments joined by `›`. Clicking a segment selects it (the application decides what that means — there is no history stack); hover highlights the segment under the pointer using per-label widths. `value()`/`setValue()` use the segment string.
+
+```xui
+Breadcrumb[id: "trail", options: "Project|Assets|Textures|Wood", value: "Textures", change: onTrail][class: "crumbs"]
+```
+
+### `KeybindField`
+Captures a keyboard shortcut. Focus it and press a combination; the field shows the normalized label (for example `Ctrl+Shift+S`) and fires `change`. Bare modifier presses keep waiting; Escape clears the binding; Tab and F3 stay reserved (focus traversal and the FPS toggle). The optional `value` sets the initial label and `placeholder` replaces the "Press keys…" hint. `value()`/`setValue()` use the label string.
+
+```xui
+KeybindField[id: "save-key", value: "Ctrl+S", placeholder: "Press keys…", change: onKeybind][class: "keybind"]
+```
+
+### `DatePicker`
+A date field with a month-calendar popup, following the Dropdown/ColorPicker popup pattern. `value` is `YYYY-MM-DD` (validated on build and `setValue`; invalid strings are ignored). Click the field to open; `‹`/`›` step the viewed month; click a day to select and close; outside click and Escape close. While open, Left/Right move one day, Up/Down one week, PageUp/PageDown about a month. The weekday row is Monday-first. `value()`/`setValue()` use the `YYYY-MM-DD` string; `change` fires on any committed date change.
+
+```xui
+DatePicker[id: "due-date", value: "2026-10-15", change: onDue][class: "date"]
+```
+
+### `ProgressBar[indeterminate: true]`
+`indeterminate` replaces the proportional fill with a short segment sweeping across the track, animated on the same 80 ms idle tick as `Spinner` (only while visible). The deterministic form is unchanged.
+
+### `Toolbar` and `StatusBar`
+Schema-recognized horizontal containers now materialized as Row-equivalent layout nodes for app chrome; they have no state or painting of their own — style them like `Row`/`Panel`.
+
 ## Schema-recognized, runtime-unsupported objects
 
-The current core schema also recognizes names that are not materialized by `UiRuntime::build()`: `Grid`, `Stack`, `ScrollView`, `Toolbar`, `MenuBar`, `StatusBar`, `Menu`, `MenuItem`, `Popover`, `Modal`, `ContextMenu`, `DockSpace`, `IconButton`, `RangeSlider`, `ComboBox`, `DatePicker`, `KeybindField`, `Icon`, `TreeView`, `ListView`, `Table`, `Canvas`, `HUD`, `Crosshair`, `RadialMenu`, `HealthBar`, and `DamageNumber`.
+The current core schema also recognizes names that are not materialized by `UiRuntime::build()`: `Grid`, `Stack`, `ScrollView`, `MenuBar`, `Menu`, `MenuItem`, `Popover`, `Modal`, `ContextMenu`, `DockSpace`, `IconButton`, `RangeSlider`, `ComboBox`, `Icon`, `TreeView`, `ListView`, `Table`, `Canvas`, `HUD`, `Crosshair`, `RadialMenu`, `HealthBar`, and `DamageNumber`. (`Toolbar` and `StatusBar` are implemented as plain horizontal containers.)
 
 Use only the supported object list above in a document passed to `Xui::attach()`. Parser/schema entries are retained for future implementation and language validation; they are not native controls or hidden fallbacks.

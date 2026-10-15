@@ -22,12 +22,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Linux GL/X11 development packages
+      - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            pkg-config libgl-dev xorg-dev libc++-18-dev libc++abi-18-dev
+            pkg-config libgl-dev xorg-dev libc++-18-dev libc++abi-18-dev \
+            fonts-dejavu-core fonts-liberation2
 
       - name: Relax ASLR for ASan
         if: runner.os == 'Linux' && matrix.san == 'ON'
@@ -57,4 +58,12 @@ jobs:
       - name: Test
         env:
           UBSAN_OPTIONS: print_stacktrace=1
-        run: ctest --test-dir build -C Debug --output-on-failure
+        run: |
+          if ! ctest --test-dir build -C Debug --output-on-failure; then
+            echo "=============== ctest failed: running test binary directly from repo root ==============="
+            exe=$(find build -type f \( -name xui_tests -o -name xui_tests.exe \) | head -1)
+            echo "binary: $exe"
+            "$exe"
+            echo "exit code: $?"
+            exit 1
+          fi

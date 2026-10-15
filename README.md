@@ -368,7 +368,7 @@ Before submitting changes, please run the [build and test](#-build-and-test) com
 
 ## 📄 License
 
-[TODO: Add a LICENSE file and state the license here.] The bundled GLFW 3.5.1 under `examples/lib/` keeps its own license; see [`examples/lib/glfw-3.5.1/LICENSE.md`](examples/lib/glfw-3.5.1/LICENSE.md).
+This project is under the MIT license. The bundled GLFW 3.5.1 under `examples/lib/` keeps its own license; see [`examples/lib/glfw-3.5.1/LICENSE.md`](examples/lib/glfw-3.5.1/LICENSE.md).
 
 ---
 

@@ -2,6 +2,36 @@
 
 This file records project changes, design decisions, trade-offs, current status, and next steps. It is updated as implementation work lands.
 
+## Second widget wave + Blender grey theme — 2026-10-15
+
+### Added
+
+- Six new runtime widgets, each with `.xui` properties, `.xss` states, pointer + keyboard interaction, focus registration, and value-API exposure: `SegmentedControl` (options/value, click + Left/Right, selected cell uses `fg`), `Stepper` (value/min/max/step/precision/unit, −/+ buttons, Up/Down, f64 value), `Rating` (max pips, click/Left/Right, click-last-pip clears), `Breadcrumb` (per-label-width clickable path), `KeybindField` (captures mods+key, normalized labels; Tab/F3 reserved; Escape clears), and `DatePicker` (`YYYY-MM-DD` value, month-grid popup reusing the dropdown/picker overlay pattern, ‹ › month nav, day selection, arrow-key day stepping via proleptic-Gregorian date math).
+- `Toolbar`/`StatusBar` materialize as Row-equivalent containers (schema names existed; no state).
+- `ProgressBar[indeterminate: true]` sweeps via the shared 80 ms idle tick (paint and both timer loops extended; no continuous redraw).
+- `NumberField` finally paints its −/+ stepper buttons and routes clicks in the reserved 44 px zone (the Phase 1 reserve existed without buttons or hit zones).
+- Demo: new "Widgets" tab exercising all of the above with per-control live readouts via `value()`/`setValue()`; six new handlers in `glfw_demo.cpp`; `showcase.xss` fully restyled to a flat grey Blender-inspired theme (canvas `#1d1d1d`, panels `#303030`, widget surfaces `#545454`, dark `#212121` outlines, Blender blue `#4772b3` selection accent, 3 px radii, no gradients).
+
+### Decisions and trade-offs
+
+- Keybind capture excludes Tab (focus traversal) and F3 (FPS toggle) so global shortcuts stay intact; documented in `doc/widgets.md`.
+- DatePicker has no "today" marker (no wall clock in the runtime) and no hover highlight inside the popup; day selection commits and closes like ImGui-style pickers. PageUp/PageDown shift ±30 days rather than exact calendar months (documented).
+- Calendar/dates use civil-date math valid across the full proleptic Gregorian range; no locale — month/weekday names are English-only.
+- `SegmentedControl` selected fill and `Rating` pip colors derive from `fg`; there are no per-segment/per-pip sub-selectors yet (same virtual-target limitation as dropdown rows).
+- Stepper defaults 0–100 step 1; authored min/max override. No typed entry — that stays `NumberField`'s role.
+
+### Verification and current status
+
+- **Not compiled or run in this session** (owner directive: no builds/executions). This is a large unverified delta on top of the also-uncompiled caret/whitespace change; the very first next action must be a full build. Expected risk areas: the new paint blocks, the popup-loop condition changes (datePicker must not fall into the color-picker `else`), and `keyLabel`'s F-key arithmetic.
+- Prior baseline: Phase 1 runtime compiled clean under MSVC `/W4 /WX`; suite was green (152 tests) before the demo/theme changes; none of the new widgets have tests yet.
+
+### Next steps
+
+1. `cmake --build build --config Release --target xui_tests xui_glfw_demo`, fix compile errors, run the suite.
+2. Visible smoke pass: every Widgets-tab control, date popup nav, keybind capture (incl. reserved keys), indeterminate sweep + spinner under F3, resize smoothness in the grey theme.
+3. Add unit tests: segmented/rating/stepper value math, breadcrumb hit widths, keybind label normalization, date parse/shift round-trips, indeterminate timer scheduling.
+4. `--profile` FPS check with the busy bar + spinner visible.
+
 ## Caret blink, whitespace visualization, demo polish — 2026-10-14
 
 ### Audit and diagnosis

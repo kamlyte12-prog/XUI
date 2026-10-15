@@ -6,7 +6,7 @@ Window(title: "Xui GLFW/OpenGL widget showcase", size: 1080x760) {
       FpsCounter[class: "fps", width: 168px, height: 26px, pad: 5px]
     }
 
-    Tabs[id: "demo-sections", selected: 0, change: onTabChange, class: "tabs", width: 100%, height: 590px] {
+    Tabs[id: "demo-sections", selected: 0, change: onTabChange, class: "tabs", width: 100%, height: 620px] {
       // Text entry, checkbox state, keyboard focus, and hover/focus tooltips.
       Tab(title: "Input")[id: "input-tab"] {
         Column[id: "input-page", class: "page", pad: 18px, gap: 10px, grow: 1] {
@@ -140,6 +140,51 @@ Window(title: "Xui GLFW/OpenGL widget showcase", size: 1080x760) {
                 Spinner[disabled: true, class: "spinner", width: 22px, height: 22px]
               }
             }
+          }
+        }
+      }
+
+      // Second wave: mode pickers, values, navigation, and popups. Every control has an id
+      // and its change handler writes a live readout through the value retriever API.
+      Tab(title: "Widgets")[id: "widgets-tab"] {
+        Column(gap: 10)[id: "widgets-page", class: "page", pad: 18px, grow: 1] {
+          Breadcrumb[id: "trail", options: "Project|Assets|Textures|Wood", value: "Textures",
+                tooltip: "Click a path segment to navigate there.", change: onTrailChange,
+                class: "crumbs", width: 420px, height: 24px]
+          Row(gap: 14)[id: "pickers-row", class: "field-row"] {
+            Column(gap: 6)[id: "pickers-left"] {
+              Text("SegmentedControl")[class: "section-title"]
+              SegmentedControl[id: "shading", options: "Solid|Wireframe|Rendered", value: "Solid",
+                    tooltip: "Click a segment, or focus and press Left/Right.", change: onShadingChange,
+                    class: "segmented", width: 330px, height: 30px]
+              Text("Rating")[class: "section-title"]
+              Rating[id: "priority", value: 3, max: 5, tooltip: "Click a pip; click the last lit pip to clear.",
+                    change: onRatingChange, class: "rating", width: 130px, height: 24px]
+              Text("Stepper")[class: "section-title"]
+              Stepper[id: "subdivisions", value: 2, min: 0, max: 7, step: 1, change: onSubdivChange,
+                    tooltip: "Click - or +, or focus and press Up/Down.", class: "stepper", width: 180px, height: 34px]
+            }
+            Column(gap: 6)[id: "pickers-right"] {
+              Text("DatePicker")[class: "section-title"]
+              DatePicker[id: "due-date", value: "2026-10-15", change: onDateChange,
+                    tooltip: "Click to open the calendar; use the arrows or type arrows to move the day.",
+                    class: "date", width: 170px, height: 34px]
+              Text("KeybindField")[class: "section-title"]
+              KeybindField[id: "save-key", value: "Ctrl+S", placeholder: "Press keys…",
+                    tooltip: "Focus and press a key combination. Escape clears it.",
+                    change: onKeybindChange, class: "keybind", width: 170px, height: 34px]
+              Text("Indeterminate progress")[class: "section-title"]
+              ProgressBar[id: "busy-bar", indeterminate: true, class: "progress", width: 220px, height: 14px]
+            }
+          }
+          Separator[class: "rule"]
+          Column(gap: 4)[id: "widgets-readouts", class: "readouts"] {
+            Text("Shading: Solid")[id: "shading-readout", class: "value-readout", width: 420px, height: 22px]
+            Text("Priority: 3/5")[id: "rating-readout", class: "value-readout", width: 420px, height: 22px]
+            Text("Subdivisions: 2")[id: "subdiv-readout", class: "value-readout", width: 420px, height: 22px]
+            Text("Due: 2026-10-15")[id: "date-readout", class: "value-readout", width: 420px, height: 22px]
+            Text("Save key: Ctrl+S")[id: "keybind-readout", class: "value-readout", width: 420px, height: 22px]
+            Text("Trail: Project › Assets › Textures")[id: "trail-readout", class: "value-readout", width: 420px, height: 22px]
           }
         }
       }

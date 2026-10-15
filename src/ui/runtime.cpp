@@ -217,6 +217,91 @@ std::string visualizeWhitespace(std::string_view text) {
     return out;
 }
 
+/// Days since 1970-01-01 for a proleptic Gregorian date (Howard Hinnant's civil-from-days inverse).
+u32 daysFromCivil(i32 year, u32 month, u32 day) {
+    i32 y = year - (month <= 2 ? 1 : 0);
+    const i32 era = (y >= 0 ? y : y - 399) / 400;
+    const u32 yoe = static_cast<u32>(y - era * 400);
+    const u32 mp = month > 2u ? month - 3u : month + 9u;   // shifted month, always positive
+    const u32 doy = (153u * mp + 2u) / 5u + day - 1u;
+    const u32 doe = yoe * 365u + yoe / 4u - yoe / 100u + doy;
+    return static_cast<u32>(era * 146097 + static_cast<i32>(doe) - 719468);
+}
+
+/// Weekday with Monday = 0 (1970-01-01 was a Thursday = 3).
+u32 weekdayMonday0(i32 year, u32 month, u32 day) { return (daysFromCivil(year, month, day) + 3u) % 7u; }
+
+u32 daysInMonth(i32 year, u32 month) {
+    static const u32 days[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    if (month == 2) { const bool leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0; return leap ? 29u : 28u; }
+    return month >= 1 && month <= 12 ? days[month - 1] : 31u;
+}
+
+const char* const kMonthNames[12] = {"January", "February", "March", "April", "May", "June",
+                                     "July", "August", "September", "October", "November", "December"};
+
+/// Shifts a civil date by a signed day count, carrying month/year boundaries.
+void shiftDate(i32& year, u32& month, u32& day, i32 days) {
+    while (days > 0) {
+        const u32 dim = daysInMonth(year, month);
+        if (day + static_cast<u32>(days) <= dim) { day = day + static_cast<u32>(days); days = 0; }
+        else { days -= static_cast<i32>(dim - day + 1u); day = 1u; if (++month > 12u) { month = 1u; ++year; } }
+    }
+    while (days < 0) {
+        if (static_cast<i32>(day) - 1 + days >= 1) { day = static_cast<u32>(static_cast<i32>(day) + days); days = 0; }
+        else { days += static_cast<i32>(day) - 1; if (month == 1u) { month = 12u; --year; } else --month; day = daysInMonth(year, month); }
+    }
+}
+
+std::string formatDateText(i32 year, u32 month, u32 day) {
+    char text[32];
+    std::snprintf(text, sizeof(text), "%04d-%02u-%02u", year, month, day);
+    return text;
+}
+
+/// Human label for a captured key combination ("Ctrl+Shift+S"). Printable keys use their ASCII value.
+std::string keyLabel(Key key, u8 mods) {
+    std::string combo;
+    if (mods & static_cast<u8>(Mod::Ctrl)) combo += "Ctrl+";
+    if (mods & static_cast<u8>(Mod::Shift)) combo += "Shift+";
+    if (mods & static_cast<u8>(Mod::Alt)) combo += "Alt+";
+    if (mods & static_cast<u8>(Mod::Super)) combo += "Super+";
+    const u16 code = static_cast<u16>(key);
+    if (code >= 32 && code <= 126 && key != Key::Space) {
+        combo += static_cast<char>(code);
+        return combo;
+    }
+    switch (key) {
+    case Key::Space: combo += "Space"; break;
+    case Key::Escape: combo += "Escape"; break;
+    case Key::Enter: case Key::KpEnter: combo += "Enter"; break;
+    case Key::Backspace: combo += "Backspace"; break;
+    case Key::Insert: combo += "Insert"; break;
+    case Key::Delete: combo += "Delete"; break;
+    case Key::Right: combo += "Right"; break;
+    case Key::Left: combo += "Left"; break;
+    case Key::Down: combo += "Down"; break;
+    case Key::Up: combo += "Up"; break;
+    case Key::PageUp: combo += "PageUp"; break;
+    case Key::PageDown: combo += "PageDown"; break;
+    case Key::Home: combo += "Home"; break;
+    case Key::End: combo += "End"; break;
+    case Key::F1: case Key::F2: case Key::F4: case Key::F5: case Key::F6: case Key::F7:
+    case Key::F8: case Key::F9: case Key::F10: case Key::F11: case Key::F12:
+        combo += "F" + std::to_string(code - 0xE030u + 1u); break;
+    case Key::Kp0: case Key::Kp1: case Key::Kp2: case Key::Kp3: case Key::Kp4:
+    case Key::Kp5: case Key::Kp6: case Key::Kp7: case Key::Kp8: case Key::Kp9:
+        combo += "Kp" + std::to_string(code - 0xE040u); break;
+    case Key::KpDecimal: combo += "Kp."; break;
+    case Key::KpDivide: combo += "Kp/"; break;
+    case Key::KpMultiply: combo += "Kp*"; break;
+    case Key::KpSubtract: combo += "Kp-"; break;
+    case Key::KpAdd: combo += "Kp+"; break;
+    default: combo += "Key" + std::to_string(code); break;
+    }
+    return combo;
+}
+
 bool loadUiAssets(std::string_view xuiSource, std::string_view xssSource, StringInterner& strings,
                   UiAssetBundle& out, std::string& error, std::string_view xuiName, std::string_view xssName) {
     auto document = parseXui(xuiSource, xuiName, strings);
@@ -370,13 +455,21 @@ bool UiRuntime::buildNode(const Document& document, u32 index, u32 parentIndex, 
     node.separator = typeIs(source.type, *m_strings, "Separator") || typeIs(source.type, *m_strings, "Divider");
     node.spinner = typeIs(source.type, *m_strings, "Spinner");
     node.image = typeIs(source.type, *m_strings, "Image");
+    node.datePicker = typeIs(source.type, *m_strings, "DatePicker");
+    node.segmented = typeIs(source.type, *m_strings, "SegmentedControl");
+    node.stepper = typeIs(source.type, *m_strings, "Stepper");
+    node.rating = typeIs(source.type, *m_strings, "Rating");
+    node.breadcrumb = typeIs(source.type, *m_strings, "Breadcrumb");
+    node.keybindField = typeIs(source.type, *m_strings, "KeybindField");
     if (node.numberField) { node.textBox = true; node.value = 0.f; }
     if (node.searchField) node.textBox = true;
+    if (node.rating) { node.minValue = 0.f; node.maxValue = 5.f; }   // an authored max overrides below
+    if (node.stepper) { node.value = 0.f; node.minValue = 0.f; node.maxValue = 100.f; }
 
     if (typeIs(source.type, *m_strings, "Window") || typeIs(source.type, *m_strings, "Column") ||
         typeIs(source.type, *m_strings, "Panel") || typeIs(source.type, *m_strings, "CheckList")) {
         node.layout = m_layout.create(LayoutKind::Column);
-    } else if (typeIs(source.type, *m_strings, "Row")) {
+    } else if (typeIs(source.type, *m_strings, "Row") || typeIs(source.type, *m_strings, "Toolbar") || typeIs(source.type, *m_strings, "StatusBar")) {
         node.layout = m_layout.create(LayoutKind::Row);
     } else if (node.split) {
         node.layout = m_layout.create(LayoutKind::Split);
@@ -384,7 +477,7 @@ bool UiRuntime::buildNode(const Document& document, u32 index, u32 parentIndex, 
         node.layout = m_layout.create(LayoutKind::Stack);
     } else if (node.tab) {
         node.layout = m_layout.create(LayoutKind::Column);
-    } else if (typeIs(source.type, *m_strings, "Text") || node.button || node.checkItem || node.checkBox || node.slider || node.progressBar || node.fpsCounter || node.dropdown || node.colorPicker || node.textBox || node.textArea || node.radioGroup || node.switchToggle || node.toggleButton || node.label || node.badge || node.separator || node.spinner || node.image) {
+    } else if (typeIs(source.type, *m_strings, "Text") || node.button || node.checkItem || node.checkBox || node.slider || node.progressBar || node.fpsCounter || node.dropdown || node.colorPicker || node.textBox || node.textArea || node.radioGroup || node.switchToggle || node.toggleButton || node.label || node.badge || node.separator || node.spinner || node.image || node.datePicker || node.segmented || node.stepper || node.rating || node.breadcrumb || node.keybindField) {
         node.layout = m_layout.create(LayoutKind::Leaf);
     } else {
         error = "unsupported runtime widget '" + std::string(m_strings->view(source.type)) + "'";
@@ -414,7 +507,7 @@ bool UiRuntime::buildNode(const Document& document, u32 index, u32 parentIndex, 
     for (const XProp& prop : document.propsOf(source)) {
         const std::string_view name = m_strings->view(prop.name);
         const std::string_view value = literal(document, *m_strings, prop.expr);
-        if (node.numberField && prop.role == XPropRole::Value && prop.expr < document.exprs.size() &&
+        if ((node.numberField || node.stepper) && prop.role == XPropRole::Value && prop.expr < document.exprs.size() &&
             (name == "value" || name == "min" || name == "max" || name == "step" || name == "precision" || name == "unit")) {
             const XExpr& expression = document.exprs[prop.expr];
             if (name == "unit") node.unit.assign(value);
@@ -455,13 +548,21 @@ bool UiRuntime::buildNode(const Document& document, u32 index, u32 parentIndex, 
             if(name=="showHue") node.pickerShowHue=enabled;
             if(name=="showSaturationValue") node.pickerShowSaturationValue=enabled;
         }
-        else if (((name == "value" && (node.textBox || node.textArea || node.colorPicker || node.dropdown || node.radioGroup)) || (name == "selected" && node.tabs)) && prop.role == XPropRole::Value && prop.expr < document.exprs.size()) {
+        else if (((name == "value" && (node.textBox || node.textArea || node.colorPicker || node.dropdown || node.radioGroup || node.segmented || node.breadcrumb || node.datePicker || node.keybindField)) || (name == "selected" && node.tabs)) && prop.role == XPropRole::Value && prop.expr < document.exprs.size()) {
             const XExpr& expression = document.exprs[prop.expr];
             if ((node.textBox || node.textArea) && name == "value") node.text = value;
             else if (node.tabs && name == "selected" && expression.kind == XExprKind::Number) node.selectedTab = static_cast<u32>(std::max(0.f, expression.num));
             else if (node.colorPicker && name == "value" && expression.kind == XExprKind::Color) node.pickerColor = Color::fromRGBA8(expression.color);
             else if (node.colorPicker && name == "value" && expression.kind == XExprKind::String) { Color parsed; if (parseColorText(value, parsed)) node.pickerColor = parsed; }
-            else if ((node.dropdown || node.radioGroup) && name == "value") for (u32 i = 0; i < node.options.size(); ++i) if (node.options[i] == value) node.selectedOption = i;
+            else if ((node.dropdown || node.radioGroup || node.segmented || node.breadcrumb) && name == "value") for (u32 i = 0; i < node.options.size(); ++i) if (node.options[i] == value) node.selectedOption = i;
+            else if (node.datePicker && name == "value") {
+                i32 year = 0; u32 month = 0, day = 0;
+                if (std::sscanf(value.data(), "%4d-%2u-%2u", &year, &month, &day) == 3 && month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth(year, month)) {
+                    node.dateYear = year; node.dateMonth = month; node.dateDay = day;
+                    node.viewYear = year; node.viewMonth = month;
+                }
+            }
+            else if (node.keybindField && name == "value") node.text.assign(value);
         }
         else if (name == "maxLength" && prop.role == XPropRole::Value && prop.expr < document.exprs.size() && document.exprs[prop.expr].kind == XExprKind::Number)
             node.maxLength = static_cast<u32>(std::max(0.f, document.exprs[prop.expr].num));
@@ -491,6 +592,8 @@ bool UiRuntime::buildNode(const Document& document, u32 index, u32 parentIndex, 
             else node.imageFit = 1;   // Contain is the default
         }
         else if (node.image && name == "source" && prop.role == XPropRole::Value) node.imageSource.assign(value);
+        else if (node.progressBar && name == "indeterminate" && prop.role == XPropRole::Value && prop.expr < document.exprs.size())
+            node.indeterminate = document.exprs[prop.expr].kind == XExprKind::Bool && document.exprs[prop.expr].bval;
         else if ((name == "readOnly" || name == "password") && prop.role == XPropRole::Value && prop.expr < document.exprs.size()) {
             const bool flag = document.exprs[prop.expr].kind == XExprKind::Bool && document.exprs[prop.expr].bval;
             if (name == "readOnly") node.readOnly = flag;
@@ -678,23 +781,26 @@ bool UiRuntime::buildNode(const Document& document, u32 index, u32 parentIndex, 
             if (control.selectedOption < control.options.size()) control.text = control.options[control.selectedOption];
         } else { control.text = colorText(control.pickerColor,control.pickerFormat,control.pickerAlpha,control.pickerPrecision); }
     }
-    if (Node& group = m_nodes[runtimeIndex]; group.radioGroup) {
+    if (Node& group = m_nodes[runtimeIndex]; group.radioGroup || group.segmented || group.breadcrumb) {
         if (group.options.empty()) group.options = {"Option 1", "Option 2", "Option 3"};
         group.selectedOption = std::min(group.selectedOption, static_cast<u32>(group.options.size() - 1));
     }
+    if (Node& picker = m_nodes[runtimeIndex]; picker.datePicker)
+        picker.text = formatDateText(picker.dateYear, picker.dateMonth, picker.dateDay);
     if (m_nodes[runtimeIndex].textBox || m_nodes[runtimeIndex].textArea) {
         Node& field = m_nodes[runtimeIndex];
         field.text = truncateUtf8(field.text, field.maxLength);
         field.caret = field.text.size();
     }
-    if (Node& field = m_nodes[runtimeIndex]; field.numberField) {
-        if (field.numberBounded) field.value = std::clamp(field.value, std::min(field.minValue, field.maxValue), std::max(field.minValue, field.maxValue));
+    if (Node& field = m_nodes[runtimeIndex]; field.numberField || field.stepper) {
+        if (field.numberBounded || field.stepper) field.value = std::clamp(field.value, std::min(field.minValue, field.maxValue), std::max(field.minValue, field.maxValue));
         field.text = formatNumberText(field.value, field.numberPrecision);
         if (!field.unit.empty()) { field.text += " "; field.text += field.unit; }
         field.caret = field.text.size();
     }
     if (m_nodes[runtimeIndex].button || m_nodes[runtimeIndex].checkItem || m_nodes[runtimeIndex].checkBox || m_nodes[runtimeIndex].slider || m_nodes[runtimeIndex].dropdown || m_nodes[runtimeIndex].colorPicker || m_nodes[runtimeIndex].textBox || m_nodes[runtimeIndex].textArea || m_nodes[runtimeIndex].tabs ||
-        m_nodes[runtimeIndex].switchToggle || m_nodes[runtimeIndex].toggleButton || m_nodes[runtimeIndex].radioGroup) m_interactiveNodes.push_back(runtimeIndex);
+        m_nodes[runtimeIndex].switchToggle || m_nodes[runtimeIndex].toggleButton || m_nodes[runtimeIndex].radioGroup ||
+        m_nodes[runtimeIndex].segmented || m_nodes[runtimeIndex].stepper || m_nodes[runtimeIndex].rating || m_nodes[runtimeIndex].breadcrumb || m_nodes[runtimeIndex].keybindField || m_nodes[runtimeIndex].datePicker) m_interactiveNodes.push_back(runtimeIndex);
     if (m_nodes[runtimeIndex].split) m_splitNodes.push_back(runtimeIndex);
 
     for (u32 child : document.childrenOf(source))
@@ -824,11 +930,11 @@ void UiRuntime::paint(Painter& painter, f32 dpiScale) {
     };
     bool spinnerActive = false;
     for (u32 i = 0; i < m_nodes.size(); ++i)
-        if (m_nodes[i].spinner && !m_nodes[i].disabled && isNodeVisible(i)) { spinnerActive = true; break; }
+        if ((m_nodes[i].spinner || (m_nodes[i].progressBar && m_nodes[i].indeterminate)) && !m_nodes[i].disabled && isNodeVisible(i)) { spinnerActive = true; break; }
     if (spinnerActive && now >= m_spinnerDeadline) {
         m_spinnerDeadline = now + std::chrono::milliseconds(80);
         for (u32 i = 0; i < m_nodes.size(); ++i)
-            if (m_nodes[i].spinner && !m_nodes[i].disabled && isNodeVisible(i)) {
+            if ((m_nodes[i].spinner || (m_nodes[i].progressBar && m_nodes[i].indeterminate)) && !m_nodes[i].disabled && isNodeVisible(i)) {
                 m_nodes[i].spinnerPhase = std::fmod(m_nodes[i].spinnerPhase + 0.6283185f, 6.2831853f);
                 addDamage(m_layout.absRect(m_nodes[i].layout));
             }
@@ -947,7 +1053,7 @@ void UiRuntime::paint(Painter& painter, f32 dpiScale) {
                 painter.line({box.x + boxSize * 0.43f, box.y + boxSize - 4.f}, {box.x + boxSize - 3.f, box.y + 4.f}, 2.f, mark);
             }
         }
-        if (node.dropdown) {
+        if (node.dropdown || node.datePicker) {
             const f32 cx = rect.right() - 15.f, cy = rect.y + rect.h * 0.5f;
             const Color mark = color(node.style, PropId::Fg, Color::fromRGBA8(0xF2F6FFFFu));
             painter.line({cx - 4.f, cy - 2.f}, {cx, cy + 2.f}, 1.5f, mark);
@@ -967,7 +1073,16 @@ void UiRuntime::paint(Painter& painter, f32 dpiScale) {
                 const f32 thickness = std::max(4.f, rect.h * 0.35f);
                 const Rect trackRect{rect.x, rect.y + (rect.h - thickness) * 0.5f, rect.w, thickness};
                 painter.fillRect(trackRect, track, CornerRadii::all(thickness * 0.5f));
-                painter.fillRect({trackRect.x, trackRect.y, trackRect.w * fraction, trackRect.h}, fill, CornerRadii::all(thickness * 0.5f));
+                if (node.indeterminate) {
+                    // Sweep a short segment across the track; spinnerPhase is advanced by the idle timer.
+                    const f32 span = trackRect.w * 0.3f;
+                    const f32 head = std::fmod(node.spinnerPhase / 6.2831853f, 1.f) * (trackRect.w + span);
+                    const f32 left = std::clamp(head - span, 0.f, trackRect.w);
+                    const f32 right = std::clamp(head, 0.f, trackRect.w);
+                    if (right > left) painter.fillRect({trackRect.x + left, trackRect.y, right - left, trackRect.h}, fill, CornerRadii::all(thickness * 0.5f));
+                } else {
+                    painter.fillRect({trackRect.x, trackRect.y, trackRect.w * fraction, trackRect.h}, fill, CornerRadii::all(thickness * 0.5f));
+                }
             } else {
                 const f32 thickness = std::max(3.f, rect.h * 0.16f);
                 const f32 centerY = rect.y + rect.h * 0.5f;
@@ -1087,6 +1202,96 @@ void UiRuntime::paint(Painter& painter, f32 dpiScale) {
             }
             painter.popOpacity(); continue;
         }
+        if (node.segmented) {
+            const Color accent = color(node.style, PropId::Fg, Color::fromRGBA8(0x4772B3FFu));
+            const f32 segmentWidth = node.options.empty() ? rect.w : rect.w / f32(node.options.size());
+            for (u32 i = 0; i < node.options.size(); ++i) {
+                const Rect cell{rect.x + segmentWidth * f32(i), rect.y, segmentWidth, rect.h};
+                RectStyle cellStyle;
+                cellStyle.radius = CornerRadii::all(4.f);
+                if (i == node.selectedOption) { cellStyle.fill = accent; cellStyle.border = accent; cellStyle.borderWidth = 1.f; }
+                else if (static_cast<i32>(i) == node.hoveredOption && !node.disabled) { cellStyle.fill = Color::fromRGBA8(0x4772B333u); }
+                if (cellStyle.fill.a > 0 || cellStyle.borderWidth > 0) painter.roundRect(cell, cellStyle);
+                drawLabel(node.options[i], cell, node.font, node.style,
+                          i == node.selectedOption ? Color::fromRGBA8(0xFFFFFFFFu) : accent, 6.f, false);
+            }
+            painter.popOpacity(); continue;
+        }
+        if (node.stepper) {
+            const Color mark = color(node.style, PropId::Fg, Color::fromRGBA8(0xD1D1D1FFu));
+            const f32 button = std::min(20.f, rect.w * 0.25f);
+            const Rect minus{rect.right() - button * 2.f, rect.y, button, rect.h};
+            const Rect plus{rect.right() - button, rect.y, button, rect.h};
+            RectStyle divider;
+            divider.border = Color::fromRGBA8(0x3A3A3AFFu); divider.borderWidth = 1.f;
+            painter.line({minus.x, rect.y}, {minus.x, rect.bottom()}, 1.f, divider.border);
+            painter.line({plus.x, rect.y}, {plus.x, rect.bottom()}, 1.f, divider.border);
+            if (node.stepperZone) {
+                const Rect& hot = node.stepperZone == 1 ? minus : plus;
+                painter.fillRect(hot, mark.withAlpha(0.12f));
+            }
+            painter.line({minus.x + 5.f, minus.y + minus.h * 0.5f}, {minus.right() - 5.f, minus.y + minus.h * 0.5f}, 1.5f, mark);
+            painter.line({plus.x + plus.w * 0.5f, plus.y + 6.f}, {plus.x + plus.w * 0.5f, plus.bottom() - 6.f}, 1.5f, mark);
+            painter.line({plus.x + 5.f, plus.y + plus.h * 0.5f}, {plus.right() - 5.f, plus.y + plus.h * 0.5f}, 1.5f, mark);
+            drawLabel(node.text, {rect.x, rect.y, rect.w - button * 2.f, rect.h}, node.font, node.style, mark, 8.f, false);
+            painter.popOpacity(); continue;
+        }
+        if (node.rating) {
+            const Color accent = color(node.style, PropId::Fg, Color::fromRGBA8(0x4772B3FFu));
+            const i32 pips = static_cast<i32>(std::clamp(node.maxValue, 1.f, 10.f));
+            const f32 spacing = rect.w / f32(pips);
+            for (i32 i = 0; i < pips; ++i) {
+                const f32 cx = rect.x + spacing * (f32(i) + 0.5f), cy = rect.y + rect.h * 0.5f;
+                const f32 radius = std::min(7.f, spacing * 0.3f);
+                const bool filled = f32(i) < node.value;
+                const bool hovered = i == node.hoveredOption && !node.disabled;
+                if (filled || hovered)
+                    painter.fillRect({cx - radius, cy - radius, radius * 2.f, radius * 2.f},
+                                     filled ? accent : accent.withAlpha(0.35f), CornerRadii::all(radius));
+                else
+                    painter.roundRect({cx - radius, cy - radius, radius * 2.f, radius * 2.f},
+                                      RectStyle{Color{0,0,0,0}, Color::fromRGBA8(0x808080FFu), 1.f, CornerRadii::all(radius)});
+            }
+            painter.popOpacity(); continue;
+        }
+        if (node.breadcrumb) {
+            const Color accent = color(node.style, PropId::Fg, Color::fromRGBA8(0xD1D1D1FFu));
+            const f32 fontSize = node.style.has(PropId::FontSize) ? number(node.style.get(PropId::FontSize), 0, 14) : 14.f;
+            f32 x = rect.x;
+            for (u32 i = 0; i < node.options.size(); ++i) {
+                const f32 width = m_text && node.font.valid() ? m_text->layout(node.font, node.options[i], fontSize, 0.f).width / m_dpiScale : 0.f;
+                if (static_cast<i32>(i) == node.hoveredOption && !node.disabled)
+                    painter.fillRect({x, rect.y, width + 8.f, rect.h}, accent.withAlpha(0.1f), CornerRadii::all(3.f));
+                drawLabel(node.options[i], {x, rect.y, width + 12.f, rect.h}, node.font, node.style,
+                          i == node.selectedOption ? color(node.style, PropId::Border, accent) : accent, 0.f, false);
+                x += width + 8.f;
+                if (i + 1 < node.options.size()) {
+                    drawLabel("›", {x, rect.y, 12.f, rect.h}, node.font, node.style, accent.withAlpha(0.55f), 0.f, false);
+                    x += 14.f;
+                }
+            }
+            painter.popOpacity(); continue;
+        }
+        if (node.keybindField) {
+            if (node.focused && node.text.empty())
+                drawLabel(node.placeholder.empty() ? "Press keys…" : node.placeholder, rect, node.font, node.style,
+                          color(node.style, PropId::Fg, Color::fromRGBA8(0x9A9A9AFFu)).withAlpha(0.6f), 8.f, false);
+            else if (!node.text.empty())
+                drawLabel(node.text, rect, node.font, node.style, color(node.style, PropId::Fg, Color::fromRGBA8(0xD1D1D1FFu)), 8.f, false);
+            painter.popOpacity(); continue;
+        }
+        if (node.numberField && !node.disabled) {
+            // Stepper buttons in the reserved right zone; clicks are routed in pointerDown().
+            const Color mark = color(node.style, PropId::Fg, Color::fromRGBA8(0xD1D1D1FFu)).withAlpha(0.7f);
+            const f32 button = std::min(20.f, rect.w * 0.22f);
+            const Rect minus{rect.right() - button * 2.f, rect.y, button, rect.h};
+            const Rect plus{rect.right() - button, rect.y, button, rect.h};
+            painter.line({minus.x, rect.y + 3.f}, {minus.x, rect.bottom() - 3.f}, 1.f, mark.withAlpha(0.35f));
+            painter.line({plus.x, rect.y + 3.f}, {plus.x, rect.bottom() - 3.f}, 1.f, mark.withAlpha(0.35f));
+            painter.line({minus.x + 5.f, minus.y + minus.h * 0.5f}, {minus.right() - 5.f, minus.y + minus.h * 0.5f}, 1.5f, mark);
+            painter.line({plus.x + plus.w * 0.5f, plus.y + 7.f}, {plus.x + plus.w * 0.5f, plus.bottom() - 7.f}, 1.5f, mark);
+            painter.line({plus.x + 5.f, plus.y + plus.h * 0.5f}, {plus.right() - 5.f, plus.y + plus.h * 0.5f}, 1.5f, mark);
+        }
         const bool placeholderText = (node.textBox || node.textArea) && node.text.empty() && !node.placeholder.empty();
         std::string passwordMask;
         std::string_view displayText = placeholderText ? std::string_view(node.placeholder) : std::string_view(node.text);
@@ -1118,7 +1323,7 @@ void UiRuntime::paint(Painter& painter, f32 dpiScale) {
         const f32 padTop = textPadding.t;
         const f32 padBottom = textPadding.b;
         const f32 textLeft = textPadding.l;
-        const f32 textRight = textPadding.r + ((node.dropdown || node.colorPicker) ? 30.f : (node.searchField && !node.text.empty() ? 18.f : 0.f));
+        const f32 textRight = textPadding.r + ((node.dropdown || node.colorPicker) ? 30.f : (node.numberField ? 44.f : (node.searchField && !node.text.empty() ? 18.f : 0.f)));
         const f32 switchTrackWidth = node.switchToggle ? std::clamp(std::clamp(rect.h - 8.f, 18.f, 26.f) * 1.8f, 36.f, 58.f) : 0.f;
         const f32 checkOffset = (node.checkItem || node.checkBox) ? 26.f : (node.switchToggle ? switchTrackWidth + 10.f : 0.f);
         const f32 contentWidth = std::max(0.f, rect.w - textLeft - textRight - checkOffset);
@@ -1242,9 +1447,10 @@ void UiRuntime::paint(Painter& painter, f32 dpiScale) {
     }
     // Popups render after the retained tree, so they always remain on top of later siblings.
     for (Node& node : m_nodes) {
-        if (!node.popupOpen || (!node.dropdown && !node.colorPicker)) continue;
+        if (!node.popupOpen || (!node.dropdown && !node.colorPicker && !node.datePicker)) continue;
         const Rect anchor = m_layout.absRect(node.layout);
-        const Rect popup = popupBounds(anchor, node.dropdown, node.options.size(), m_lastLayoutHeight,node.pickerWidth,node.pickerHeight);
+        const Rect popup = popupBounds(anchor, node.dropdown, node.options.size(), m_lastLayoutHeight,
+                                       node.datePicker ? 224.f : node.pickerWidth, node.datePicker ? 208.f : node.pickerHeight);
         const Color panel = color(node.style, PropId::Bg, Color::fromRGBA8(0x151E32FFu));
         const Color foreground = color(node.style, PropId::Fg, Color::fromRGBA8(0xF2F6FFFFu));
         painter.fillRect(popup, panel, CornerRadii::all(5.f));
@@ -1263,6 +1469,32 @@ void UiRuntime::paint(Painter& painter, f32 dpiScale) {
                     painter.fillRect(row, foreground.withAlpha(0.16f), CornerRadii::all(2.f));
                 }
                 drawLabel(node.options[i], row, node.font, node.style, foreground, 8.f, false);
+            }
+        } else if (node.datePicker) {
+            static const char* const weekdays[7] = {"Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"};
+            const Color accent = color(node.style, PropId::Fg, Color::fromRGBA8(0x4772B3FFu));
+            const Rect header{popup.x, popup.y, popup.w, 26.f};
+            RectStyle headerDivider;
+            painter.fillRect(header, foreground.withAlpha(0.06f));
+            drawLabel("‹", {popup.x, popup.y, 26.f, 26.f}, node.font, node.style, foreground, 8.f, false);
+            drawLabel("›", {popup.right() - 26.f, popup.y, 26.f, 26.f}, node.font, node.style, foreground, 8.f, false);
+            drawLabel(std::string(kMonthNames[std::clamp<u32>(node.viewMonth, 1u, 12u) - 1u]) + " " + std::to_string(node.viewYear),
+                      header, node.font, node.style, foreground, 0.f, false);
+            const f32 cellWidth = popup.w / 7.f;
+            for (u32 column = 0; column < 7; ++column)
+                drawLabel(weekdays[column], {popup.x + cellWidth * f32(column), popup.y + 28.f, cellWidth, 16.f},
+                          node.font, node.style, foreground.withAlpha(0.55f), 6.f, false);
+            const u32 firstWeekday = weekdayMonday0(node.viewYear, node.viewMonth, 1u);
+            const u32 monthDays = daysInMonth(node.viewYear, node.viewMonth);
+            const bool viewingSelection = node.viewYear == node.dateYear && node.viewMonth == node.dateMonth;
+            for (u32 cell = 0; cell < 42u; ++cell) {
+                const i32 day = static_cast<i32>(cell) - static_cast<i32>(firstWeekday) + 1;
+                if (day < 1 || day > static_cast<i32>(monthDays)) continue;
+                const Rect cellRect{popup.x + cellWidth * f32(cell % 7u), popup.y + 46.f + 22.f * f32(cell / 7u), cellWidth, 22.f};
+                if (viewingSelection && static_cast<u32>(day) == node.dateDay)
+                    painter.fillRect(cellRect, accent, CornerRadii::all(3.f));
+                drawLabel(std::to_string(day), cellRect, node.font, node.style,
+                          viewingSelection && static_cast<u32>(day) == node.dateDay ? Color::fromRGBA8(0xFFFFFFFFu) : foreground, 9.f, false);
             }
         } else {
             constexpr u32 columns = 14, rows = 8;
@@ -1372,8 +1604,9 @@ bool UiRuntime::pointerMove(Vec2 point) {
     for (std::size_t i = m_nodes.size(); i > 0; --i) {
         const u32 index = static_cast<u32>(i - 1);
         const Node& node = m_nodes[index];
-        if (!node.popupOpen || (!node.dropdown && !node.colorPicker) || !isNodeVisible(index)) continue;
-        if (popupBounds(m_layout.absRect(node.layout), node.dropdown, node.options.size(), m_lastLayoutHeight,node.pickerWidth,node.pickerHeight).contains(point)) {
+        if (!node.popupOpen || (!node.dropdown && !node.colorPicker && !node.datePicker) || !isNodeVisible(index)) continue;
+        if (popupBounds(m_layout.absRect(node.layout), node.dropdown, node.options.size(), m_lastLayoutHeight,
+                        node.datePicker ? 224.f : node.pickerWidth, node.datePicker ? 208.f : node.pickerHeight).contains(point)) {
             popupTarget = index;
             break;
         }
@@ -1422,11 +1655,28 @@ bool UiRuntime::pointerMove(Vec2 point) {
     }
     for (u32 i = 0; i < m_nodes.size(); ++i) {
         Node& node = m_nodes[i];
-        if (!node.radioGroup || node.disabled || !isNodeVisible(i) || node.options.empty()) continue;
+        if (!(node.radioGroup || node.segmented || node.rating || node.breadcrumb) || node.disabled || !isNodeVisible(i) || node.options.empty()) continue;
         const Rect rect = m_layout.absRect(node.layout);
-        const f32 rowHeight = rect.h / f32(node.options.size());
-        const i32 over = rect.contains(point)
-            ? std::clamp<i32>(static_cast<i32>((point.y - rect.y) / std::max(1.f, rowHeight)), 0, static_cast<i32>(node.options.size()) - 1) : -1;
+        i32 over = -1;
+        if (rect.contains(point)) {
+            if (node.radioGroup) {
+                const f32 rowHeight = rect.h / f32(node.options.size());
+                over = std::clamp<i32>(static_cast<i32>((point.y - rect.y) / std::max(1.f, rowHeight)), 0, static_cast<i32>(node.options.size()) - 1);
+            } else if (node.segmented) {
+                over = std::clamp<i32>(static_cast<i32>((point.x - rect.x) / std::max(1.f, rect.w / f32(node.options.size()))), 0, static_cast<i32>(node.options.size()) - 1);
+            } else if (node.rating) {
+                const i32 pips = static_cast<i32>(std::clamp(node.maxValue, 1.f, 10.f));
+                over = std::clamp<i32>(static_cast<i32>((point.x - rect.x) / std::max(1.f, rect.w / f32(pips))), 0, pips - 1);
+            } else {   // breadcrumb: segments have per-label widths
+                const f32 fontSize = node.style.has(PropId::FontSize) ? number(node.style.get(PropId::FontSize), 0, 14) : 14.f;
+                f32 x = rect.x;
+                for (u32 segment = 0; segment < node.options.size(); ++segment) {
+                    const f32 width = m_text && node.font.valid() ? m_text->layout(node.font, node.options[segment], fontSize, 0.f).width / m_dpiScale : 0.f;
+                    if (point.x < x + width + 10.f) { over = static_cast<i32>(segment); break; }
+                    x += width + 22.f;
+                }
+            }
+        }
         if (over != node.hoveredOption) { node.hoveredOption = over; changed = true; addDamage(rect); }
     }
     return changed;
@@ -1462,10 +1712,36 @@ bool UiRuntime::pointerDown(Vec2 point) {
     for (std::size_t i = m_nodes.size(); i > 0; --i) {
         const u32 index = static_cast<u32>(i - 1);
         Node& node = m_nodes[index];
-        if (!node.popupOpen || (!node.dropdown && !node.colorPicker) || !isNodeVisible(index)) continue;
+        if (!node.popupOpen || (!node.dropdown && !node.colorPicker && !node.datePicker) || !isNodeVisible(index)) continue;
         const Rect anchor = m_layout.absRect(node.layout);
-        const Rect popup = popupBounds(anchor, node.dropdown, node.options.size(), m_lastLayoutHeight,node.pickerWidth,node.pickerHeight);
+        const Rect popup = popupBounds(anchor, node.dropdown, node.options.size(), m_lastLayoutHeight,
+                                       node.datePicker ? 224.f : node.pickerWidth, node.datePicker ? 208.f : node.pickerHeight);
         if (!popup.contains(point)) continue;
+        if (node.datePicker) {
+            const f32 localY = point.y - popup.y;
+            if (localY < 26.f) {
+                // Header arrows step the viewed month; the selection follows so it stays visible.
+                if (point.x < popup.x + 30.f) stepViewMonth(node, -1);
+                else if (point.x > popup.right() - 30.f) stepViewMonth(node, 1);
+            } else if (localY >= 44.f) {
+                const f32 cellWidth = popup.w / 7.f;
+                const u32 cell = std::min<u32>(static_cast<u32>((localY - 46.f) / 22.f), 5u) * 7u
+                               + std::min<u32>(static_cast<u32>((point.x - popup.x) / cellWidth), 6u);
+                const i32 day = static_cast<i32>(cell) - static_cast<i32>(weekdayMonday0(node.viewYear, node.viewMonth, 1u)) + 1;
+                const i32 monthDays = static_cast<i32>(daysInMonth(node.viewYear, node.viewMonth));
+                if (day >= 1 && day <= monthDays) {
+                    node.dateYear = node.viewYear;
+                    node.dateMonth = node.viewMonth;
+                    node.dateDay = static_cast<u32>(day);
+                    node.text = formatDateText(node.dateYear, node.dateMonth, node.dateDay);
+                    m_layout.markContentChanged(node.layout);
+                    node.popupOpen = false;
+                    if (node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
+                }
+            }
+            addDamage(anchor); addDamage(popup);
+            return true;
+        }
         if (node.dropdown) {
             if (node.options.empty()) return true;
             const u32 selected = std::min<u32>(static_cast<u32>((point.y - popup.y) / 28.f), static_cast<u32>(node.options.size() - 1));
@@ -1530,7 +1806,7 @@ bool UiRuntime::pointerDown(Vec2 point) {
         return true;
     }
     // An outside click dismisses the popup, then may activate the newly exposed target.
-    for (Node& node : m_nodes) if (node.popupOpen && (node.dropdown || node.colorPicker)) {
+    for (Node& node : m_nodes) if (node.popupOpen && (node.dropdown || node.colorPicker || node.datePicker)) {
         const Rect anchor = m_layout.absRect(node.layout);
         const Rect popup = popupBounds(anchor, node.dropdown, node.options.size(), m_lastLayoutHeight,node.pickerWidth,node.pickerHeight);
         node.popupOpen = false;
@@ -1604,6 +1880,49 @@ bool UiRuntime::pointerDown(Vec2 point) {
         }
         return true;
     }
+    if (target && !target->disabled) {
+        const Rect rect = m_layout.absRect(target->layout);
+        if (target->segmented && !target->options.empty()) {
+            const u32 segment = std::clamp<u32>(static_cast<u32>((point.x - rect.x) / std::max(1.f, rect.w / f32(target->options.size()))), 0, static_cast<u32>(target->options.size()) - 1);
+            if (selectSegment(*target, segment, false) && target->pressHandler.v && m_eventFn)
+                m_eventFn(m_eventContext, m_strings->view(target->pressHandler));
+            return true;
+        }
+        if (target->breadcrumb && !target->options.empty()) {
+            const f32 fontSize = target->style.has(PropId::FontSize) ? number(target->style.get(PropId::FontSize), 0, 14) : 14.f;
+            f32 x = rect.x;
+            u32 chosen = 0xFFFFFFFFu;
+            for (u32 segment = 0; segment < target->options.size(); ++segment) {
+                const f32 width = m_text && target->font.valid() ? m_text->layout(target->font, target->options[segment], fontSize, 0.f).width / m_dpiScale : 0.f;
+                if (point.x < x + width + 10.f) { chosen = segment; break; }
+                x += width + 22.f;
+            }
+            if (chosen != 0xFFFFFFFFu && selectSegment(*target, chosen, false) && target->pressHandler.v && m_eventFn)
+                m_eventFn(m_eventContext, m_strings->view(target->pressHandler));
+            return true;
+        }
+        if (target->rating) {
+            const i32 pips = static_cast<i32>(std::clamp(target->maxValue, 1.f, 10.f));
+            const i32 pip = std::clamp<i32>(static_cast<i32>((point.x - rect.x) / std::max(1.f, rect.w / f32(pips))), 0, pips - 1);
+            const f32 next = f32(pip + 1) == target->value ? 0.f : f32(pip + 1);   // clicking the last lit pip clears
+            if (next != target->value) {
+                target->value = next;
+                addDamage(rect);
+                if (target->pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(target->pressHandler));
+            }
+            return true;
+        }
+        if ((target->stepper || target->numberField) && rect.w > 24.f) {
+            const f32 button = std::min(20.f, rect.w * 0.22f);
+            if (point.x >= rect.right() - button * 2.f) {
+                const bool minus = point.x < rect.right() - button;
+                target->stepperZone = minus ? 1u : 2u;
+                applyNumberStep(*target, minus ? -1.f : 1.f);
+                addDamage(rect);
+                return true;
+            }
+        }
+    }
 
     // Split gutters are painted by the Split node before its children. They only
     // receive input when no later-painted node covers that point.
@@ -1625,7 +1944,7 @@ bool UiRuntime::pointerDown(Vec2 point) {
     }
     if (target && !target->disabled) {
         const bool shouldPress = target->button || target->checkItem || target->checkBox || target->slider ||
-            target->dropdown || target->colorPicker || target->textBox || target->textArea || target->switchToggle || target->toggleButton;
+            target->dropdown || target->colorPicker || target->textBox || target->textArea || target->switchToggle || target->toggleButton || target->datePicker;
         for (Node& node : m_nodes) if (&node != target && node.pressed) {
             node.pressed = false;
             addDamage(m_layout.absRect(node.layout));
@@ -1636,10 +1955,12 @@ bool UiRuntime::pointerDown(Vec2 point) {
         if (target->pressed) {
             changed = true;
             addDamage(m_layout.absRect(target->layout));
-            if (target->dropdown || target->colorPicker) {
+            if (target->dropdown || target->colorPicker || target->datePicker) {
                 for (Node& node : m_nodes) if (&node != target && node.popupOpen) node.popupOpen = false;
                 target->popupOpen = true;
-                addDamage(popupBounds(m_layout.absRect(target->layout), target->dropdown, target->options.size(), m_lastLayoutHeight,target->pickerWidth,target->pickerHeight));
+                if (target->datePicker) { target->viewYear = target->dateYear; target->viewMonth = target->dateMonth; }
+                addDamage(popupBounds(m_layout.absRect(target->layout), target->dropdown, target->options.size(), m_lastLayoutHeight,
+                                      target->datePicker ? 224.f : target->pickerWidth, target->datePicker ? 208.f : target->pickerHeight));
             }
             if (target->slider) {
                 const f32 before = target->value;
@@ -1670,6 +1991,7 @@ bool UiRuntime::pointerUp(Vec2 point) {
         changed |= node.pressed;
         if (node.pressed) addDamage(m_layout.absRect(node.layout));
         node.pressed = false;
+        if (node.stepperZone) { node.stepperZone = 0; addDamage(m_layout.absRect(node.layout)); changed = true; }
     }
     if (activated && (activated->checkItem || activated->checkBox || activated->switchToggle || activated->toggleButton)) {
         activated->checked = !activated->checked;
@@ -1784,6 +2106,69 @@ bool UiRuntime::keyDown(Key key, u8 mods, Platform* platform) {
         refreshTooltipTarget();
         return true;
     }
+    // A focused KeybindField captures the next non-modifier key combination. Tab stays reserved
+    // for focus traversal and F3 stays the global FPS toggle, so neither can be bound.
+    for (u32 index : m_interactiveNodes) {
+        Node& field = m_nodes[index];
+        if (!field.keybindField || !field.focused || field.disabled) continue;
+        if (key == Key::F3 || key == Key::Tab) break;
+        const u16 code = static_cast<u16>(key);
+        if (code >= 0xE060 && code <= 0xE067) return false;   // bare modifier press: keep waiting
+        if (key == Key::Escape) {
+            if (field.text.empty()) return false;
+            field.text.clear();
+        } else {
+            field.text = keyLabel(key, mods);
+        }
+        m_layout.markContentChanged(field.layout);
+        addDamage(m_layout.absRect(field.layout));
+        if (field.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(field.pressHandler));
+        return true;
+    }
+    if (key == Key::Left || key == Key::Right || key == Key::Up || key == Key::Down || key == Key::PageUp || key == Key::PageDown) {
+        for (u32 index : m_interactiveNodes) {
+            Node& node = m_nodes[index];
+            if (!node.datePicker || !node.focused || node.disabled || !node.popupOpen) continue;
+            i32 delta = 0;
+            if (key == Key::Left) delta = -1;
+            else if (key == Key::Right) delta = 1;
+            else if (key == Key::Up) delta = -7;
+            else if (key == Key::Down) delta = 7;
+            else if (key == Key::PageUp) delta = -30;
+            else delta = 30;
+            shiftDate(node.dateYear, node.dateMonth, node.dateDay, delta);
+            node.viewYear = node.dateYear;
+            node.viewMonth = node.dateMonth;
+            node.text = formatDateText(node.dateYear, node.dateMonth, node.dateDay);
+            m_layout.markContentChanged(node.layout);
+            addDamage(m_layout.absRect(node.layout));
+            addDamage(popupBounds(m_layout.absRect(node.layout), false, 0, m_lastLayoutHeight, 224.f, 208.f));
+            if (node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
+            return true;
+        }
+    }
+    if (key == Key::Left || key == Key::Right) {
+        for (u32 index : m_interactiveNodes) {
+            Node& node = m_nodes[index];
+            if (node.disabled || !node.focused) continue;
+            if (node.segmented && node.options.size() > 1) {
+                const i32 count = static_cast<i32>(node.options.size());
+                const i32 direction = key == Key::Right ? 1 : -1;
+                const i32 next = (static_cast<i32>(node.selectedOption) + count + direction) % count;
+                selectSegment(node, static_cast<u32>(next), true);
+                return true;
+            }
+            if (node.rating) {
+                const f32 step = key == Key::Right ? 1.f : -1.f;
+                const f32 next = std::clamp(node.value + step, node.minValue, node.maxValue);
+                if (next == node.value) return false;
+                node.value = next;
+                addDamage(m_layout.absRect(node.layout));
+                if (node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
+                return true;
+            }
+        }
+    }
     if (key == Key::Left || key == Key::Right) {
         for (Node& tabs : m_nodes) if (tabs.tabs && tabs.focused && !tabs.disabled) {
             const u32 count = m_layout.childCount(tabs.layout);
@@ -1845,7 +2230,7 @@ bool UiRuntime::keyDown(Key key, u8 mods, Platform* platform) {
                 if (node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
                 return true;
             }
-            if (node.numberField && node.focused && !node.disabled) {
+            if ((node.numberField || node.stepper) && node.focused && !node.disabled) {
                 applyNumberStep(node, key == Key::Up ? 1.f : -1.f);
                 addDamage(m_layout.absRect(node.layout));
                 return true;
@@ -2046,6 +2431,24 @@ Rect UiRuntime::searchClearRect(const Node& node) const {
     return {rect.right() - side - 4.f, rect.y + (rect.h - side) * 0.5f, side, side};
 }
 
+bool UiRuntime::selectSegment(Node& node, u32 index, bool notify) {
+    if (index >= node.options.size()) return false;
+    const bool changed = node.selectedOption != index;
+    node.selectedOption = index;
+    if (changed) {
+        addDamage(m_layout.absRect(node.layout));
+        if (notify && node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
+    }
+    return changed;
+}
+
+void UiRuntime::stepViewMonth(Node& node, i32 direction) {
+    i32 month = static_cast<i32>(node.viewMonth) - 1 + direction;   // 0-based
+    node.viewYear += (month >= 0 ? month : month - 11) / 12;        // floor division
+    month = ((month % 12) + 12) % 12;
+    node.viewMonth = static_cast<u32>(month) + 1u;
+}
+
 void UiRuntime::applyNumberStep(Node& node, f32 direction) {
     const f32 stepped = node.value + direction * node.stepValue;
     const f32 clamped = node.numberBounded ? std::clamp(stepped, std::min(node.minValue, node.maxValue), std::max(node.minValue, node.maxValue)) : stepped;
@@ -2099,7 +2502,8 @@ u32 UiRuntime::hitTestNode(Vec2 point) const {
 
         const bool interactive = node.button || node.checkItem || node.checkBox || node.slider || node.dropdown ||
             node.colorPicker || node.textBox || node.textArea || node.tabs ||
-            node.switchToggle || node.toggleButton || node.radioGroup;
+            node.switchToggle || node.toggleButton || node.radioGroup ||
+            node.segmented || node.stepper || node.rating || node.breadcrumb || node.keybindField || node.datePicker;
         const bool structuralBlocker = typeIs(node.type, *m_strings, "Window") || typeIs(node.type, *m_strings, "Text") ||
             typeIs(node.type, *m_strings, "Panel") || typeIs(node.type, *m_strings, "Split") ||
             typeIs(node.type, *m_strings, "CheckList") || typeIs(node.type, *m_strings, "Tab") ||
@@ -2212,10 +2616,10 @@ bool UiRuntime::updateTimers(std::chrono::steady_clock::time_point now) {
     }
     bool spinnerVisible = false;
     for (u32 i = 0; i < m_nodes.size(); ++i)
-        if (m_nodes[i].spinner && !m_nodes[i].disabled && isNodeVisible(i)) { spinnerVisible = true; break; }
+        if ((m_nodes[i].spinner || (m_nodes[i].progressBar && m_nodes[i].indeterminate)) && !m_nodes[i].disabled && isNodeVisible(i)) { spinnerVisible = true; break; }
     if (spinnerVisible && (m_spinnerDeadline.time_since_epoch().count() == 0 || now >= m_spinnerDeadline)) {
         for (u32 i = 0; i < m_nodes.size(); ++i)
-            if (m_nodes[i].spinner && !m_nodes[i].disabled && isNodeVisible(i)) addDamage(m_layout.absRect(m_nodes[i].layout));
+            if ((m_nodes[i].spinner || (m_nodes[i].progressBar && m_nodes[i].indeterminate)) && !m_nodes[i].disabled && isNodeVisible(i)) addDamage(m_layout.absRect(m_nodes[i].layout));
         redraw = true;
     } else if (!spinnerVisible && m_spinnerDeadline.time_since_epoch().count() != 0) {
         m_spinnerDeadline = {};
@@ -2260,8 +2664,8 @@ Color UiRuntime::controlColor(std::string_view id) const {
 }
 
 std::string_view UiRuntime::controlText(std::string_view id) const {
-    for (const Node& node : m_nodes) if ((node.dropdown || node.colorPicker || node.textBox || node.textArea || typeIs(node.type,*m_strings,"Text") || node.label || node.badge) && node.id.v && m_strings->view(node.id) == id) return node.text;
-    for (const Node& node : m_nodes) if (node.radioGroup && node.id.v && m_strings->view(node.id) == id && node.selectedOption < node.options.size()) return node.options[node.selectedOption];
+    for (const Node& node : m_nodes) if ((node.dropdown || node.colorPicker || node.textBox || node.textArea || typeIs(node.type,*m_strings,"Text") || node.label || node.badge || node.stepper || node.datePicker || node.keybindField) && node.id.v && m_strings->view(node.id) == id) return node.text;
+    for (const Node& node : m_nodes) if ((node.radioGroup || node.segmented || node.breadcrumb) && node.id.v && m_strings->view(node.id) == id && node.selectedOption < node.options.size()) return node.options[node.selectedOption];
     return {};
 }
 
@@ -2269,10 +2673,10 @@ std::optional<UiValue> UiRuntime::value(std::string_view id) const {
     for (const Node& node : m_nodes) {
         if (!node.id.v || m_strings->view(node.id) != id) continue;
         if (node.checkItem || node.checkBox || node.switchToggle || node.toggleButton) return UiValue{node.checked};
-        if (node.slider) return UiValue{static_cast<f64>(node.value)};
-        if (node.numberField) return UiValue{static_cast<f64>(node.value)};
-        if (node.dropdown || node.textBox || node.textArea || typeIs(node.type,*m_strings,"Text") || node.label || node.badge) return UiValue{node.text};
-        if (node.radioGroup) return node.selectedOption < node.options.size() ? UiValue{node.options[node.selectedOption]} : UiValue{std::string{}};
+        if (node.slider || node.rating) return UiValue{static_cast<f64>(node.value)};
+        if (node.numberField || node.stepper) return UiValue{static_cast<f64>(node.value)};
+        if (node.dropdown || node.textBox || node.textArea || typeIs(node.type,*m_strings,"Text") || node.label || node.badge || node.datePicker || node.keybindField) return UiValue{node.text};
+        if (node.radioGroup || node.segmented || node.breadcrumb) return node.selectedOption < node.options.size() ? UiValue{node.options[node.selectedOption]} : UiValue{std::string{}};
         if (node.colorPicker) return UiValue{node.pickerColor};
         if (node.tabs) return UiValue{node.selectedTab};
     }
@@ -2293,12 +2697,21 @@ bool UiRuntime::setValue(std::string_view id, const UiValue& valueToSet, bool no
         } else if (node.switchToggle || node.toggleButton) {
             const bool* value = std::get_if<bool>(&valueToSet); if (!value) return false;
             changed = node.checked != *value; node.checked = *value;
-        } else if (node.radioGroup) {
+        } else if (node.radioGroup || node.segmented || node.breadcrumb) {
             const std::string* value = std::get_if<std::string>(&valueToSet); if (!value) return false;
             const auto found = std::find(node.options.begin(), node.options.end(), *value); if (found == node.options.end()) return false;
             const u32 selected = static_cast<u32>(found - node.options.begin());
             changed = node.selectedOption != selected; node.selectedOption = selected;
-        } else if (node.numberField) {
+        } else if (node.datePicker) {
+            const std::string* value = std::get_if<std::string>(&valueToSet); if (!value) return false;
+            i32 year = 0; u32 month = 0, day = 0;
+            if (!(std::sscanf(value->data(), "%4d-%2u-%2u", &year, &month, &day) == 3 && month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth(year, month))) return false;
+            changed = !(year == node.dateYear && month == node.dateMonth && day == node.dateDay);
+            node.dateYear = year; node.dateMonth = month; node.dateDay = day;
+            node.viewYear = year; node.viewMonth = month;
+            node.text = formatDateText(year, month, day);
+            if (changed) m_layout.markContentChanged(node.layout);
+        } else if (node.numberField || node.stepper) {
             if (const f64* number = std::get_if<f64>(&valueToSet)) {
                 const f32 clamped = node.numberBounded ? std::clamp(static_cast<f32>(*number), std::min(node.minValue, node.maxValue), std::max(node.minValue, node.maxValue)) : static_cast<f32>(*number);
                 changed = node.value != clamped;
@@ -2318,7 +2731,7 @@ bool UiRuntime::setValue(std::string_view id, const UiValue& valueToSet, bool no
             const u32 selected = static_cast<u32>(found - node.options.begin());
             changed = node.selectedOption != selected; node.selectedOption = selected; node.text = *value;
             if (changed) m_layout.markContentChanged(node.layout);
-        } else if (node.textBox || node.textArea || typeIs(node.type,*m_strings,"Text") || node.label || node.badge) {
+        } else if (node.textBox || node.textArea || typeIs(node.type,*m_strings,"Text") || node.label || node.badge || node.keybindField) {
             const std::string* value = std::get_if<std::string>(&valueToSet); if (!value) return false;
             std::string next = truncateUtf8(*value, node.maxLength);
             changed = node.text != next; node.text = std::move(next); node.caret = node.selectionAnchor = node.text.size();
@@ -2367,6 +2780,21 @@ Size UiRuntime::measure(NodeId node, Constraint constraint) const {
             width = std::max(width, m_text->layout(runtimeNode->font, option, fontSize, 0.f).width + 30.f);
         return {width, f32(runtimeNode->options.size()) * 28.f};
     }
+    if (runtimeNode->segmented || runtimeNode->breadcrumb) {
+        if (!m_text || !runtimeNode->font.valid() || runtimeNode->options.empty())
+            return runtimeNode->segmented ? Size{240.f, 28.f} : Size{220.f, 22.f};
+        const f32 fontSize = runtimeNode->style.has(PropId::FontSize) ? number(runtimeNode->style.get(PropId::FontSize), 0, 16) : 16.f;
+        f32 total = 0.f, widest = 0.f;
+        for (const std::string& option : runtimeNode->options) {
+            const f32 width = m_text->layout(runtimeNode->font, option, fontSize, 0.f).width;
+            total += width;
+            widest = std::max(widest, width);
+        }
+        if (runtimeNode->segmented) return {widest * f32(runtimeNode->options.size()) + 16.f, 28.f};
+        return {total + f32(runtimeNode->options.size()) * 22.f, std::max(22.f, fontSize * 1.4f)};
+    }
+    if (runtimeNode->stepper || runtimeNode->keybindField || runtimeNode->datePicker) return {runtimeNode->datePicker ? 170.f : 180.f, 36.f};
+    if (runtimeNode->rating) return {std::clamp(runtimeNode->maxValue, 1.f, 10.f) * 26.f, 24.f};
     if (runtimeNode->text.empty() || !m_text || !runtimeNode->font.valid()) return {};
     f32 fontSize = runtimeNode->style.has(PropId::FontSize) ? number(runtimeNode->style.get(PropId::FontSize), 0, 16) : 16.f;
     const f32 wrapWidth = constraint.fw ? constraint.w : 0.f;

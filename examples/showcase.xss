@@ -1,125 +1,138 @@
+// Blender-inspired grey theme: flat surfaces, dark outlines, a single selection blue.
 tokens {
-  color.canvas = #0b1020
-  color.panel = #151e32
-  color.raised = #1d2b45
-  color.fg = #f2f6ff
-  color.muted = #a9b7d0
-  color.accent = #5b8cff
-  color.accent-hover = #77a0ff
-  color.outline = #344563
-  color.disabled = #64748b
+  color.canvas = #1d1d1d        // editor background
+  color.panel = #303030          // panels and tab bodies
+  color.raised = #545454         // widget resting surface
+  color.hover = #656565          // widget hover surface
+  color.fg = #d8d8d8
+  color.muted = #999999
+  color.accent = #4772b3         // Blender selection blue
+  color.accent-hover = #5684c7
+  color.outline = #212121        // dark edge lines
+  color.disabled = #747474
 }
 
 Window { resting: { bg: color.canvas } }
-Text.title { resting: { fg: color.fg, font-size: 26px, font-weight: 700 } }
+Text.title { resting: { fg: color.fg, font-size: 24px, font-weight: 700 } }
 Text.subtitle { resting: { fg: color.muted, font-size: 13px } }
-Text.section-title { resting: { fg: color.fg, font-size: 18px, font-weight: 600 } }
+Text.section-title { resting: { fg: color.muted, font-size: 13px, font-weight: 600 } }
 Text.help { resting: { fg: color.muted, font-size: 13px, margin: 0px 0px 4px } }
-Text.value-readout { resting: { fg: color.accent-hover, font-size: 13px, font-weight: 600 } }
-Text.panel-title { resting: { fg: color.fg, font-size: 16px, font-weight: 600, margin: 0px 0px 8px } }
+Text.value-readout { resting: { fg: #9ec2ee, font-size: 13px } }
+Text.panel-title { resting: { fg: color.fg, font-size: 15px, font-weight: 600, margin: 0px 0px 8px } }
 Text.body { resting: { fg: color.muted, font-size: 14px, pad: 0px 0px 10px } }
 
-FpsCounter.fps { resting: { bg: color.raised, fg: color.fg, font-size: 12px, radius: 5px } }
-Tabs.tabs { resting: { bg: color.panel, radius: 10px } focus: { border: 1px solid color.accent } }
+FpsCounter.fps { resting: { bg: color.panel, fg: color.fg, font-size: 12px, radius: 3px, border: 1px solid color.outline } }
+Tabs.tabs { resting: { bg: color.panel, radius: 4px, border: 1px solid color.outline } focus: { border: 1px solid color.accent } }
 Tab {
-  resting: { bg: #111a2b, fg: color.muted, font-size: 13px }
-  hover: { bg: color.raised, fg: color.fg }
+  resting: { bg: #232323, fg: color.muted, font-size: 13px }
+  hover: { bg: #3d3d3d, fg: color.fg }
   selected: { bg: color.panel, fg: color.fg, border: 1px solid color.accent }
-  disabled: { opacity: 0.45 }
+  disabled: { opacity: 0.4 }
 }
 Column.page { resting: { bg: color.panel } }
 
 TextBox.field, TextArea.field {
-  resting: { bg: #10192b, fg: color.fg, border: 1px solid color.outline, radius: 7px, pad: 9px, font-size: 14px }
-  enabled: { cursor: text }
-  hover: { border: 1px solid color.accent-hover }
-  focus: { border: 2px solid color.accent }
-  readonly: { bg: #1a2233, fg: #bac6da, border: 1px solid #46536b }
-  placeholder: { fg: color.muted }
-  disabled: { opacity: 0.45 }
+  resting: { bg: color.raised, fg: color.fg, border: 1px solid color.outline, radius: 3px, pad: 8px, font-size: 14px }
+  hover: { bg: color.hover }
+  focus: { bg: color.hover, border: 1px solid color.accent }
+  readonly: { bg: #3a3a3a, fg: #b8b8b8 }
+  placeholder: { fg: #8d8d8d }
+  disabled: { opacity: 0.4 }
 }
 TextBox.picker-channel, TextBox.picker-hex {
-  resting: { bg: #101827, fg: color.fg, border: 1px solid color.outline, radius: 4px, font-size: 12px }
-  enabled: { cursor: text }
-  hover: { border: 1px solid color.accent-hover }
-  focus: { border: 2px solid color.accent }
-  readonly: { bg: #1a2233, fg: #bac6da }
-  disabled: { opacity: 0.45 }
+  resting: { bg: color.raised, fg: color.fg, border: 1px solid color.outline, radius: 3px, font-size: 12px }
+  hover: { bg: color.hover }
+  focus: { border: 1px solid color.accent }
+  readonly: { bg: #3a3a3a, fg: #b8b8b8 }
+  disabled: { opacity: 0.4 }
 }
 CheckBox.checkbox {
-  resting: { bg: color.raised, fg: color.fg, radius: 6px }
-  hover: { bg: #293b5c }
+  resting: { bg: color.raised, fg: color.fg, radius: 3px, border: 1px solid color.outline }
+  hover: { bg: color.hover }
   focus: { border: 1px solid color.accent }
   checked: { fg: color.accent }
-  disabled: { opacity: 0.45 }
+  disabled: { opacity: 0.4 }
 }
 CheckBox.disabled-check { resting: { fg: color.disabled } }
 
 Button.action, Button.secondary {
-  resting: { bg: color.accent, fg: color.fg, radius: 7px, font-size: 14px }
-  hover: { bg: color.accent-hover }
-  pressed: { opacity: 0.78 }
-  focus: { border: 2px solid #b7ccff }
-  disabled: { bg: #303b50, fg: #94a3b8, opacity: 0.6 }
-}
-Button.disabled-action { resting: { bg: #303b50, fg: #94a3b8, opacity: 0.6 } }
-Slider.slider { resting: { bg: color.outline, fg: color.accent } hover: { fg: color.accent-hover } focus: { border: 1px solid color.fg } disabled: { opacity: 0.45 } }
-ProgressBar.progress { resting: { bg: color.outline, fg: color.accent, radius: 8px } }
-Dropdown.dropdown, ColorPicker.color-picker {
-  resting: { bg: color.raised, fg: color.fg, radius: 7px, border: 1px solid color.outline }
-  hover: { bg: #293b5c, border: 1px solid color.accent-hover }
-  open: { border: 2px solid color.accent }
+  resting: { bg: color.raised, fg: color.fg, radius: 3px, font-size: 14px, border: 1px solid color.outline }
+  hover: { bg: color.hover }
+  pressed: { bg: #3f3f3f }
   focus: { border: 1px solid color.accent }
-  disabled: { opacity: 0.45 }
+  disabled: { bg: #3a3a3a, fg: color.disabled, opacity: 0.5 }
 }
-Split.split { resting: { fg: color.outline } }
-Panel.panel { resting: { bg: color.panel, border: 1px solid color.outline, radius: 8px } }
+Button.disabled-action { resting: { bg: #3a3a3a, fg: color.disabled, opacity: 0.5 } }
+Slider.slider { resting: { bg: color.outline, fg: color.accent } hover: { fg: color.accent-hover } focus: { border: 1px solid color.fg } disabled: { opacity: 0.4 } }
+ProgressBar.progress { resting: { bg: color.outline, fg: color.accent, radius: 4px } }
+Dropdown.dropdown, ColorPicker.color-picker, DatePicker.date, KeybindField.keybind {
+  resting: { bg: color.raised, fg: color.fg, radius: 3px, border: 1px solid color.outline }
+  hover: { bg: color.hover }
+  open: { border: 1px solid color.accent }
+  focus: { border: 1px solid color.accent }
+  disabled: { opacity: 0.4 }
+}
+DatePicker.date { resting: { pad: 6px, font-size: 14px } }
+KeybindField.keybind { resting: { pad: 6px, font-size: 14px } }
+Split.split { resting: { fg: #3d3d3d } }
+Panel.panel { resting: { bg: color.panel, border: 1px solid color.outline, radius: 4px } }
 CheckItem.check-item {
-  resting: { fg: color.fg, font-size: 13px, radius: 5px }
-  hover: { bg: color.raised }
+  resting: { fg: color.fg, font-size: 13px, radius: 3px }
+  hover: { bg: color.hover }
   focus: { border: 1px solid color.accent }
   checked: { fg: color.accent }
-  disabled: { opacity: 0.45 }
+  disabled: { opacity: 0.4 }
 }
-Tooltip { resting: { bg: #202a40, fg: color.fg, font-size: 13px, pad: 7px, radius: 5px, border: 1px solid color.outline } }
+Tooltip { resting: { bg: #1a1a1a, fg: color.fg, font-size: 13px, pad: 6px, radius: 3px, border: 1px solid #3d3d3d } }
 
-// Phase 1 widgets: selection, numeric/search entry, and display controls.
-Separator.rule { resting: { fg: #2a3a57, margin: 10px 0px } }
+// Phase 1 widgets.
+Separator.rule { resting: { fg: #3d3d3d, margin: 8px 0px } }
 Switch.switch {
   resting: { fg: color.accent, font-size: 14px }
   hover: { fg: color.accent-hover }
   focus: { border: 1px solid color.accent }
-  disabled: { opacity: 0.45 }
+  disabled: { opacity: 0.4 }
 }
 ToggleButton.toggle {
-  resting: { bg: color.raised, fg: color.fg, radius: 7px, font-size: 13px }
-  hover: { bg: #293b5c }
-  pressed: { opacity: 0.78 }
-  checked: { bg: color.accent, fg: color.fg }
+  resting: { bg: color.raised, fg: color.fg, radius: 3px, font-size: 13px, border: 1px solid color.outline }
+  hover: { bg: color.hover }
+  pressed: { bg: #3f3f3f }
+  checked: { bg: color.accent, fg: #ffffff }
   focus: { border: 1px solid color.accent }
-  disabled: { opacity: 0.45 }
+  disabled: { opacity: 0.4 }
 }
 RadioGroup.radio {
   resting: { fg: color.accent, font-size: 14px }
   hover: { fg: color.accent-hover }
   focus: { border: 1px solid color.accent }
-  disabled: { opacity: 0.45 }
+  disabled: { opacity: 0.4 }
 }
 NumberField.number {
-  resting: { bg: #10192b, fg: color.fg, border: 1px solid color.outline, radius: 7px, pad: 9px, font-size: 14px }
-  hover: { border: 1px solid color.accent-hover }
-  focus: { border: 2px solid color.accent }
-  readonly: { bg: #1a2233, fg: #bac6da }
-  disabled: { opacity: 0.45 }
+  resting: { bg: color.raised, fg: color.fg, border: 1px solid color.outline, radius: 3px, pad: 8px, font-size: 14px }
+  hover: { bg: color.hover }
+  focus: { border: 1px solid color.accent }
+  readonly: { bg: #3a3a3a, fg: #b8b8b8 }
+  disabled: { opacity: 0.4 }
 }
 SearchField.search {
-  resting: { bg: #10192b, fg: color.fg, border: 1px solid color.outline, radius: 20px, pad: 9px, font-size: 14px }
-  hover: { border: 1px solid color.accent-hover }
-  focus: { border: 2px solid color.accent }
-  placeholder: { fg: color.muted }
-  disabled: { opacity: 0.45 }
+  resting: { bg: color.raised, fg: color.fg, border: 1px solid color.outline, radius: 3px, pad: 8px, font-size: 14px }
+  hover: { bg: color.hover }
+  focus: { border: 1px solid color.accent }
+  placeholder: { fg: #8d8d8d }
+  disabled: { opacity: 0.4 }
 }
 Label.demo-label { resting: { fg: color.fg, font-size: 14px } }
-Badge.badge { resting: { bg: color.accent, fg: color.fg, radius: 11px, font-size: 12px, align: Center } }
+Badge.badge { resting: { bg: color.accent, fg: #ffffff, radius: 3px, font-size: 12px, align: Center } }
 Spinner.spinner { resting: { fg: color.accent } disabled: { opacity: 0.4 } }
-Image.demo-image { resting: { radius: 8px } }
+Image.demo-image { resting: { radius: 3px } }
+
+// Second-wave widgets.
+SegmentedControl.segmented {
+  resting: { fg: color.fg, font-size: 13px }
+  hover: { fg: color.fg }
+  focus: { border: 1px solid color.accent }
+  disabled: { opacity: 0.4 }
+}
+Rating.rating { resting: { fg: color.accent } hover: { fg: color.accent-hover } focus: { border: 1px solid color.accent } disabled: { opacity: 0.4 } }
+Stepper.stepper { resting: { bg: color.raised, fg: color.fg, border: 1px solid color.outline, radius: 3px, font-size: 14px } hover: { bg: color.hover } focus: { border: 1px solid color.accent } disabled: { opacity: 0.4 } }
+Breadcrumb.crumbs { resting: { fg: color.fg, font-size: 13px } hover: { fg: #ffffff } focus: { border: 1px solid color.accent } disabled: { opacity: 0.4 } }

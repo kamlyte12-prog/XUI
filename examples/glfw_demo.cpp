@@ -74,6 +74,27 @@ void onUiEvent(void* context, std::string_view name) {
     } else if (name == "onWhitespaceToggle") {
         // Debug aid: spaces render as a middle dot, tabs as a right arrow inside editable fields.
         if (const auto value = valueAs<bool>(app, "whitespace-toggle")) app.runtime().setWhitespaceVisible(*value);
+    } else if (name == "onShadingChange") {
+        if (const auto value = valueAs<std::string>(app, "shading")) app.runtime().setValue("shading-readout", "Shading: " + *value);
+    } else if (name == "onRatingChange") {
+        if (const auto value = valueAs<xui::f64>(app, "priority"))
+            app.runtime().setValue("rating-readout", "Priority: " + std::to_string(static_cast<int>(*value)) + "/5");
+    } else if (name == "onSubdivChange") {
+        if (const auto value = valueAs<xui::f64>(app, "subdivisions"))
+            app.runtime().setValue("subdiv-readout", "Subdivisions: " + std::to_string(static_cast<int>(*value)));
+    } else if (name == "onDateChange") {
+        if (const auto value = valueAs<std::string>(app, "due-date")) app.runtime().setValue("date-readout", "Due: " + *value);
+    } else if (name == "onKeybindChange") {
+        if (const auto value = valueAs<std::string>(app, "save-key"))
+            app.runtime().setValue("keybind-readout", "Save key: " + (value->empty() ? std::string("(none)") : *value));
+    } else if (name == "onTrailChange") {
+        if (const auto value = valueAs<std::string>(app, "trail")) {
+            // Rebuild the visible path up to the selected segment from the option list.
+            static const char* options[] = {"Project", "Assets", "Textures", "Wood"};
+            std::string path;
+            for (const char* option : options) { path += path.empty() ? option : std::string(" > ") + option; if (option == *value) break; }
+            app.runtime().setValue("trail-readout", "Trail: " + path);
+        }
     }
 }
 

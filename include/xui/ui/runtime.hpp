@@ -117,6 +117,11 @@ private:
         bool radioGroup = false, switchToggle = false, toggleButton = false;
         bool numberField = false, searchField = false, numberBounded = false;
         bool label = false, badge = false, separator = false, spinner = false, image = false;
+        bool datePicker = false, segmented = false, stepper = false, rating = false, breadcrumb = false, keybindField = false;
+        bool indeterminate = false;
+        u8 stepperZone = 0;   // 0 none, 1 minus button, 2 plus button (pressed visual)
+        i32 dateYear = 2026, viewYear = 2026;
+        u32 dateMonth = 1, dateDay = 1, viewMonth = 1;
         bool imageLoaded = false, imageFailed = false;
         u8 imageFit = 1;   // 0 Fill, 1 Contain, 2 Cover
         u32 imageW = 0, imageH = 0;
@@ -161,6 +166,8 @@ private:
     void applyNumberStep(Node& node, f32 direction);
     bool commitNumberText(Node& node);
     void resetCaretBlink();
+    bool selectSegment(Node& node, u32 index, bool notify);
+    void stepViewMonth(Node& node, i32 direction);
     void refreshTooltipTarget(std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
     void addDamage(Rect rect);
     Node* findNode(NodeId layoutNode);

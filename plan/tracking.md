@@ -2,6 +2,50 @@
 
 This file records project changes, design decisions, trade-offs, current status, and next steps. It is updated as implementation work lands.
 
+## Documentation consolidation — 2026-10-16
+
+### Audit, changes, and decisions
+
+- Audited 40 Markdown files outside generated build/output and Git directories: Xui root/docs/plan files plus the bundled GLFW project's own documentation. No identical project-owned files were found. Most duplication was repeated setup, backend, conventions, and status summaries. GLFW Markdown remains third-party and out of scope for edits.
+- Moved the detailed root tracking history into this canonical `plan/tracking.md` file without dropping its historical entries. The root `tracking.md` now links here as a compatibility stub. Replaced the stacked, conflicting plan snapshots with the current structured roadmap in `plan/plan.md`; root `plan.md` is likewise a compatibility stub.
+- Kept `doc/architecture.md` as the user-facing architecture/backend guide. Replaced the former `plan/architecture.md` pointer with the agent source map and change boundaries, which link to the public guide rather than repeating its data-flow/interface content.
+- Shortened the root README into an overview and links. Configuration, dependency, CMake, and demo details moved to `doc/getting-started.md`. Contribution workflow remains in `CONTRIBUTING.md`; duplicated architecture/style/widget/performance instructions now point to the architecture guide and agent conventions.
+- Kept the project guide files in `doc/` as separate topic references and made `doc/README.md` list each. `plan/README.md` lists each agent-context file. No project Markdown was deleted: every project guide has a defined index/workflow role; root roadmap/tracking compatibility stubs protect existing inbound links. Vendored GLFW docs stay with the dependency and its docs build.
+- Updated stale documentation: ScrollView is now listed as runtime-supported in the `.xui` guide; the troubleshooting color-picker section now reflects alpha support; performance guidance describes the current live-resize hook and links to the tracker for measurements rather than repeating profile numbers.
+
+### File disposition
+
+- **Moved:** the full root `tracking.md` history is now `plan/tracking.md`; the current roadmap content is canonical in `plan/plan.md`.
+- **Merged:** root README setup, dependency, build, and configuration details moved into `doc/getting-started.md`; repeated contribution guidance now links to canonical architecture and conventions guides. No unique content was intentionally discarded.
+- **Removed:** no project Markdown files were deleted. Root `plan.md` and `tracking.md` remain short compatibility pointers; the former `plan/architecture.md` pointer is now an agent-facing source map.
+
+### Trade-offs and remaining gaps
+
+- Keeping short root stubs costs two tiny files but avoids breaking old in-repository links and any external bookmarks to `plan.md` or `tracking.md`. The full canonical contents live only under `plan/`.
+- `CONTRIBUTING.md` still links the canonical technical guides rather than duplicating their checklists. The root README retains its existing major section headings as lightweight pointers for stable section anchors.
+- Internal Markdown file links and heading anchors resolve after the move. External backlinks cannot be discovered from this checkout; compatibility stubs are the mitigation. Vendored GLFW docs were not content-audited for Xui accuracy because they describe upstream GLFW.
+- No framework code changed. Documentation-only validation is link/index/duplicate review; no build or runtime test is needed.
+
+### Current status and next steps
+
+- Canonical homes: user guides in `doc/`, agent rules and status/history in `plan/`, concise navigation in root `README.md`, contribution workflow in `CONTRIBUTING.md`.
+- Both `doc/README.md` and `plan/README.md` enumerate every Markdown file in their respective folders. No project Markdown file was deleted; the three former pointer files were repurposed as canonical plan/history and agent source-map files. Keep the history here and current status in `plan/plan.md`.
+
+## Initial agent-context setup — 2026-10-16 (superseded by documentation consolidation below)
+
+### Audit and decisions
+
+- The repository already had a root `plan.md`, a root `tracking.md`, and the current architecture guide at `doc/architecture.md`. Existing contribution notes, README sections, docs, and historical tracking entries link to those locations. No root `AGENTS.md` or `CLAUDE.md` existed.
+- Created a root `AGENTS.md` pointer and a `plan/` folder with `agents.md`, `conventions.md`, and an index. Added `plan/plan.md`, `plan/architecture.md`, and `plan/tracking.md` as links to the canonical files rather than moving or copying them. This preserves every historical link and avoids divergent duplicate plan/tracking content.
+- Updated the root README project tree/docs section and CONTRIBUTING entry point so agents can discover the rules. No framework code or runtime behavior changed.
+
+### Current status and verification
+
+- `plan/agents.md` now records the `.xui`/`.xss` and backend invariants, the supplied anti-regression list, root-cause and verification rules, the >60 FPS/live-resize target, and required documentation updates.
+- `plan/conventions.md` documents current C++ practices, asset responsibilities, widget/property implementation paths, tests, and verification boundaries; it links to contributor and user guides for details instead of duplicating them.
+- Verified that canonical existing documents remain at their original paths and that the new index/pointer files target those paths. Since this is a documentation-only change, no code build or runtime test was run.
+- Next: agents should follow the new entry point on future work; keep the guidance synchronized when architecture, verification targets, or contribution conventions change.
+
 ## Live resize: modal-loop root cause and frame hook — 2026-10-15
 
 ### Root cause (why the earlier fixes never took effect)

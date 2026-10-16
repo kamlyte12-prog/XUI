@@ -2,15 +2,15 @@
 
 Thanks for your interest in Xui! Xui is experimental, so the design is still evolving. Small, focused contributions are easiest to review. For anything large (a new widget, a change to the `Platform` / `Renderer` contracts, new `.xui` / `.xss` syntax), please open an issue to discuss it first.
 
-> 💡 Before you start, skim [`tracking.md`](tracking.md) for audit findings, design choices, status, and next steps. It shows what is already planned or known to be broken. The [architecture and backends guide](doc/architecture.md) explains how the pieces fit together.
+> 💡 Agents: read [`AGENTS.md`](AGENTS.md) and [`plan/agents.md`](plan/agents.md) first. Check the [current roadmap](plan/plan.md) and [change history](plan/tracking.md) before changing code. The [architecture and backends guide](doc/architecture.md) explains the current public contracts.
 
 ## Ways to contribute
 
 - **Report bugs** — see [Reporting issues](#reporting-issues).
 - **Improve documentation** — the guides in [`doc/`](doc/README.md) are as important as the code.
 - **Add or improve examples** — demo apps and `.xui` / `.xss` assets live in [`examples/`](examples).
-- **Implement widgets or runtime features** — see [Adding or changing a widget](#adding-or-changing-a-widget).
-- **Improve performance or harden parsers** — see [Performance-sensitive changes](#performance-sensitive-changes) and the fuzz harnesses in [`benchmarks/`](benchmarks).
+- **Implement widgets or runtime features** — follow [the widget implementation checklist](plan/conventions.md#adding-a-widget-end-to-end).
+- **Improve performance or harden parsers** — read the [performance guide](doc/performance.md) and use the fuzz harnesses in [`benchmarks/`](benchmarks).
 
 ## Code of conduct
 
@@ -26,53 +26,17 @@ Open an issue at <https://github.com/kamlyte12-prog/XUI/issues>. Please include:
 - **A minimal repro:** the smallest `.xui` / `.xss` snippet that shows the problem, or the code that implements your custom `Platform` / `Renderer`.
 - **Screenshots or a short GIF** for visual or input bugs.
 
-> **Note:** Some "bugs" are known limitations: the runtime does not yet evaluate bindings, conditions, loops, component expansion, or transitions, and unsupported nodes intentionally return an error. Check [Features](README.md#-features) and [`tracking.md`](tracking.md) first.
+> **Note:** Some apparent bugs are known limitations. The runtime does not evaluate bindings, conditions, loops, component expansion, or transitions, and unsupported nodes intentionally return an error. Check the [widget reference](doc/widgets.md) and [current roadmap](plan/plan.md) first.
 
 ## Setting up a development environment
 
-Prerequisites (details in [Prerequisites](README.md#-prerequisites)): CMake **3.25+**, a **C++23** compiler (CI uses GCC 13, Clang 18, Apple Clang, and MSVC 2022), and on Linux the OpenGL/X11/Wayland development packages for the bundled GLFW (on Ubuntu: `sudo apt install libgl-dev xorg-dev libwayland-dev libxkbcommon-dev`). GLFW 3.5.1 is bundled, so macOS and Windows need no windowing dependency.
+Prerequisites and platform dependencies are listed in the [getting-started guide](doc/getting-started.md#build-xui). Xui uses CMake **3.25+** and C++23; GLFW 3.5.1 is bundled.
 
 ### Build, test, and run
 
-Use the same commands as [Build and test](README.md#-build-and-test):
+Use the canonical [build and test instructions](doc/getting-started.md#build-xui). The `xui_tests` suite covers core, layout, render, text, `.xui`/`.xss` parsing, runtime behavior, and golden-image comparisons in [`tests/golden/`](tests/golden). If a change intentionally alters rendered output, update the affected baselines and mention it in the PR description. The getting-started guide also documents the GLFW target and its platform dependencies; CI includes a GCC ASan/UBSan configuration.
 
-```sh
-cmake -S . -B build/debug -DXUI_BUILD_TESTS=ON -DXUI_BUILD_BENCHMARKS=ON
-cmake --build build/debug --config Debug
-ctest --test-dir build/debug -C Debug --output-on-failure
-```
-
-The test suite is the `xui_tests` target: unit tests for core, layout, render, text, `.xui`/`.xss` parsing, and the runtime, plus golden-image comparisons against the baselines in [`tests/golden/`](tests/golden). If your change intentionally alters rendered output, update the affected baselines and say so in the PR description.
-
-For a sanitizer build with GCC/Clang (the CI runs one on Ubuntu):
-
-```sh
-cmake -S . -B build/sanitize -DCMAKE_BUILD_TYPE=Debug -DXUI_SANITIZE=ON
-cmake --build build/sanitize --config Debug
-```
-
-To try your change in a real window, build and run the demo:
-
-```sh
-cmake -S . -B build/glfw -DXUI_BUILD_GLFW_EXAMPLE=ON -DXUI_BUILD_TESTS=OFF -DXUI_BUILD_BENCHMARKS=OFF
-cmake --build build/glfw --target xui_glfw_demo
-```
-
-### Where things live
-
-The CMake build produces small static libraries, one per module, mirroring the source layout:
-
-| Library | Sources | Responsibility |
-| --- | --- | --- |
-| `xui_core` | `src/core/`, `include/xui/core/` | Handles, arenas, interner, math, color, diagnostics |
-| `xui_assets` | `src/lang/`, `src/style/` | `.xui` and `.xss` parsers/compilers |
-| `xui_layout` | `src/layout/` | Layout engine |
-| `xui_renderer` | `src/render/` | `Renderer` interface, `DrawList`, `Painter`, `NullRenderer`, `SoftRenderer` |
-| `xui_platform` | `src/platform/` | `Platform` interface and headless null backend |
-| `xui_text` | `src/text/` | TTF parsing, glyph rasterizer, atlas, wrap cache |
-| `xui_widgets` | `src/ui/` | Retained runtime; also the application facade target |
-
-Public headers are in [`include/xui/`](include/xui); start from [`include/xui/xui.hpp`](include/xui/xui.hpp).
+The agent [architecture map](plan/architecture.md) maps source modules to responsibilities. Public headers are in [`include/xui/`](include/xui); start from [`include/xui/xui.hpp`](include/xui/xui.hpp).
 
 ## Pull request process
 
@@ -80,66 +44,20 @@ Public headers are in [`include/xui/`](include/xui); start from [`include/xui/xu
 2. **Make one logical change per PR.** Keep unrelated refactors and formatting changes out of it.
 3. **Add or update tests** for new behavior and bug fixes.
 4. **Run the full test suite** (`ctest` command above) and confirm it passes in a Debug build.
-5. **Update documentation** if behavior changes (see [Documentation changes](#documentation-changes)).
+5. **Update documentation** if behavior changes (see [the documentation update rules](plan/agents.md#update-after-each-change)).
 6. **Open the PR** with a clear description: what changed, why, how you tested it, and which platforms you tried. Link the related issue.
 7. **Respond to review feedback** by pushing follow-up commits to the same branch.
-
-[TODO: Document commit message conventions if any — the existing history has none.]
 
 ### Continuous integration
 
 Every push and pull request runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml): a Debug build plus `ctest` on Ubuntu (GCC 13, GCC 13 with ASan + UBSan, Clang 18), macOS 14, and Windows (MSVC with `/W4 /WX`). Because `XUI_WERROR` defaults to `ON`, compiler warnings fail the build — keep your changes warning-clean.
 
-## Code style
+## Technical contribution references
 
-The existing sources are the reference. Please match them. Observed conventions:
-
-- **Language:** C++23.
-- **Namespaces:** library code lives in `namespace xui`; file-local helpers go in an anonymous namespace.
-- **Formatting:** 4-space indentation, braces on the same line as the statement.
-- **Types:** use the Xui fixed-width aliases (for example `xui::u32`, `xui::f64`) and `std::string_view` for non-owning string parameters.
-- **Error handling:** report failures through return values (`bool` / `std::optional`) and expose messages via `lastError()`. Do not fail silently.
-- **Includes:** public headers are included as `<xui/xui.hpp>`; standard headers are listed alphabetically.
-
-[TODO: Add the formatter/linter configuration (for example `.clang-format`, `.clang-tidy`) and the command to run it, if the project adopts one.]
-
-## Architecture rules to respect
-
-These boundaries are core to the design. PRs that break them are likely to be sent back:
-
-| Rule | Why |
-| --- | --- |
-| `Platform` and `Renderer` never parse `.xui` or `.xss`. | Backends stay replaceable and small. |
-| Shared application code makes no OS or graphics-API calls. | The same `.xui` / `.xss` runs on any backend. |
-| GLFW-specific calls stay in the GLFW platform adapter. UI input and layout use Xui interfaces. | Keeps the framework backend-neutral. |
-| `Platform` reports top-left-origin logical coordinates, logical client size, physical framebuffer size, and DPI, and waits instead of busy-polling. | Consistent input and DPI handling across backends. |
-| `Renderer` executes the backend-neutral `DrawList` and reports truthful capabilities. | Callers can rely on what a renderer says it supports. |
-| Unsupported `.xui` nodes return an error instead of silently becoming native controls. | Authors get clear feedback. |
-
-## Documentation changes
-
-Update docs in the same PR as the code change:
-
-- **New or changed widget, option, or style property:** update the [widget guide](doc/widgets.md).
-- **Changed backend contracts or data flow:** update [`doc/architecture.md`](doc/architecture.md).
-- **Changed status, limitations, or known issues:** update [`tracking.md`](tracking.md).
-- **New CMake option, environment variable, or command-line flag:** update the [Configuration](README.md#-configuration) tables in the README.
-
-## Adding or changing a widget
-
-The runtime lives in [`src/ui/runtime.cpp`](src/ui/runtime.cpp) with its public header at [`include/xui/ui/runtime.hpp`](include/xui/ui/runtime.hpp). As a checklist:
-
-- [ ] Support the widget in the runtime, with its layout behavior and `.xss` states (`resting`, `hover`, `focus`, `checked`, `disabled`, `pressed`) where applicable.
-- [ ] If it holds state, make it readable and writable by authored id through `runtime().value(id)` / `setValue(id, value)`.
-- [ ] If it changes in response to input, make sure it can notify the application through the event handler.
-- [ ] Add it to the showcase (`showcase.xui` / `showcase.xss`) if it helps demonstrate the feature.
-- [ ] Add tests and update [`doc/widgets.md`](doc/widgets.md).
-
-## Performance-sensitive changes
-
-If your change touches layout, painting, text, or rendering, build with `XUI_BUILD_BENCHMARKS=ON` and compare before and after using the `bench_style`, `bench_xui`, `bench_layout`, and `bench_paint` targets. You can also use `xui_glfw_demo --profile` (or `xui_hello --profile`) for a quick loop-throughput check.
-
-> **Note:** `--profile` measures loop throughput, not visible presentation or input latency, so don't use it as the only evidence for latency claims.
+- Follow the project invariants and regression checklist in [`plan/agents.md`](plan/agents.md), and code/widget/style conventions in [`plan/conventions.md`](plan/conventions.md).
+- Update user behavior documentation in [`doc/`](doc/README.md), especially the [widget guide](doc/widgets.md), [style reference](doc/styling-reference.md), and [architecture guide](doc/architecture.md).
+- Record current status and decisions in [`plan/plan.md`](plan/plan.md) and [`plan/tracking.md`](plan/tracking.md). CMake options, demo flags, and setup belong in the [getting-started guide](doc/getting-started.md#configuration).
+- For layout, paint, text, or rendering changes, compare the relevant benchmarks and use `xui_glfw_demo --profile` only as a loop-throughput measurement; it does not prove visible presentation or input latency. See the [performance guide](doc/performance.md).
 
 ## Getting help
 
@@ -148,4 +66,4 @@ If your change touches layout, painting, text, or rendering, build with `XUI_BUI
 
 ## Licensing of contributions
 
-[TODO: State the license that applies to contributions, and whether a CLA or sign-off is required. The project has no LICENSE file yet — see [License](README.md#-license).]
+The repository is licensed under the [MIT License](LICENSE.md). This repository does not currently document a separate CLA or sign-off requirement. The bundled GLFW dependency retains its own license at [`examples/lib/glfw-3.5.1/LICENSE.md`](examples/lib/glfw-3.5.1/LICENSE.md).

@@ -1,261 +1,276 @@
+// Reference showcase: every runtime-supported widget and layout option, grouped by category.
+// Structure and styling live here and in showcase.xss; glfw_demo.cpp only wires event handlers.
 Window(title: "Xui GLFW/OpenGL widget showcase", size: 1080x760) {
   Column[id: "app-column", class: "app", pad: 20px, gap: 10px] {
     Text("Xui widget showcase")[class: "title"]
     Row(gap: 12)[class: "toolbar", width: 100%, height: 28px, align: Center] {
-      Text("Try the controls below. Press F3 to toggle the live FPS display.")[class: "subtitle"]
+      Text("Every widget and layout option, grouped by category. Press F3 for the FPS overlay.")[class: "subtitle"]
       FpsCounter[class: "fps", width: 168px, height: 26px, pad: 5px]
     }
 
     Tabs[id: "demo-sections", selected: 0, change: onTabChange, class: "tabs", width: 100%, height: 620px] {
-      // Text entry, checkbox state, keyboard focus, and hover/focus tooltips.
-      Tab(title: "Input")[id: "input-tab"] {
-        Column[id: "input-page", class: "page", pad: 18px, gap: 10px, grow: 1] {
-          Text("Text input and focus")[class: "section-title"]
-          Text("Type in either field. Values are read by authored id when the change callback fires.")[class: "help"]
-          Row(gap: 12)[id: "input-row", class: "field-row"] {
+
+      // ── Layout options: sizing, alignment, spacing, nesting ────────────────────────────
+      Tab(title: "Layout") {
+        Column[class: "page", pad: 18px, gap: 10px, grow: 1] {
+          Text("Sizing: fixed, percent, and min/max floors")[class: "section-title"]
+          Text("Middle box is 30% of the row. The right box grows but never shrinks below its 220x64 floor (minSize) — shrink the window and it holds.")[class: "help"]
+          Row(gap: 12)[width: 100%] {
+            Panel[id: "sizing-fixed", class: "layout-box", width: 120px, height: 64px] { Text("120px fixed")[class: "help"] }
+            Panel[id: "sizing-pct", class: "layout-box", width: 30%, height: 64px] { Text("30% of parent")[class: "help"] }
+            Panel[id: "sizing-min", class: "layout-box", grow: 1, height: 64px, minSize: 220x64] { Text("grow: 1, minSize 220x64")[class: "help"] }
+          }
+          Separator[class: "rule"]
+          Text("Direction, alignment, and spacing")[class: "section-title"]
+          Column[class: "layout-box", width: 100%, pad: 10px, gap: 8px, align: Center] {
+            Row(gap: 8)[width: 100%, justify: SpaceBetween] {
+              Text("justify: SpaceBetween")[class: "help"]
+              Text("start")[class: "help"]
+              Text("end")[class: "help"]
+            }
+            Row(gap: 8)[width: 100%, justify: Center] {
+              Button(label: "Centered")[class: "secondary", width: 120px, height: 30px]
+              Button(label: "in a centered row", disabled: true)[class: "secondary", width: 150px, height: 30px]
+            }
+          }
+          Separator[class: "rule"]
+          Text("Nesting and margins")[class: "section-title"]
+          Panel[class: "layout-box", width: 100%, pad: 12px] {
+            Panel[class: "layout-box P2", width: 100%, pad: 10px] {
+              Text("Outer panel pads 12; the inner panel adds a 24px left margin — nesting composes insets.")[class: "help"]
+            }
+          }
+        }
+      }
+
+      // ── Text entry: single-line, password, read-only, multiline, numeric ───────────────
+      Tab(title: "Input") {
+        Column[class: "page", pad: 18px, gap: 10px, grow: 1] {
+          Text("Text entry")[class: "section-title"]
+          Row(gap: 12)[width: 100%] {
             TextBox[id: "display-name", value: "Guest", placeholder: "Display name", maxLength: 48,
                    tooltip: "Single-line input. Try Shift+arrows, Ctrl+A/C/X/V, Delete, and Backspace.",
                    tooltipTrigger: "both", tooltipShowDelay: 450, tooltipHideDelay: 120,
                    change: onNameChange, class: "field name-field", width: 380px, height: 40px]
-            TextBox[id: "readonly-field", value: "Read only", readOnly: true,
-                   tooltip: "This tip is disabled for this field.", tooltipDisabled: true,
-                   class: "field readonly-field", width: 200px, height: 40px]
             TextBox[id: "passphrase", password: true, placeholder: "Password", maxLength: 32,
                    tooltip: "Password mode masks the display with bullets; the stored text is plain.",
                    change: onPassphraseChange, class: "field", width: 170px, height: 40px]
+            TextBox[id: "readonly-field", value: "Read only", readOnly: true,
+                   tooltip: "This tip is disabled for this field.", tooltipDisabled: true,
+                   class: "field readonly-field", width: 200px, height: 40px]
           }
           TextArea[id: "notes", value: "", placeholder: "Write a multiline note…", maxLength: 800, tabSize: 4,
-                   tooltip: "Text wraps inside this area. Press Enter to add a line.",
-                   change: onNotesChange, class: "field notes", width: 720px, height: 132px, align: Start]
-          Row(gap: 12)[id: "checks-row", class: "checks"] {
-            CheckBox(label: "Receive update notices")[id: "updates", checked: true,
-                    tooltip: "Checkbox state is available as a bool by id.", change: onCheckChange, class: "checkbox", width: 240px, height: 38px, pad: 6px]
-            CheckBox(label: "Disabled example")[id: "disabled-check", checked: false, disabled: true, class: "checkbox disabled-check", width: 240px, height: 38px, pad: 6px]
-          }
-
-          // Search field: clear button + Escape reset, plus the numeric field with steppers.
-          Separator[class: "rule"]
-          Text("Search and numeric entry")[class: "section-title"]
-          Row(gap: 12)[id: "search-row", class: "field-row"] {
+                   tooltip: "Text wraps inside this area. Enter adds a line; Tab inserts four spaces.",
+                   change: onNotesChange, class: "field notes", width: 720px, height: 120px, align: Start]
+          Row(gap: 12)[width: 100%] {
             SearchField[id: "query", placeholder: "Search widgets…", maxLength: 60,
                    tooltip: "Click the x glyph or press Escape to clear. The string is readable by id.",
                    change: onSearchChange, class: "search", width: 440px, height: 40px]
             Text("(empty)")[id: "search-readout", class: "value-readout", width: 260px, height: 24px]
           }
-          Row(gap: 12)[id: "number-row", class: "field-row"] {
+          Row(gap: 12)[width: 100%] {
             NumberField[id: "delay", value: 250, min: 0, max: 2000, step: 50, unit: "ms", precision: 0,
                    tooltip: "Type a number, use the steppers, or focus and press Up/Down. Clamped to min/max.",
                    change: onNumberChange, class: "number", width: 220px, height: 40px]
             Text("Delay: 250 ms")[id: "number-readout", class: "value-readout", width: 320px, height: 24px]
           }
-
-          // Debug view for control characters: spaces render as a middle dot, tabs as a right arrow.
-          // Tab inside notes inserts four spaces; other controls use Tab for focus traversal.
+          Row(gap: 12)[width: 100%] {
+            KeybindField[id: "save-key", value: "Ctrl+S", placeholder: "Press keys…",
+                   tooltip: "Focus and press a key combination. Escape clears it.",
+                   change: onKeybindChange, class: "keybind", width: 170px, height: 34px]
+            Text("Save key: Ctrl+S")[id: "keybind-readout", class: "value-readout", width: 320px, height: 24px]
+          }
           CheckBox(label: "Show whitespace marks")[id: "whitespace-toggle", checked: false,
                   tooltip: "Render spaces as a middle dot and tabs as a right arrow in the fields above.",
                   change: onWhitespaceToggle, class: "checkbox", width: 300px, height: 34px, pad: 5px]
         }
       }
 
-      // Buttons, slider, progress bar, dropdown, and HSV color picker.
-      Tab(title: "Controls")[id: "controls-tab"] {
-        Column(gap: 12)[id: "controls-page", class: "page controls-page", pad: 18px, grow: 1] {
-          Text("Actions and values")[class: "section-title"]
-          Text("Hover, focus, and press the enabled button. Disabled controls show their disabled styling.")[class: "help"]
-          Row(gap: 12)[id: "actions-row", class: "actions", margin: 0x4] {
+      // ── Buttons, toggles, choices, and values ──────────────────────────────────────────
+      Tab(title: "Controls") {
+        Column[class: "page", pad: 18px, gap: 10px, grow: 1] {
+          Text("Buttons, toggles, and values")[class: "section-title"]
+          Text("Hover, focus, press, and disable. Every value widget mirrors its state into a readout.")[class: "help"]
+          Row(gap: 12)[width: 100%] {
             Button(label: "Run action")[id: "run-action", tooltip: "Activate the demo action.", press: onAction, class: "action", width: 220px, height: 42px]
             Button(label: "Disabled action")[disabled: true, class: "action disabled-action", width: 220px, height: 42px]
+            CheckBox(label: "Receive updates")[id: "updates", checked: true,
+                    tooltip: "Checkbox state is available as a bool by id.", change: onCheckChange, class: "checkbox", width: 250px, height: 42px, pad: 6px]
           }
-          Text("Slider value: drag the thumb or focus it and press Left/Right.")[class: "help"]
-          Slider[id: "volume", value: 0.65, min: 0, max: 1, tooltip: "The slider reports a numeric value by id.",
-                 change: onSliderChange, class: "slider", width: 480px, height: 26px, margin: 0x2]
-          Text("Volume: 65%")[id: "volume-readout", class: "value-readout", width: 180px, height: 24px]
-          ProgressBar[id: "progress-demo", value: 0.65, min: 0, max: 1, class: "progress", width: 480px, height: 16px]
-          Row(gap: 16)[id: "picker-row", class: "picker-row", margin: 0x8] {
-            Dropdown[id: "density", options: "Compact|Comfortable|Spacious", value: "Comfortable",
-                     tooltip: "Click to open; choose one density.", tooltipTrigger: "hover", tooltipShowDelay: 350,
-                     change: onDensityChange, class: "dropdown", width: 260px, height: 38px, pad: 8px]
-            ColorPicker[id: "accent-color", value: #5b8cff, format: "hex", formats: "hex|rgb|hsl|hsv", precision: 1,
-                        popupSize: 300x352,
-                        alpha: true, showAlpha: true, showInputs: true, showFormatSwitcher: true,
-                        showHue: true, showSaturationValue: true,
-                        tooltip: "Click and drag in the popup to choose a color, or edit the value row.",
-                        change: onColorChange, class: "color-picker", width: 260px, height: 38px, pad: 8px]
-          }
-
-          // Switch and ToggleButton keep a bool by id; RadioGroup keeps the selected option string.
-          Separator[class: "rule"]
-          Text("Selection controls")[class: "section-title"]
-          Row(gap: 16)[id: "selection-row", class: "selection-row"] {
+          Row(gap: 12)[width: 100%] {
             Switch[label: "Live sync", checked: true, tooltip: "Switch state is a bool by id.",
                    id: "live-sync", change: onSwitchChange, class: "switch", width: 220px, height: 36px]
             ToggleButton(label: "Mute")[id: "mute", checked: false, tooltip: "A button that stays pressed.",
                    change: onToggleChange, class: "toggle", width: 150px, height: 36px]
+            SegmentedControl[id: "shading", options: "Solid|Wireframe|Rendered", value: "Solid",
+                   tooltip: "Click a segment, or focus and press Left/Right.", change: onShadingChange,
+                   class: "segmented", width: 330px, height: 30px]
           }
-          Row(gap: 16)[id: "radio-row", class: "radio-row"] {
+          Row(gap: 16)[width: 100%] {
             RadioGroup[id: "density-choice", options: "Compact|Comfortable|Spacious", value: "Comfortable",
                    tooltip: "Click a row or focus and press Up/Down.",
                    change: onRadioChange, class: "radio", width: 300px, height: 108px]
-            Column(gap: 8)[id: "selection-readouts", class: "readouts"] {
+            Column(gap: 8)[class: "readouts"] {
               Text("Live sync: on")[id: "switch-readout", class: "value-readout", width: 240px, height: 22px]
               Text("Mute: off")[id: "toggle-readout", class: "value-readout", width: 240px, height: 22px]
               Text("Layout: Comfortable")[id: "radio-readout", class: "value-readout", width: 240px, height: 22px]
+              Text("Shading: Solid")[id: "shading-readout", class: "value-readout", width: 240px, height: 22px]
             }
+          }
+          Separator[class: "rule"]
+          Text("Ranges")[class: "section-title"]
+          Row(gap: 12)[width: 100%, align: Center] {
+            Slider[id: "volume", value: 0.65, min: 0, max: 1, tooltip: "Drag the thumb or focus and press Left/Right.",
+                   change: onSliderChange, class: "slider", width: 480px, height: 26px]
+            Text("Volume: 65%")[id: "volume-readout", class: "value-readout", width: 160px, height: 24px]
+          }
+          Row(gap: 12)[width: 100%, align: Center] {
+            ProgressBar[id: "progress-demo", value: 0.65, min: 0, max: 1, class: "progress", width: 480px, height: 16px]
+            Text("65% determinate")[class: "help", width: 160px, height: 16px]
+          }
+          Row(gap: 12)[width: 100%, align: Center] {
+            ProgressBar[id: "busy-bar", indeterminate: true, class: "progress", width: 480px, height: 14px]
+            Text("indeterminate")[class: "help", width: 160px, height: 14px]
+          }
+          Row(gap: 12)[width: 100%, align: Center] {
+            Rating[id: "priority", value: 3, max: 5, tooltip: "Click a pip; click the last lit pip to clear.",
+                   change: onRatingChange, class: "rating", width: 130px, height: 24px]
+            Text("Priority: 3/5")[id: "rating-readout", class: "value-readout", width: 160px, height: 24px]
+            Stepper[id: "subdivisions", value: 2, min: 0, max: 7, step: 1, change: onSubdivChange,
+                   tooltip: "Click - or +, or focus and press Up/Down.", class: "stepper", width: 180px, height: 34px]
+            Text("Subdivisions: 2")[id: "subdiv-readout", class: "value-readout", width: 160px, height: 24px]
           }
         }
       }
 
-      // A draggable split with a checklist and wrapping text.
-      Tab(title: "Layout")[id: "layout-tab"] {
-        Column(gap: 10)[id: "layout-page", class: "page layout-page", pad: 18px, grow: 1] {
-          Text("Resizable layout and checklist")[class: "section-title"]
-          Text("Drag the splitter between the panels. The content paragraph wraps and remains clipped to its layout bounds.")[class: "help"]
-          Split(direction: Horizontal)[id: "main-split", class: "split", ratio: 0.34, gutter: 8, grow: 1] {
-            Panel[id: "tasks-panel", class: "panel checklist-panel", pad: 14px] {
-              Text("Tasks")[class: "panel-title"]
-              CheckList[gap: 8, class: "checklist"] {
-                CheckItem(label: "Parse the .xui tree", checked: true)[id: "task-layout", change: onTaskLayout, class: "check-item", width: 100%, height: 34px, pad: 5px]
-                CheckItem(label: "Resolve .xss styles", checked: true)[id: "task-styles", change: onTaskStyles, class: "check-item", width: 100%, height: 34px, pad: 5px]
-                CheckItem(label: "Keep controls backend-neutral")[id: "task-backend", change: onTaskBackend, class: "check-item", width: 100%, height: 34px, pad: 5px]
-                CheckItem(label: "Resize the split panels")[id: "task-resize", change: onTaskResize, class: "check-item", width: 100%, height: 34px, pad: 5px]
-              }
-            }
-            Panel[id: "content-panel", class: "panel content-panel", pad: 14px] {
-              Text("Shared document, replaceable backends")[class: "panel-title"]
-              Text("This page is described entirely with .xui structure and .xss styling. The GLFW platform supplies window and input events; the OpenGL renderer draws the same backend-neutral command list.")[class: "body"]
-              Text("Long content wraps to the next line, contributes to auto layout, and is clipped to the widget bounds instead of painting over neighboring controls.")[class: "body"]
-              Button(label: "Test hover and focus")[tooltip: "This tooltip is attached to its target control.", press: onAction, class: "secondary", width: 240px, height: 40px]
-            }
+      // ── Popup controls ─────────────────────────────────────────────────────────────────
+      Tab(title: "Pickers") {
+        Column[class: "page", pad: 18px, gap: 10px, grow: 1] {
+          Text("Popup controls")[class: "section-title"]
+          Text("Open, choose, and close: dropdown list, HSV picker, month calendar, key capture.")[class: "help"]
+          Row(gap: 12)[width: 100%] {
+            Dropdown[id: "density", options: "Compact|Comfortable|Spacious", value: "Comfortable",
+                     tooltip: "Click to open; choose one density.", tooltipTrigger: "hover", tooltipShowDelay: 350,
+                     change: onDensityChange, class: "dropdown", width: 260px, height: 38px, pad: 8px]
+            Text("Density: Comfortable")[class: "help", width: 240px, height: 24px]
           }
+          Row(gap: 12)[width: 100%] {
+            ColorPicker[id: "accent-color", value: #5b8cff, format: "hex", formats: "hex|rgb|hsl|hsv", precision: 1,
+                        popupSize: 300x352, alpha: true, showAlpha: true, showInputs: true,
+                        showFormatSwitcher: true, showHue: true, showSaturationValue: true,
+                        tooltip: "Click and drag in the popup, switch formats, or edit the value row.",
+                        change: onColorChange, class: "color-picker", width: 260px, height: 38px, pad: 8px]
+            Text("Pick a color; the popup reports live changes.")[class: "help", width: 300px, height: 24px]
+          }
+          Row(gap: 12)[width: 100%] {
+            DatePicker[id: "due-date", value: "2026-10-15", change: onDateChange,
+                  tooltip: "Click to open the calendar; arrows move the day while it is open.",
+                  class: "date", width: 170px, height: 34px]
+            KeybindField[id: "save-key", value: "Ctrl+S", placeholder: "Press keys…",
+                  tooltip: "Focus and press a key combination. Escape clears it.",
+                  change: onKeybindChange, class: "keybind", width: 170px, height: 34px]
+            Text("Due: 2026-10-15")[id: "date-readout", class: "value-readout", width: 220px, height: 24px]
+            Text("Save key: Ctrl+S")[id: "keybind-readout", class: "value-readout", width: 220px, height: 24px]
+          }
+          Separator[class: "rule"]
+          Text("Breadcrumb")[class: "section-title"]
+          Breadcrumb[id: "trail", options: "Project|Assets|Textures|Wood", value: "Textures",
+                tooltip: "Click a path segment to navigate there.", change: onTrailChange,
+                class: "crumbs", width: 420px, height: 24px]
+          Text("Trail: Project › Assets › Textures")[id: "trail-readout", class: "value-readout", width: 420px, height: 22px]
+        }
+      }
 
-          // Display widgets: static label, badge, activity spinner, and a PNG image.
-          // The demo generates xui-demo-image.png at startup if it is missing (see glfw_demo.cpp).
-          Divider[class: "rule"]
-          Text("Display widgets")[class: "section-title"]
-          Row(gap: 14)[id: "display-row", class: "display-row"] {
-            Image("xui-demo-image.png")[fit: Contain, tooltip: "PNG image loaded through the renderer's texture API.",
+      // ── Display widgets and chrome containers ──────────────────────────────────────────
+      Tab(title: "Display") {
+        Column[class: "page", pad: 18px, gap: 10px, grow: 1] {
+          Text("Static content and indicators")[class: "section-title"]
+          Row(gap: 14)[width: 100%] {
+            Image("xui-demo-image.png")[fit: Contain, tooltip: "PNG loaded through the renderer's texture API.",
                   class: "demo-image", width: 200px, height: 120px]
-            Column(gap: 10)[id: "display-column", class: "display-column"] {
-              Label("Static label text")[class: "demo-label", width: 220px, height: 22px]
-              Row(gap: 10)[id: "badge-row", class: "badge-row"] {
+            Column(gap: 10)[grow: 1] {
+              Row(gap: 10) {
+                Label("Static label text")[class: "demo-label", width: 200px, height: 22px]
                 Badge("NEW")[class: "badge", width: 58px, height: 22px]
                 Spinner[class: "spinner", width: 22px, height: 22px]
                 Spinner[disabled: true, class: "spinner", width: 22px, height: 22px]
               }
               Toolbar[id: "demo-toolbar", class: "demo-toolbar"] {
-                Label("Toolbar container")[class: "demo-label"]
+                Label("Toolbar")[class: "demo-label"]
                 Button(label: "Action")[class: "secondary", width: 96px, height: 32px]
               }
               StatusBar[id: "demo-status", class: "demo-status"] {
-                Text("StatusBar container")[class: "help"]
+                Text("StatusBar")[class: "help"]
                 Badge("Ready")[class: "badge", width: 64px, height: 22px]
               }
             }
           }
-        }
-      }
-
-      // Second wave: mode pickers, values, navigation, and popups. Every control has an id
-      // and its change handler writes a live readout through the value retriever API.
-      Tab(title: "Widgets")[id: "widgets-tab"] {
-        Column(gap: 10)[id: "widgets-page", class: "page", pad: 18px, grow: 1] {
-          Breadcrumb[id: "trail", options: "Project|Assets|Textures|Wood", value: "Textures",
-                tooltip: "Click a path segment to navigate there.", change: onTrailChange,
-                class: "crumbs", width: 420px, height: 24px]
-          Row(gap: 14)[id: "pickers-row", class: "field-row"] {
-            Column(gap: 6)[id: "pickers-left"] {
-              Text("SegmentedControl")[class: "section-title"]
-              SegmentedControl[id: "shading", options: "Solid|Wireframe|Rendered", value: "Solid",
-                    tooltip: "Click a segment, or focus and press Left/Right.", change: onShadingChange,
-                    class: "segmented", width: 330px, height: 30px]
-              Text("Rating")[class: "section-title"]
-              Rating[id: "priority", value: 3, max: 5, tooltip: "Click a pip; click the last lit pip to clear.",
-                    change: onRatingChange, class: "rating", width: 130px, height: 24px]
-              Text("Stepper")[class: "section-title"]
-              Stepper[id: "subdivisions", value: 2, min: 0, max: 7, step: 1, change: onSubdivChange,
-                    tooltip: "Click - or +, or focus and press Up/Down.", class: "stepper", width: 180px, height: 34px]
-            }
-            Column(gap: 6)[id: "pickers-right"] {
-              Text("DatePicker")[class: "section-title"]
-              DatePicker[id: "due-date", value: "2026-10-15", change: onDateChange,
-                    tooltip: "Click to open the calendar; use the arrows or type arrows to move the day.",
-                    class: "date", width: 170px, height: 34px]
-              Text("KeybindField")[class: "section-title"]
-              KeybindField[id: "save-key", value: "Ctrl+S", placeholder: "Press keys…",
-                    tooltip: "Focus and press a key combination. Escape clears it.",
-                    change: onKeybindChange, class: "keybind", width: 170px, height: 34px]
-              Text("Indeterminate progress")[class: "section-title"]
-              ProgressBar[id: "busy-bar", indeterminate: true, class: "progress", width: 220px, height: 14px]
-            }
-          }
           Separator[class: "rule"]
-          Column(gap: 4)[id: "widgets-readouts", class: "readouts"] {
-            Text("Shading: Solid")[id: "shading-readout", class: "value-readout", width: 420px, height: 22px]
-            Text("Priority: 3/5")[id: "rating-readout", class: "value-readout", width: 420px, height: 22px]
-            Text("Subdivisions: 2")[id: "subdiv-readout", class: "value-readout", width: 420px, height: 22px]
-            Text("Due: 2026-10-15")[id: "date-readout", class: "value-readout", width: 420px, height: 22px]
-            Text("Save key: Ctrl+S")[id: "keybind-readout", class: "value-readout", width: 420px, height: 22px]
-            Text("Trail: Project › Assets › Textures")[id: "trail-readout", class: "value-readout", width: 420px, height: 22px]
+          Text("Tooltips and the FPS overlay")[class: "section-title"]
+          Row(gap: 12)[width: 100%, align: Center] {
+            Button(label: "Tooltip target")[tooltip: "This tooltip is attached to its target control.",
+                   press: onAction, class: "secondary", width: 220px, height: 40px]
+            Text("Hover the button; it hides on click.")[class: "help", width: 300px, height: 24px]
+          }
+          Row(gap: 12)[width: 100%, align: Center] {
+            FpsCounter[class: "fps", width: 168px, height: 26px, pad: 5px]
+            Text("F3 toggles the overlay anywhere in the demo.")[class: "help", width: 340px, height: 24px]
           }
         }
       }
 
-      // ScrollView demos: vertical, horizontal, nested, keyboard and programmatic scrolling.
-      Tab(title: "Scrolling")[id: "scrolling-tab"] {
-        Column(gap: 10)[id: "scrolling-page", class: "page", pad: 18px, grow: 1] {
-          Text("Scrollable containers")[class: "section-title"]
-          Text("Wheel over a viewport, drag its thumb, focus it and use arrows/Page Up/Down, or use the scroll-into-view button.")[class: "help"]
-          Row(gap: 12)[id: "scroll-columns", grow: 1] {
-            ScrollView[id: "vertical-scroll", vertical: true, horizontal: false, scrollBehavior: "smooth", scrollSpeed: 42,
-                       class: "scroll-demo", width: 230px, height: 340px, change: onScrollChanged] {
-              Column(gap: 4)[id: "vertical-content"] {
-                Text("Vertical content")[class: "panel-title"]
-                Button(label: "Scroll target A")[id: "scroll-target-a", class: "scroll-action", width: 180px, height: 32px]
-                Text("Item 01 — cached measure")[class: "scroll-item"]
-                Text("Item 02 — retained layout")[class: "scroll-item"]
-                Text("Item 03 — clipped at viewport")[class: "scroll-item"]
-                Text("Item 04 — wheel and keyboard")[class: "scroll-item"]
-                Text("Item 05 — scrollbar drag")[class: "scroll-item"]
-                Text("Item 06 — nested containers")[class: "scroll-item"]
-                Text("Item 07 — focus navigation")[class: "scroll-item"]
-                Text("Item 08 — no forced reflow")[class: "scroll-item"]
-                Text("Item 09 — logical pixels")[class: "scroll-item"]
-                Text("Item 10 — automatic range clamp")[class: "scroll-item"]
-                Text("Item 11 — last visible target")[id: "scroll-target-last", class: "scroll-item"]
+      // ── Scrolling, splitters, and checklists ───────────────────────────────────────────
+      Tab(title: "Containers") {
+        Column[class: "page", pad: 18px, gap: 10px, grow: 1] {
+          Text("Scrolling, splitters, and checklists")[class: "section-title"]
+          Text("Wheel or drag the scrollbars, drag the splitter, toggle the checklist.")[class: "help"]
+          Row(gap: 12)[width: 100%, grow: 1] {
+            Column(gap: 8)[width: 460px] {
+              ScrollView[id: "vertical-scroll", vertical: true, horizontal: false, scrollBehavior: "smooth", scrollSpeed: 42,
+                         class: "scroll-demo", width: 100%, height: 180px, change: onScrollChanged] {
+                Column(gap: 4)[id: "vertical-content"] {
+                  Text("Vertical content")[class: "panel-title"]
+                  Button(label: "Scroll target A")[id: "scroll-target-a", class: "scroll-action", width: 180px, height: 32px]
+                  Text("Item 02 — retained layout")[class: "scroll-item"]
+                  Text("Item 03 — clipped at viewport")[class: "scroll-item"]
+                  Text("Item 04 — wheel and keyboard")[class: "scroll-item"]
+                  Text("Item 05 — scrollbar drag")[class: "scroll-item"]
+                  Text("Item 06 — nested containers")[class: "scroll-item"]
+                  Text("Item 07 — focus navigation")[class: "scroll-item"]
+                  Text("Item 08 — no forced reflow")[class: "scroll-item"]
+                  Text("Item 11 — last visible target")[id: "scroll-target-last", class: "scroll-item"]
+                }
+              }
+              ScrollView[id: "horizontal-scroll", horizontal: true, vertical: false, scrollbar: "always",
+                         class: "scroll-demo", width: 100%, height: 96px, change: onScrollChanged] {
+                Row(gap: 12)[id: "horizontal-content"] {
+                  Button(label: "Horizontal 1")[class: "scroll-action", width: 180px, height: 56px]
+                  Button(label: "Horizontal 2")[class: "scroll-action", width: 180px, height: 56px]
+                  Button(label: "Horizontal 3")[class: "scroll-action", width: 180px, height: 56px]
+                  Button(label: "Horizontal 4")[class: "scroll-action", width: 180px, height: 56px]
+                  Button(label: "Horizontal 5")[class: "scroll-action", width: 180px, height: 56px]
+                }
+              }
+              Row(gap: 12)[width: 100%, align: Center] {
+                Button(label: "Scroll to last item")[press: onScrollToTarget, class: "action", width: 210px, height: 36px]
+                Text("Vertical offset: 0, 0")[id: "scroll-position-readout", class: "value-readout", width: 220px, height: 24px]
               }
             }
-            Column(gap: 8, grow: 1)[id: "scroll-right-column"] {
-              ScrollView[id: "horizontal-scroll", horizontal: true, vertical: false, scrollbar: "always",
-                         class: "scroll-demo", width: 100%, height: 112px, change: onScrollChanged] {
-                Row(gap: 12)[id: "horizontal-content"] {
-                  Button(label: "Horizontal 1")[class: "scroll-action", width: 180px, height: 64px]
-                  Button(label: "Horizontal 2")[class: "scroll-action", width: 180px, height: 64px]
-                  Button(label: "Horizontal 3")[class: "scroll-action", width: 180px, height: 64px]
-                  Button(label: "Horizontal 4")[class: "scroll-action", width: 180px, height: 64px]
-                  Button(label: "Horizontal 5")[class: "scroll-action", width: 180px, height: 64px]
+            Split(direction: Horizontal)[id: "main-split", class: "split", ratio: 0.34, gutter: 8, grow: 1] {
+              Panel[id: "tasks-panel", class: "panel checklist-panel", pad: 12px] {
+                Text("Tasks")[class: "panel-title"]
+                CheckList[gap: 6, class: "checklist"] {
+                  CheckItem(label: "Parse the .xui tree", checked: true)[id: "task-layout", change: onTaskLayout, class: "check-item", width: 100%, height: 34px, pad: 5px]
+                  CheckItem(label: "Resolve .xss styles", checked: true)[id: "task-styles", change: onTaskStyles, class: "check-item", width: 100%, height: 34px, pad: 5px]
+                  CheckItem(label: "Keep controls backend-neutral")[id: "task-backend", change: onTaskBackend, class: "check-item", width: 100%, height: 34px, pad: 5px]
+                  CheckItem(label: "Resize the split panels")[id: "task-resize", change: onTaskResize, class: "check-item", width: 100%, height: 34px, pad: 5px]
                 }
               }
-              Row(gap: 12, align: Center)[id: "scroll-actions"] {
-                Button(label: "Scroll to last item")[press: onScrollToTarget, class: "action", width: 210px, height: 36px]
-                Text("Vertical offset: 0, 0")[id: "scroll-position-readout", class: "value-readout", width: 260px, height: 24px]
-              }
-              ScrollView[id: "nested-outer", vertical: true, class: "scroll-demo", width: 100%, height: 190px] {
-                Column(gap: 8)[id: "nested-content"] {
-                  Text("Outer scroll area")[class: "panel-title"]
-                  Text("Outer item one")[class: "scroll-item"]
-                  ScrollView[id: "nested-inner", vertical: true, scrollbar: "never", class: "scroll-demo scroll-hidden", width: 100%, height: 92px] {
-                    Column(gap: 4)[id: "nested-inner-content"] {
-                      Text("Nested viewport — scrollbar hidden")[class: "scroll-item"]
-                      Text("Inner item 2")[class: "scroll-item"]
-                      Text("Inner item 3")[class: "scroll-item"]
-                      Text("Inner item 4")[class: "scroll-item"]
-                      Text("Inner item 5")[class: "scroll-item"]
-                      Text("Inner item 6")[class: "scroll-item"]
-                    }
-                  }
-                  Text("Outer item two")[class: "scroll-item"]
-                  Text("Outer item three")[class: "scroll-item"]
-                }
+              Panel[id: "content-panel", class: "panel content-panel", pad: 12px] {
+                Text("Shared document, replaceable backends")[class: "panel-title"]
+                Text("This page is described entirely with .xui structure and .xss styling. The GLFW platform supplies window and input events; the OpenGL renderer draws the same backend-neutral command list.")[class: "body"]
+                Text("Long content wraps to the next line, contributes to auto layout, and is clipped to the widget bounds instead of painting over neighboring controls.")[class: "body"]
+                Button(label: "Test hover and focus")[tooltip: "This tooltip is attached to its target control.", press: onAction, class: "secondary", width: 240px, height: 40px]
               }
             }
           }

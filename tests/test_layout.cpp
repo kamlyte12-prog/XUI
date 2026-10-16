@@ -122,6 +122,22 @@ TEST(layout_percent_min_max_constraints_resolve_in_parent_content_box) {
 	t.setStyle(child, childStyle); t.layout(parent, 240, 120);
 	CHECK(std::abs(t.rect(child).w - 150.f) < 0.01f);
 }
+TEST(layout_min_size_floor_survives_root_shrink) {
+	// A container with an authored floor keeps it when the window shrinks below it: the floor
+	// wins over the available space (and over a smaller authored size) and the content
+	// overflows instead of being crushed.
+	LayoutTree t; t.setLeafMeasure(leaf40x20, nullptr);
+	NodeId root = t.create(LayoutKind::Column, box(300, 200));
+	LayoutStyle panel = box(200, 120); panel.minW = 240; panel.minH = 160;
+	NodeId p = t.create(LayoutKind::Column, panel);
+	NodeId a = t.create(LayoutKind::Leaf);
+	t.append(root, p); t.append(p, a);
+	t.layout(root, 300, 200);
+	CHECK_RECT(t, p, 0, 0, 240, 160);   // floor raises the authored 200x120
+	CHECK_RECT(t, a, 0, 0, 240, 20);    // the stretched grandchild follows the floored panel
+	t.layout(root, 120, 90);            // root far below the panel's floor
+	CHECK_RECT(t, p, 0, 0, 240, 160);
+}
 TEST(layout_absolute_children_use_insets) {
 	LayoutTree t; NodeId root = t.create(LayoutKind::Stack, box(200, 100));
 	auto abs = [&](Length l, Length tp, Length r, Length b, Length w, Length h) {

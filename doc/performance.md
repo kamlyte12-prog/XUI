@@ -2,16 +2,11 @@
 
 Xui is retained: it keeps a layout tree and caches measurements, resolves style sets at node creation/state changes, and redraws after events or requested ticks. Performance depends strongly on the renderer. The interactive examples use direct OpenGL draw-list rendering; `SoftRenderer` is a correctness/reference path.
 
-## What the measurements mean
+## What measurements mean
 
-Recorded Windows Release measurements are host-specific:
+Recorded benchmark values and their build conditions are kept in the canonical [project tracking history](../plan/tracking.md), so measurement snapshots have one home. The recorded hidden Windows Release loop profiles exceeded 60 FPS, but those are throughput measurements from one machine and build; they do not establish visible interaction or resize performance.
 
-- The latest hidden, uncapped Windows Release profile reported 805 FPS (`xui_glfw_demo`, 4,025 frames in 5.00004 s), with the FPS widget enabled and vsync disabled. This measures the demo's idle continuous loop; it does not simulate visible scrolling, resizing, or input latency.
-- The 938-node layout benchmark reported 103.8 μs for a full relayout, 99.8 μs for a resize, 2.4 μs for one leaf content change, and effectively zero for same-size idle layout. The pre-ScrollView baseline was 107.9 μs, 102.3 μs, 2.2 μs, and effectively zero, respectively. The differences are small and host-noisy; no solver speedup is claimed because the solver algorithm was retained.
-- A separate 1,000-child scroll benchmark measured offset update plus a descendant `absRect()` at 0.008 μs per iteration and reported zero nodes arranged. This confirms scrolling does not re-run layout; it is a microbenchmark, not a full rendered scroll-frame profile.
-- An earlier 640×360 software raster benchmark measured about 28 milliseconds for a full frame before export, below 60 FPS. Direct OpenGL drawing avoids the CPU full-frame raster loop for the bundled windows.
-
-These results verify one local Windows Release configuration. They do not guarantee a particular FPS on other GPUs, drivers, display sizes, operating systems, or under vsync. Uncapped hidden frame-loop FPS is a throughput ceiling, not a displayed monitor refresh rate or interaction-latency guarantee. Visible scrolling, clipping, resize smoothness, and ordinary close still need an interactive smoke test.
+No benchmark guarantees a particular FPS on other GPUs, drivers, display sizes, operating systems, or under vsync. Uncapped hidden frame-loop FPS is a throughput ceiling, not a displayed monitor refresh rate or an interaction-latency guarantee. Visible scrolling, clipping, resize smoothness, and ordinary close still need an interactive smoke test.
 
 Run the examples with `--profile` to measure their actual shared assets and loop. Use dedicated benchmarks for stage-level profiling; the simple sample profile reports frame count, elapsed seconds, and effective FPS.
 
@@ -29,7 +24,7 @@ Run the examples with `--profile` to measure their actual shared assets and loop
 
 - Use a GPU renderer for interactive full-window redraws. The CPU `SoftRenderer` is deterministic but full-frame software rasterization is much slower.
 - Let the facade's event loop sleep when idle. Continuous redraw is intended for animation/profile use, not normal static UI.
-- Enabling the FPS counter opts into continuous redraw so the displayed FPS measures actual rendered frame cadence instead of the event-driven idle refresh rate. This intentionally raises CPU/GPU use while visible; turn it off with F3 for normal event-driven idle behavior. Continuous profile mode and the overlay use the same render loop.
+- Enabling the FPS counter opts into continuous redraw so the displayed FPS measures rendered frame cadence instead of event-driven idle refresh. This intentionally raises CPU/GPU use while visible; turn it off with F3 for event-driven idle behavior.
 - Keep glyph atlases reusable and load fonts before `attach()` so atlas setup and glyph upload happen through the normal renderer lifecycle.
 - Avoid very large shadows or thousands of separately styled objects. Painter batches compatible draw commands, but each visible object still contributes geometry and style/layout work.
 - Do not force `vsync = false` in shipped applications unless uncapped throughput is intentional. Vsync can cap frame rate at display refresh and reduce tearing.
@@ -48,8 +43,8 @@ For reproducible results, note whether the process ran alongside other GPU-heavy
 
 ## Live resize and the GLFW event drain
 
-The GLFW platform drains callbacks that were queued by its last `glfwPollEvents()` call before polling again. Polling repeatedly inside one drain loop can keep the UI run loop servicing resize callbacks without reaching its frame submission point when the OS produces a continuous stream. `GlfwPlatform::pumpEvents()` therefore polls once per drain cycle; after the current callback queue empties it returns control to the frame loop, which lays out and paints before the next poll. This keeps redraw scheduling in the framework loop rather than deferring layout until resize ends.
+The GLFW platform drains callbacks queued by its last `glfwPollEvents()` call before polling again. Polling repeatedly inside one drain loop can starve frame submission while the OS produces a continuous stream. `GlfwPlatform::pumpEvents()` polls once per drain cycle. Some operating systems also enter a modal native resize loop, so the ordinary `Xui::run()` loop cannot run during the drag. To handle that case, the platform contract offers an optional `setLiveResizeHook`; the GLFW size callback invokes the facade's render-frame path, which resizes the backbuffer, recalculates layout, paints, and presents at each callback. Other backends can leave the hook as a no-op if their event loop remains active during resizing.
 
-`Xui::run()` reads the latest logical client size and framebuffer pixel size every iteration. On a resize/DPI event it resizes the renderer in physical pixels, then runs retained layout with logical client dimensions before painting. Flex/stack/grid children follow the changed parent rectangle; `ScrollView` clips descendants through the backend-neutral painter clip stack. The audit verified this source path and a visible GLFW frame; a successful manual drag-resize could not be completed in the desktop helper session, so interactive resize remains unverified here.
+`Xui::run()` reads the latest logical client size and framebuffer pixel size every iteration. On a resize/DPI event it resizes the renderer in physical pixels, then runs retained layout with logical client dimensions before painting. During a modal resize, the GLFW live-resize hook runs the same frame path from the size callback. `ScrollView` clips descendants through the backend-neutral painter clip stack. The source path and automated suite were verified; a successful manual drag-resize could not be completed in the desktop helper session, so interactive resize remains unverified here.
 
-The Release `--profile` run is a hidden/uncapped loop measurement, not a visible interaction benchmark. The latest 2026-10-15 showcase sizing/theme run measured 572.588 FPS for `xui_hello` (4,137 frames / 7.22509 s) and 583.659 FPS for `xui_glfw_demo` (4,216 frames / 7.2234 s). These exceed 60 FPS in that hidden loop but do not prove visible presentation, resize pacing, or interaction latency. Both example targets use the GLFW/OpenGL backend in this checkout. A visible resize/input pass and a distinct Win32 backend run still require an interactive environment.
+Both example targets use the GLFW/OpenGL backend in this checkout. A visible resize/input pass and non-Windows backend verification still require an interactive environment; see the tracking history for the last recorded profile data and exact conditions.

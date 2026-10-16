@@ -165,3 +165,5 @@ Column.readouts { resting: { gap: 8px, align: Start } }
 Row.toolbar { resting: { gap: 12px, align: Center } }
 Row.selection-row, Row.radio-row { resting: { margin: 2px 0px 4px } }
 Toolbar.demo-toolbar, StatusBar.demo-status { resting: { gap: 8px, align: Center } }
+Panel.layout-box { resting: { bg: color.panel-raised, border: 1px solid color.border-soft, radius: 6px, pad: 10px } }
+Panel.P2 { resting: { margin: 0px 0px 0px 24px } }

@@ -57,7 +57,7 @@ Start with the actual error string from `Xui::lastError()`, then confirm the run
 
 - Dropdown options use a pipe-separated string such as `"Small|Medium|Large"`; option values cannot include a pipe.
 - Dropdown is single-select. Click to open/select, use Escape to close, and use arrow keys when focused.
-- The color picker is an in-app HSV popup, not a native dialog. `alpha` is not implemented.
+- The color picker is an in-app HSV popup, not a native dialog. Alpha is enabled by default; set `alpha: false` to force full opacity, and use `showAlpha` to control the alpha strip.
 - Read the current selected text/color from an event callback using `ui.runtime().controlText(id)` or `controlColor(id)`.
 - Dropdown header hover is scoped to the header; popup option hover is a row-local virtual target. Use an `open` or `focus` selector to keep a stable header outline while the popup is open. Per-option selectors are not currently supported.
 - Slider `change` callbacks fire for each distinct value during a drag; update a `Text[id: ...]` node from the callback with `setValue` to keep an authored readout live.

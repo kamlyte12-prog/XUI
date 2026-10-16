@@ -16,6 +16,8 @@ Xui separates authored document data, style resolution, retained layout, drawing
 | `Renderer` | Owns drawing device/surface/textures and executes `DrawList` frames. |
 | `Platform` | Owns native window(s), normalizes input events, reports logical/pixel dimensions and DPI, waits while idle, and provides context/presentation hooks. |
 
+For the agent-facing module/source map and change boundaries, see [`plan/architecture.md`](../plan/architecture.md). Project invariants and anti-regression checks are in [`plan/agents.md`](../plan/agents.md).
+
 The public interfaces allow a Win32-specific implementation, but the current interactive sample targets use GLFW on Windows, Linux, and macOS; this tree does not currently build a separate native Win32 window backend. The bundled examples pair GLFW with an OpenGL renderer. Neither `.xui` nor `.xss` calls either backend directly.
 
 ## Data flow
@@ -44,7 +46,7 @@ main.cpp
           Platform swap/presentation hook
 ```
 
-Input travels in the opposite direction: `Platform::pumpEvents()` yields normalized pointer/key/text/wheel/window events; `Xui::run()` dispatches supported input to `UiRuntime`; a changed interaction requests another frame. Scroll offsets are updated without remeasuring the subtree. ScrollView clips are applied to each visible descendant's draw and hit rectangles. Smooth scroll and delayed tooltip deadlines are passed into the platform wait timeout, so idle apps do not need a polling loop. Resizes update renderer framebuffer dimensions/DPI and rerun layout using logical client dimensions.
+Input travels in the opposite direction: `Platform::pumpEvents()` yields normalized pointer/key/text/wheel/window events; `Xui::run()` dispatches supported input to `UiRuntime`; a changed interaction requests another frame. Scroll offsets are updated without remeasuring the subtree. ScrollView clips are applied to each visible descendant's draw and hit rectangles. Smooth scroll and delayed tooltip deadlines are passed into the platform wait timeout, so idle apps do not need a polling loop. Resizes update renderer framebuffer dimensions/DPI and rerun layout using logical client dimensions. Backends whose native resize enters a modal loop can use the optional `Platform::setLiveResizeHook`; the GLFW example invokes the facade's full render-frame path from each size callback.
 
 ## Backend-neutral coordinate and event contract
 
@@ -102,4 +104,4 @@ For a host-managed loop, the lower-level order is: load/validate the `Program`, 
 
 The parser/schema has more widget names and language syntax than `UiRuntime` supports. See [UI object reference](widgets.md) for implemented controls and the schema-only list. Dynamic expression evaluation, `if`/`for`, component expansion, property-filter selector lookup, and animation playback are not implemented by the standard runtime. Named `.xss` palette themes can be selected with `Xui::setTheme("dark")` after loading the stylesheet (or before attach); theme-dependent layout geometry such as padding and gap still needs full reapplication support, so keep structural dimensions in `.xui` until that is resolved.
 
-This guide is the current interface reference. Historical implementation notes are recorded in [`tracking.md`](../tracking.md).
+This guide is the current interface reference. Current readiness and historical implementation notes are recorded in [`plan/plan.md`](../plan/plan.md) and [`plan/tracking.md`](../plan/tracking.md).

@@ -4,7 +4,9 @@ This guide creates a small app with one `.xui` layout and one `.xss` stylesheet.
 
 ## Build Xui
 
-Xui uses CMake 3.25+ and C++23. In a checkout, configure and build the libraries and example:
+Xui uses CMake 3.25+ and a C++23 compiler. The bundled GLFW example requires OpenGL 2.1 support. On Linux, install OpenGL, X11, and Wayland development packages (for Ubuntu: `libgl-dev xorg-dev libwayland-dev libxkbcommon-dev`). The GLFW source is bundled; macOS uses its system Cocoa/OpenGL frameworks.
+
+Configure, build, and test from a checkout:
 
 ```sh
 cmake -S . -B build -DXUI_BUILD_EXAMPLES=ON -DXUI_BUILD_TESTS=ON
@@ -12,17 +14,27 @@ cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-The cross-platform demo target is `xui_glfw_demo`. It uses the bundled GLFW source and requires system OpenGL development files. On Windows the same source is also built as `xui_hello`. The default launch loads `showcase.xui` and `showcase.xss`, with Input, Controls, Layout, Widgets, and Scrolling tabs covering every currently runtime-supported widget, including toolbar/status bar container aliases and the divider alias. Press F3 to toggle the FPS counter.
+For GCC/Clang sanitizer checks, configure another build tree with `-DXUI_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug`, then build and run `ctest` there.
 
-For a project in the same CMake tree, add Xui as a subdirectory and link its application facade target:
+Xui builds from source and does not currently export an installed CMake package. To consume it from another CMake project in the same build, add the source tree and link the facade target:
 
 ```cmake
 add_subdirectory(path/to/xui)
-add_executable(my_app main.cpp my_platform.cpp my_renderer.cpp)
 target_link_libraries(my_app PRIVATE xui_widgets)
 ```
 
-`xui_widgets` publicly links the core, asset parsers, layout, rendering, and text libraries it uses. A custom platform/renderer implementation supplies its own platform and graphics dependencies. The repository currently builds from source through CMake; it does not define an installed package/export target yet.
+`xui_widgets` publicly links the core, asset parser, layout, rendering, and text libraries used by the facade.
+
+The cross-platform demo target is `xui_glfw_demo`. It uses the bundled GLFW source and requires system OpenGL development files. On Windows the same source is also built as `xui_hello`. The default launch loads `showcase.xui` and `showcase.xss`, with Input, Controls, Layout, Widgets, and Scrolling tabs covering every currently runtime-supported widget, including toolbar/status bar container aliases and the divider alias. Press F3 to toggle the FPS counter.
+
+To build the GLFW demo explicitly:
+
+```sh
+cmake -S . -B build/glfw -DXUI_BUILD_GLFW_EXAMPLE=ON -DXUI_BUILD_TESTS=OFF -DXUI_BUILD_BENCHMARKS=OFF
+cmake --build build/glfw --target xui_glfw_demo
+```
+
+The executable loads the copied showcase pair beside itself, independent of the working directory. Set `XUI_DEMO_FONT` to a TrueType font path if the demo's font search paths do not find one. A screenshot and the full example assets are linked from the [documentation index](README.md#examples-and-implementation-scope).
 
 ## Minimal application
 
@@ -131,3 +143,33 @@ Read [Architecture and backends](architecture.md) for the complete method contra
 ## Advanced / lower-level path
 
 Use `UiRuntime`, `TextSystem`, `Painter`, and `loadUiAssets()` directly when embedding into an existing event loop, managing multiple windows, or customizing frame scheduling. The low-level path makes the host responsible for file reads, parsing, font-atlas setup, input dispatch, logical-size layout, draw-list submission, and cleanup. It does not change the `.xui` / `.xss` separation.
+
+Compared with the lower-level setup, the facade replaces caller-owned `StringInterner`/asset-bundle/error plumbing and manual parser/style compilation with `loadFont()`, `loadXui()`, and `loadXss()`; `attach()` builds and wires the runtime; and `run()` owns the standard event/layout/paint/presentation loop. `runtime()` and `textSystem()` remain available for advanced access.
+
+## Configuration
+
+Pass `XuiOptions` to the `Xui` constructor to configure the app/window and glyph atlas:
+
+| Field | Purpose | Default |
+|---|---|---|
+| `appName` | Application name | `"xui-app"` |
+| `windowTitle` | Native window title | `"Xui"` |
+| `width`, `height` | Initial client size | 720 × 440 |
+| `minWidth`, `minHeight` | Minimum client size | 128 × 96 |
+| `resizable`, `visible` | Window behavior | `true`, `true` |
+| `glContext` | Request a GL context; set false for non-GL backends | `true` |
+| `vsync` | Request vertical synchronization | `false` |
+| `atlasSize` | Glyph texture atlas dimension | `GlyphAtlas::kMinSize` |
+
+`Xui::run()` accepts `XuiRunOptions`: `maxSeconds` bounds a run when nonzero, and `redrawContinuously` opts into continuous drawing (default false). The demos use continuous mode for their hidden `--profile` run; it measures loop throughput, not visible presentation or input latency.
+
+| CMake option | Purpose | Default |
+|---|---|---|
+| `XUI_BUILD_TESTS` | Build `xui_tests` | ON |
+| `XUI_BUILD_BENCHMARKS` | Build benchmarks and fuzz harnesses | ON |
+| `XUI_BUILD_EXAMPLES` | Build runnable examples | ON |
+| `XUI_BUILD_GLFW_EXAMPLE` | Build GLFW/OpenGL demo (`xui_glfw_demo`, and `xui_hello` on Windows) | ON |
+| `XUI_WERROR` | Treat warnings as errors | ON |
+| `XUI_SANITIZE` | Enable ASan/UBSan on GCC/Clang | OFF |
+
+Demo controls: `--profile` runs a hidden bounded loop; F3 toggles the visible FPS overlay; `XUI_DEMO_FONT` adds a TrueType file to the demo's font search list.

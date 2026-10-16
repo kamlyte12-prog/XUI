@@ -716,6 +716,7 @@ TEST(showcase_example_assets_parse_validate_and_build) {
 	if (!error.empty()) { std::cerr << error << '\n'; return; }
 	ui.layout(1080, 760);
 	CHECK(ui.value("display-name").has_value());
+	CHECK(ui.value("passphrase").has_value());
 	CHECK(ui.value("readonly-field").has_value());
 	CHECK(ui.value("notes").has_value());
 	CHECK(ui.value("updates").has_value());
@@ -760,40 +761,50 @@ TEST(showcase_example_assets_parse_validate_and_build) {
 		};
 	auto separatedVertically = [](Rect a, Rect b) { return a.empty() || b.empty() || a.bottom() <= b.y + 0.01f; };
 
-	const Rect name = rectFor("display-name"), readOnly = rectFor("readonly-field");
-	const Rect inputRow = rectFor("input-row"), notes = rectFor("notes"), checks = rectFor("checks-row");
+	const Rect name = rectFor("display-name"), passphrase = rectFor("passphrase"), readOnly = rectFor("readonly-field");
+	const Rect inputRow = rectFor("input-row"), notes = rectFor("notes");
 	CHECK(name.w > 0.f && name.h > 0.f); CHECK(readOnly.w > 0.f && readOnly.h > 0.f);
-	CHECK(inputRow.w > 0.f && inputRow.h > 0.f); CHECK(name.right() <= readOnly.x + 0.01f);
-	CHECK(separatedVertically(inputRow, notes)); CHECK(separatedVertically(notes, checks));
+	CHECK(name.right() <= passphrase.x + 0.01f); CHECK(passphrase.right() <= readOnly.x + 0.01f);
+	CHECK(separatedVertically(inputRow, notes));
 
 	// Each authored tab must produce drawable content, not just parse successfully.
 	Painter painter;
-	for (u32 section = 0; section < 4; ++section) {
+	for (u32 section = 0; section < 6; ++section) {
 		CHECK(ui.setValue("demo-sections", section));
 		ui.layout(1080, 760);
-		if (section == 1) {
-			const Rect actions = rectFor("actions-row"), slider = rectFor("volume");
-			const Rect progress = rectFor("progress-demo"), picker = rectFor("picker-row");
-			CHECK(actions.w > 0.f && actions.h > 0.f); CHECK(slider.w > 0.f && slider.h > 0.f);
-			CHECK(separatedVertically(actions, slider)); CHECK(separatedVertically(slider, progress));
-			CHECK(separatedVertically(progress, picker));
-			CHECK(rectFor("density").w > 0.f); CHECK(rectFor("accent-color").w > 0.f);
+		if (section == 0) {
+			// Layout tab: the min-size box holds its 220x64 floor and the sizing boxes stay ordered.
+			const Rect fixedBox = rectFor("sizing-fixed"), pct = rectFor("sizing-pct"), minBox = rectFor("sizing-min");
+			CHECK(fixedBox.w > 0.f && pct.w > 0.f && minBox.w > 0.f);
+			CHECK(fixedBox.right() <= pct.x + 0.01f); CHECK(pct.right() <= minBox.x + 0.01f);
+			CHECK(minBox.w >= 220.f - 0.01f && minBox.h >= 64.f - 0.01f);
 		}
 		else if (section == 2) {
+			const Rect volume = rectFor("volume"), progress = rectFor("progress-demo"), busy = rectFor("busy-bar");
+			CHECK(volume.w > 0.f && progress.w > 0.f && busy.w > 0.f);
+			CHECK(separatedVertically(volume, progress)); CHECK(separatedVertically(progress, busy));
+			const Rect radio = rectFor("density-choice");
+			CHECK(radio.w > 0.f && radio.h > 0.f);
+		}
+		else if (section == 3) {
+			const Rect density = rectFor("density"), color = rectFor("accent-color"), trail = rectFor("trail");
+			CHECK(density.w > 0.f && color.w > 0.f && trail.w > 0.f);
+		}
+		else if (section == 4) {
+			const Rect image = rectFor("demo-image"), toolbar = rectFor("demo-toolbar"), status = rectFor("demo-status");
+			CHECK(image.w > 0.f && toolbar.w > 0.f && status.w > 0.f);
+		}
+		else if (section == 5) {
 			const Rect split = rectFor("main-split"), tasks = rectFor("tasks-panel"), content = rectFor("content-panel");
 			const Rect firstTask = rectFor("task-layout"), lastTask = rectFor("task-resize");
+			const Rect scroll = rectFor("vertical-scroll");
 			CHECK(split.w > 0.f && split.h > 300.f);
 			CHECK(tasks.w > 0.f && content.w > 0.f && tasks.right() < content.x);
 			CHECK(firstTask.w > 0.f && lastTask.h > 0.f);
 			CHECK(rectFor("task-styles").y > firstTask.y);
 			CHECK(rectFor("task-backend").y > rectFor("task-styles").y);
 			CHECK(lastTask.y > rectFor("task-backend").y);
-		}
-		else if (section == 3) {
-			const Rect crumbs = rectFor("trail"), segmented = rectFor("shading"), stepper = rectFor("subdivisions");
-			const Rect rating = rectFor("priority"), date = rectFor("due-date"), keybind = rectFor("save-key");
-			CHECK(crumbs.w > 0.f && segmented.w > 0.f && stepper.w > 0.f);
-			CHECK(rating.w > 0.f && date.w > 0.f && keybind.w > 0.f);
+			CHECK(scroll.w > 0.f && scroll.h > 0.f);
 		}
 		text.beginFrame();
 		painter.begin(1080, 760, 1.f);
@@ -806,27 +817,31 @@ TEST(showcase_example_assets_parse_validate_and_build) {
 	ui.setEventHandler([](void* context, std::string_view name) {
 		static_cast<std::vector<std::string>*>(context)->emplace_back(name);
 		}, &events);
-	CHECK(ui.setValue("demo-sections", u32{ 0 }));
+	CHECK(ui.setValue("demo-sections", u32{ 1 }));   // Input tab
 	ui.layout(1080, 760);
 	const Rect nameField = rectFor("display-name");
 	const Vec2 namePoint{ nameField.x + 20.f, nameField.y + nameField.h * 0.5f };
 	CHECK(ui.pointerDown(namePoint)); CHECK(ui.pointerUp(namePoint)); CHECK(ui.textInput('!'));
 	CHECK(std::get<std::string>(*ui.value("display-name")) == "Guest!");
-	const Rect updates = rectFor("updates");
-	const Vec2 updatesPoint{ updates.x + 30.f, updates.y + updates.h * 0.5f };
-	CHECK(ui.pointerDown(updatesPoint)); CHECK(ui.pointerUp(updatesPoint));
-	CHECK(!std::get<bool>(*ui.value("updates")));
 
 	const Rect tabs = rectFor("demo-sections");
-	const Vec2 controlsHeader{ tabs.x + tabs.w * 0.375f, tabs.y + 12.f };   // center of the second of four equal tabs
+	const Vec2 controlsHeader{ tabs.x + tabs.w * 0.4167f, tabs.y + 12.f };   // center of the third of six equal tabs
 	CHECK(ui.pointerDown(controlsHeader)); (void)ui.pointerUp(controlsHeader);
-	CHECK_EQ(std::get<u32>(*ui.value("demo-sections")), 1u);
+	CHECK_EQ(std::get<u32>(*ui.value("demo-sections")), 2u);
 	ui.layout(1080, 760);
 	const Rect action = rectFor("run-action");
 	const Vec2 actionPoint{ action.x + action.w * 0.5f, action.y + action.h * 0.5f };
 	CHECK(ui.pointerDown(actionPoint)); CHECK(ui.pointerUp(actionPoint));
 	CHECK(std::find(events.begin(), events.end(), "onAction") != events.end());
+	const Rect updates = rectFor("updates");
+	const Vec2 updatesPoint{ updates.x + 30.f, updates.y + updates.h * 0.5f };
+	CHECK(ui.pointerDown(updatesPoint)); CHECK(ui.pointerUp(updatesPoint));
+	CHECK(!std::get<bool>(*ui.value("updates")));
 
+	const Vec2 pickersHeader{ tabs.x + tabs.w * 0.5833f, tabs.y + 12.f };   // center of the fourth of six equal tabs
+	CHECK(ui.pointerDown(pickersHeader)); (void)ui.pointerUp(pickersHeader);
+	CHECK_EQ(std::get<u32>(*ui.value("demo-sections")), 3u);
+	ui.layout(1080, 760);
 	const Rect density = rectFor("density");
 	const Vec2 densityPoint{ density.x + 20.f, density.y + density.h * 0.5f };
 	CHECK(ui.pointerDown(densityPoint));
@@ -840,9 +855,9 @@ TEST(showcase_example_assets_parse_validate_and_build) {
 	CHECK(ui.pointerDown({ color.x + 150.f, colorPopupY + 90.f }));
 	CHECK(std::get<Color>(*ui.value("accent-color")) != beforeColor);
 
-	const Vec2 layoutHeader{ tabs.x + tabs.w * 0.5f, tabs.y + 12.f };   // center of the third of five equal tabs
-	CHECK(ui.pointerDown(layoutHeader)); (void)ui.pointerUp(layoutHeader);
-	CHECK_EQ(std::get<u32>(*ui.value("demo-sections")), 2u);
+	const Vec2 containersHeader{ tabs.x + tabs.w * 0.9167f, tabs.y + 12.f };   // center of the sixth of six equal tabs
+	CHECK(ui.pointerDown(containersHeader)); (void)ui.pointerUp(containersHeader);
+	CHECK_EQ(std::get<u32>(*ui.value("demo-sections")), 5u);
 	ui.layout(1080, 760);
 	const Rect task = rectFor("task-backend");
 	const Vec2 taskPoint{ task.x + 50.f, task.y + task.h * 0.5f };

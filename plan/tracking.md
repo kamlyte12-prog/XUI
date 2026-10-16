@@ -1046,3 +1046,19 @@ Premise corrections worth recording: this checkout has a GLFW + OpenGL 2.1 backe
 - Run the same visible smoke test for `xui_hello.exe` and confirm text, resize, and close behavior.
 - Add a focused `.xui` regression fixture if any non-intentional sibling overlap remains; capture node bounds, parent content boxes, and z-order before changing the solver.
 - Rework theme application to reapply layout-affecting stylesheet values while preserving authored `.xui` overrides, then verify all geometry/state combinations.
+
+## Root README refresh — 2026-10-16
+
+### Changes and decisions
+
+- Replaced the root README's duplicate table of contents and repeated setup/usage sections with a short project description and links to the canonical `doc/` and `plan/` indexes.
+- Added a compact `xui::Xui` startup example using the current GLFW/OpenGL backend class names, with matching minimal `.xui` and `.xss` files. The sample expects the application's TrueType font at `font.ttf`; font files are not bundled in this repository.
+- Added the existing `doc/showcase.png` with a caption describing only visible showcase content, and linked its `.xui`, `.xss`, C++ entry point, and widget documentation.
+- Kept the fuller setup and backend build instructions in `doc/getting-started.md` rather than duplicating them in the root entry point.
+
+### Verification and status
+
+- Inspected `include/xui/xui.hpp`, the GLFW demo and backend declarations, getting-started/architecture guides, and the screenshot. The methods, options, backend class names, and referenced files in the README match the current source tree.
+- Confirmed `doc/showcase.png` exists and visually shows the tabbed GLFW/OpenGL showcase, themed controls, a checklist, splitter panels, and the FPS/readout area.
+- A fresh compile could not be run in this environment because `cmake`, `cl`, and `msbuild` are not available on `PATH`. Existing prebuilt demo binaries are present, but they do not constitute a fresh verification of this README snippet. No framework code or build files were changed.
+- Current status: README content and internal links were source-checked; compile verification of the exact inline sample remains unconfirmed. The user can follow the linked getting-started build instructions to compile the bundled GLFW example.

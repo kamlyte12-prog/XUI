@@ -47,7 +47,7 @@ User-facing guides are indexed in [`../doc/README.md`](../doc/README.md). Agent 
 - **Stability:** the project history contains freeze, glyph-atlas, resize, and input regressions. Headless tests reduce risk but cannot establish native event-loop stability or normal close behavior.
 - **Layout:** percent/min/max floors, nested minima, Split minima, absolute insets, and retained layout paths have automated tests, but no comprehensive visible matrix across window sizes/DPI is recorded. Grid/Stack are solver-only and unavailable in ordinary `.xui` runtime documents. Theme geometry reapplication remains incomplete.
 - **API and packaging:** the facade simplifies startup, but there is no install/export package or stable compatibility/version policy. Lower-level ownership and frame-loop paths still require careful use.
-- **Cross-platform:** only the GLFW/OpenGL path is implemented in the current examples. A native Win32 backend and current Linux/macOS verification are absent.
+- **Cross-platform:** only the GLFW/OpenGL path is implemented in the current examples. A native Win32 backend and current Linux/macOS verification are absent. GitHub Actions is configured for Ubuntu GCC/Clang, macOS, and Windows builds, but hosted results have not been checked in this update; only the Windows build/test path was run locally.
 - **Accessibility and input:** accessibility semantics, IME/composition, advanced keyboard navigation, touch/gesture behavior, and broad platform text-input testing remain limited or absent.
 - **Documentation:** docs now have separate user and agent indexes, but accuracy must track runtime support; parser/schema features must never be described as working controls.
 

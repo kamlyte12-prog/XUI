@@ -49,12 +49,14 @@ jobs:
             -DXUI_BUILD_TESTS=ON \
             -DXUI_BUILD_BENCHMARKS=OFF \
             -DXUI_BUILD_EXAMPLES=ON \
+            -DXUI_BUILD_GLFW_EXAMPLE=ON \
             -DXUI_WERROR=${{ matrix.werror }} \
             -DXUI_SANITIZE=${{ matrix.san }} \
             $EXTRA
 
       - name: Build
-        run: cmake --build build --config Debug --parallel
+        # Building the demo also compiles both optional adapters from backends/.
+        run: cmake --build build --config Debug --parallel --target xui_tests xui_glfw_demo
 
       - name: Test
         env:

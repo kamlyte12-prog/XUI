@@ -1120,3 +1120,25 @@ Premise corrections worth recording: this checkout has a GLFW + OpenGL 2.1 backe
 
 - Run a visible GLFW smoke pass for the demo after the path changes when native desktop inspection is available; test startup asset loading, interaction, docking, resize, and normal close.
 - Keep the GLFW/OpenGL adapters optional and separate from core targets; add install/export support only if a later packaging task defines a stable backend distribution contract.
+
+## GitHub Actions workflow alignment — 2026-10-16
+
+### Audit and changes
+
+- Audited `.github/workflows/ci.yml`; it is the repository's only workflow. It already runs on push and pull request across Ubuntu GCC 13, Ubuntu GCC 13 with ASan/UBSan, Ubuntu Clang 18/libc++, macOS 14, and Windows 2022. Linux installs X11/OpenGL development packages and disables GLFW Wayland because that workflow job is configured for X11.
+- The CMake restructure introduced the explicit `XUI_BUILD_GLFW_EXAMPLE` option and separate `xui_backend_glfw` / `xui_backend_opengl` targets under `backends/`. CI now explicitly enables that example and builds `xui_tests` plus `xui_glfw_demo`, ensuring the relocated adapters are compiled rather than relying on an implicit default all-target build.
+- Kept existing push/PR triggers and platform matrix. Added no secrets, caches, release/publish jobs, or extra platforms. CTest remains the test runner, with its existing direct-binary diagnostic fallback.
+- No previous failing workflow run was available in the local checkout, so this update does not claim to fix a recorded hosted failure. The change addresses coverage drift after the backend/CMake restructure.
+
+### Verification and status
+
+- Windows local validation used a fresh Debug Ninja configure with the same CI options and MSVC `/W4 /WX`; the explicit `xui_tests` and `xui_glfw_demo` targets built successfully (67/67 build steps), including both backend libraries.
+- CTest passed: **1/1 registered test passed** (`xui_tests`, 17.57 seconds; the executable reports the suite's cases internally).
+- Source review confirmed the workflow references current target and option names; old `examples/` backend and fixture paths do not appear in workflow commands. No `actionlint`, YAML parser, or GitHub-hosted runner result is available locally; final hosted YAML parsing and the Ubuntu/macOS jobs remain unverified until Actions runs.
+- No visible-window FPS or interaction measurement was part of CI validation. Hidden profile results elsewhere in this tracking file are not evidence of visible >60 FPS performance.
+
+### Decisions and next steps
+
+- Explicit targets make CI intent clearer and prevent an accidental target-selection change from skipping the demo or tests. Linking the GLFW demo compiles both backend adapters through CMake's target dependencies.
+- Retained the current OS matrix because it is already the project's stated target coverage. Linux CI intentionally validates X11, not Wayland; add Wayland only after the required dependencies and support claim are established.
+- Next: inspect the hosted matrix result for this workflow revision, fix any platform-specific build failures, then consider adding an independent YAML/actionlint check if the project adopts that tool.

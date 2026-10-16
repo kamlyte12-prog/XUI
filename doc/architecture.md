@@ -70,7 +70,13 @@ See [`renderer.hpp`](../include/xui/render/renderer.hpp). A concrete renderer mu
 
 `DrawList` data is temporary and remains valid only until the next painter frame. Copy or consume it synchronously. Honor framebuffer pixel dimensions and premultiplied-alpha conventions used by the draw-list renderer. The optional custom-command callback is installed with `setCustomHandler()`.
 
-The bundled `GlDrawListRenderer` is in [`gl_drawlist_renderer.cpp`](../examples/gl_drawlist_renderer.cpp). `SoftRenderer` is a CPU reference renderer for tests/headless work; its full-frame raster cost is not suitable as a high-frame-rate interactive backend at common window sizes.
+The bundled `GlDrawListRenderer` is in [`backends/opengl/gl_drawlist_renderer.cpp`](../backends/opengl/gl_drawlist_renderer.cpp). `SoftRenderer` is a CPU reference renderer for tests/headless work; its full-frame raster cost is not suitable as a high-frame-rate interactive backend at common window sizes.
+
+## Repository layout and backend targets
+
+Framework implementations and public headers remain under `src/` and `include/xui/`. Optional concrete adapters live at the repository root under `backends/`: `backends/glfw/` implements `Platform`, and `backends/opengl/` implements `Renderer`. The example application itself stays in `examples/` and links the `xui_backend_glfw` and `xui_backend_opengl` targets declared by [`backends/CMakeLists.txt`](../backends/CMakeLists.txt). These targets are built only when `XUI_BUILD_GLFW_EXAMPLE` is enabled; they are not linked into the core framework targets.
+
+The interactive `showcase.xui`/`.xss` pair stays in `examples/` because the GLFW demo and runtime asset tests both use it. Focused `cross_platform.*` and `controls.*` fixtures live under `tests/fixtures/`; tests load them from `XUI_TEST_FIXTURE_DIR`, and user guides link those same files as syntax examples. Other test-authored UI snippets remain inline in their owning tests.
 
 ## Implement `xui::Platform`
 

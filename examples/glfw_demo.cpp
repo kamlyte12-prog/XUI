@@ -1,5 +1,5 @@
-#include "gl_drawlist_renderer.hpp"
-#include "glfw_platform.hpp"
+#include <opengl/gl_drawlist_renderer.hpp>
+#include <glfw/glfw_platform.hpp>
 #include <xui/render/image_io.hpp>
 #include <xui/xui.hpp>
 #include <cstdio>

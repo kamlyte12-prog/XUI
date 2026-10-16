@@ -151,4 +151,4 @@ component PageTitle(text) {
 - Add stable IDs only when app code needs to read a control value or target a unique style.
 - Keep long body copy in `Text`; it wraps to its measured width and clips to its widget bounds. Give its parent a width constraint and enough vertical space.
 - Check widget support in the [object reference](widgets.md) before relying on a parser-accepted name.
-- Start from the actual [cross-platform sample](../examples/cross_platform.xui) and [stylesheet](../examples/cross_platform.xss).
+- Start from the [cross-platform fixture](../tests/fixtures/cross_platform.xui) and its [stylesheet](../tests/fixtures/cross_platform.xss), or the [full showcase](../examples/showcase.xui).

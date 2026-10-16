@@ -244,6 +244,12 @@ DockPreview { resting: { bg: #5386d866, border: 1px solid #69a7ff, radius: 4px }
 		if (!file) return {};
 		return { std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>() };
 	}
+	std::string readFixture(std::string_view filename) {
+		const std::filesystem::path path = std::filesystem::path(XUI_TEST_FIXTURE_DIR) / filename;
+		std::ifstream file(path, std::ios::binary);
+		if (!file) return {};
+		return { std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>() };
+	}
 }
 
 TEST(ui_runtime_pointer_stacking_activates_only_the_front_widget) {
@@ -302,8 +308,8 @@ Button { resting: { bg: #446688, fg: #ffffff } }
 
 TEST(cross_platform_example_assets_parse_and_build_in_shared_runtime) {
 	StringInterner strings;
-	const std::string xuiSource = readExample("cross_platform.xui");
-	const std::string xssSource = readExample("cross_platform.xss");
+	const std::string xuiSource = readFixture("cross_platform.xui");
+	const std::string xssSource = readFixture("cross_platform.xss");
 	CHECK(!xuiSource.empty()); CHECK(!xssSource.empty());
 	UiAssetBundle assets; std::string error;
 	const bool loaded = loadUiAssets(xuiSource, xssSource, strings, assets, error, "cross_platform.xui", "cross_platform.xss");
@@ -345,8 +351,8 @@ TEST(cross_platform_example_assets_parse_and_build_in_shared_runtime) {
 
 TEST(xui_facade_loads_assets_attaches_backends_and_runs_frames) {
 	Xui app;
-	const auto xuiPath = (std::filesystem::path(XUI_EXAMPLE_DIR) / "cross_platform.xui").string();
-	const auto xssPath = (std::filesystem::path(XUI_EXAMPLE_DIR) / "cross_platform.xss").string();
+	const auto xuiPath = (std::filesystem::path(XUI_TEST_FIXTURE_DIR) / "cross_platform.xui").string();
+	const auto xssPath = (std::filesystem::path(XUI_TEST_FIXTURE_DIR) / "cross_platform.xss").string();
 	CHECK(app.loadXui(xuiPath));
 	CHECK(app.loadXss(xssPath));
 	if (!app.lastError().empty()) return;
@@ -766,8 +772,8 @@ Tooltip { resting: { bg: #202a40, fg: #ffffff, pad: 6px, radius: 4px } }
 }
 
 TEST(controls_example_assets_parse_validate_and_build) {
-	const std::string xuiSource = readExample("controls.xui");
-	const std::string xssSource = readExample("controls.xss");
+	const std::string xuiSource = readFixture("controls.xui");
+	const std::string xssSource = readFixture("controls.xss");
 	CHECK(!xuiSource.empty()); CHECK(!xssSource.empty());
 	StringInterner strings; UiAssetBundle assets; std::string error;
 	CHECK(loadUiAssets(xuiSource, xssSource, strings, assets, error, "controls.xui", "controls.xss"));

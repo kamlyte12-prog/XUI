@@ -1,4 +1,4 @@
-#include "glfw_platform.hpp"
+#include <glfw/glfw_platform.hpp>
 #include <algorithm>
 #include <cmath>
 

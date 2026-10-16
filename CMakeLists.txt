@@ -9,6 +9,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(XUI_BUILD_TESTS       "Build unit tests"        ON)
 option(XUI_BUILD_BENCHMARKS  "Build benchmarks"        ON)
 option(XUI_BUILD_EXAMPLES    "Build runnable examples" ON)
+option(XUI_BUILD_GLFW_EXAMPLE "Build the GLFW + OpenGL example (uses bundled GLFW and system OpenGL)" ON)
 option(XUI_WERROR            "Treat warnings as errors" ON)
 option(XUI_SANITIZE          "Enable ASan+UBSan (GCC/Clang)" OFF)
 

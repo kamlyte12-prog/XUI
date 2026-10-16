@@ -21,6 +21,6 @@ The root [`README.md`](../README.md) is a short project entry point. Agent rules
 
 ## Examples and implementation scope
 
-The [showcase](../examples/showcase.xui) and [stylesheet](../examples/showcase.xss) are the default interactive reference. Smaller [`cross_platform`](../examples/cross_platform.xui) and [`controls`](../examples/controls.xui) examples remain source fixtures used by tests and linked as focused references. GLFW backend implementation files are [`glfw_demo.cpp`](../examples/glfw_demo.cpp), [`glfw_platform.hpp`](../examples/glfw_platform.hpp), and [`gl_drawlist_renderer.hpp`](../examples/gl_drawlist_renderer.hpp).
+The [showcase](../examples/showcase.xui) and [stylesheet](../examples/showcase.xss) are the default interactive reference. Focused [cross-platform](../tests/fixtures/cross_platform.xui) and [controls](../tests/fixtures/controls.xui) fixtures are shared by tests and these guides. GLFW backend implementations live in [`backends/glfw`](../backends/glfw/glfw_platform.hpp) and [`backends/opengl`](../backends/opengl/gl_drawlist_renderer.hpp); the example application remains in [`examples/glfw_demo.cpp`](../examples/glfw_demo.cpp).
 
 Parser/schema acceptance does not guarantee runtime support. The [widget reference](widgets.md) labels objects that are not materialized by `UiRuntime`; only runtime-backed objects should be treated as interactive controls.

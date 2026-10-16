@@ -6,13 +6,13 @@ The bundled interactive example uses GLFW and OpenGL. Start with the [user docum
 
 ## Getting started
 
-This example uses the GLFW/OpenGL backend files in `examples/`. Put a TrueType font at `font.ttf`, then build the program with the framework, GLFW, and OpenGL linked. The CMake setup for the bundled demo is in [`examples/CMakeLists.txt`](examples/CMakeLists.txt); backend implementations are [`gl_drawlist_renderer.hpp`](examples/gl_drawlist_renderer.hpp) and [`glfw_platform.hpp`](examples/glfw_platform.hpp).
+This example uses the GLFW/OpenGL backend targets from `backends/`. Put a TrueType font at `font.ttf`, then build the program with `xui_widgets`, `xui_backend_glfw`, and `xui_backend_opengl` linked. The CMake setup for the bundled demo is in [`examples/CMakeLists.txt`](examples/CMakeLists.txt); implementations are [`GlDrawListRenderer`](backends/opengl/gl_drawlist_renderer.hpp) and [`GlfwPlatform`](backends/glfw/glfw_platform.hpp).
 
 `main.cpp`:
 
 ```cpp
-#include "gl_drawlist_renderer.hpp"
-#include "glfw_platform.hpp"
+#include <opengl/gl_drawlist_renderer.hpp>
+#include <glfw/glfw_platform.hpp>
 #include <xui/xui.hpp>
 #include <iostream>
 

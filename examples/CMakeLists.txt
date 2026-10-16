@@ -1,4 +1,3 @@
-option(XUI_BUILD_GLFW_EXAMPLE "Build the cross-platform GLFW + OpenGL example (uses bundled GLFW and system OpenGL)" ON)
 if(XUI_BUILD_GLFW_EXAMPLE)
   # --- GLFW from the bundled examples/lib dependency ---
   # GLFW ships its own CMakeLists.txt, so add_subdirectory is enough.
@@ -18,18 +17,14 @@ if(XUI_BUILD_GLFW_EXAMPLE)
   else()
     message(FATAL_ERROR "The glfw3 package did not export a supported GLFW target")
   endif()
-  add_executable(xui_glfw_demo glfw_demo.cpp glfw_platform.cpp gl_drawlist_renderer.cpp)
-  target_link_libraries(xui_glfw_demo PRIVATE xui_widgets ${XUI_GLFW_TARGET} OpenGL::GL xui_warnings)
+  # Backend adapters are separate targets and stay outside the framework libraries.
+  add_subdirectory("${PROJECT_SOURCE_DIR}/backends" "${PROJECT_BINARY_DIR}/backends")
+
+  add_executable(xui_glfw_demo glfw_demo.cpp)
+  target_link_libraries(xui_glfw_demo PRIVATE xui_widgets xui_backend_glfw xui_backend_opengl xui_warnings)
   # The runtime demo loads only the unified showcase pair. The smaller
-  # cross_platform/controls fixtures remain source-tree references for tests/docs.
+  # cross_platform/controls fixtures are owned by tests and linked from user docs.
   add_custom_command(TARGET xui_glfw_demo POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/showcase.xui" "$<TARGET_FILE_DIR:xui_glfw_demo>/showcase.xui"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/showcase.xss" "$<TARGET_FILE_DIR:xui_glfw_demo>/showcase.xss")
-  if(WIN32)
-    add_executable(xui_hello glfw_demo.cpp glfw_platform.cpp gl_drawlist_renderer.cpp)
-    target_link_libraries(xui_hello PRIVATE xui_widgets ${XUI_GLFW_TARGET} OpenGL::GL xui_warnings)
-    add_custom_command(TARGET xui_hello POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/showcase.xui" "$<TARGET_FILE_DIR:xui_hello>/showcase.xui"
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/showcase.xss" "$<TARGET_FILE_DIR:xui_hello>/showcase.xss")
-  endif()
 endif()

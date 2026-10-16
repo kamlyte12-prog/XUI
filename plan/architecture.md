@@ -14,7 +14,7 @@ This file helps agents locate implementation layers without duplicating the publ
 | `xui_platform` — platform | `include/xui/platform/`, `src/platform/` | Window/event contract and null platform. |
 | `xui_text` — text | `include/xui/text/`, `src/text/` | Font loading, shaping/layout, glyph rasterization and atlas. |
 | `xui_widgets` — widget runtime | `include/xui/ui/runtime.hpp`, `src/ui/runtime.cpp` | Materialized widgets, state, layout integration, events and paint generation. |
-| Example backend (not a library target) | `examples/glfw_platform.*`, `examples/gl_drawlist_renderer.*` | GLFW window/input adapter and OpenGL draw-list renderer. |
+| Optional backend targets | `backends/glfw/*`, `backends/opengl/*` | GLFW window/input adapter and OpenGL draw-list renderer. They implement the public interfaces and link to framework targets; they are not part of the core libraries. |
 | `xui_tests` | `tests/` | Unit, runtime, layout, render, text, parser and golden-image checks. |
 
 ## Change boundaries

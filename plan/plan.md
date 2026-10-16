@@ -12,6 +12,7 @@ This is the canonical readiness plan. The detailed chronology and rationale for 
 - Layout supports retained flow, Split, ScrollView, absolute child insets, percentage sizing, explicit min/max constraints on leaves and containers, measured text wrapping, viewport clipping, and nested scroll routing. Runtime behavior is covered by automated tests.
 - The GLFW showcase now has seven sections. Its new Docking page authors nested left/right/bottom regions and a center tab group in `.xui`, with all dock chrome in `.xss`; a callback reads dock state into a live value label.
 - The bundled GLFW/OpenGL example is the interactive backend in this checkout. Windows builds also produce `xui_hello` from the same GLFW/OpenGL example source.
+- Optional GLFW and OpenGL backend implementations now live under root `backends/` as separate CMake targets; test-only sample assets are under `tests/fixtures/` while the demo's shared showcase pair remains in `examples/`.
 - The root and `doc/` documentation entry points describe the current API and supported runtime scope. Agent context is indexed in this `plan/` folder.
 
 ### What does not work
@@ -24,7 +25,7 @@ This is the canonical readiness plan. The detailed chronology and rationale for 
 ### What partially works or remains unverified
 
 - Windows Release build of `xui_tests`, `xui_glfw_demo`, and `xui_hello` succeeded on 2026-10-16; **161 tests passed** after the docking runtime changes.
-- Latest hidden GLFW demo profile measured **422.333 FPS over 8.04815 seconds**; latest hidden `xui_hello` profile measured **427.048 FPS over 8.11852 seconds**. These are loop throughput readings, not visible interaction/resize FPS; see [`tracking.md`](tracking.md).
+- Latest clean Release hidden GLFW demo profile measured **671.382 FPS over 5.00014 seconds**; latest hidden `xui_hello` profile measured **432.721 FPS over 7.99591 seconds**. These are loop throughput readings, not visible interaction/resize FPS; see [`tracking.md`](tracking.md).
 - An optional live-resize hook now invokes the full render-frame path from GLFW size callbacks, including during a native modal resize loop. Source inspection and tests cover the path, but sustained manual border-drag verification is still pending.
 - Visible checks for resize smoothness, normal close, popup editing, caret/tab behavior, cursor states, theme appearance, clipping, and widget interactivity across all showcase tabs have not been completed on the current source. The demo ran in hidden profile mode only.
 - DockHost/DockPanel build and pass headless tests for authored recursive splits, tab activation, min-size constraints, splitter movement, release-outside floating (including a stale-preview pointer-up case), and value-API redocking. A four-panel Release runtime microbenchmark most recently measured 0.67 μs per drag-preview pointer update and 1.88 μs per splitter resize update. Latest hidden GLFW/hello profiles measured 422.333/427.048 FPS. Docking was not manually exercised in a visible desktop session, so chrome appearance, pointer feel, and docking-specific visible FPS remain unverified.

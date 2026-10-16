@@ -2,6 +2,35 @@
 
 This file records project changes, design decisions, trade-offs, current status, and next steps. It is updated as implementation work lands.
 
+## Showcase rewrite and layout coverage — 2026-10-16
+
+### Audit and findings
+
+- Re-read `plan.md`, the runtime widget materialization list, layout schema/solver, current showcase assets, GLFW callbacks, widget/layout guides, and the showcase asset test. Runtime supports the controls/containers enumerated in `doc/widgets.md`; `Tooltip` is an attached behavior, while `Grid` and `Stack` remain solver-level only.
+- The prior showcase named most controls but mixed categories, repeated IDs (`density`, `save-key`, readouts), left several value changes without a visible value display, and did not demonstrate absolute positioning through `.xui`. The layout engine already enforced authored min/max floors for containers and Split panes, but showcase-level regression coverage for `.xui` and `.xss` floors was incomplete.
+
+### Changes and decisions
+
+- Rebuilt `examples/showcase.xui` and `examples/showcase.xss` as six deliberate tabs: Layout, Text input, Choices, Popups, Display, and Containers. The structure is authored in `.xui`; the coherent theme, spacing, typography, borders, and widget states are in `.xss`. Existing tab order and useful IDs remain stable for the test/demo contract; duplicate IDs were removed.
+- Added visible examples of fixed/percentage/clamped sizing, both XUI and XSS minimum floors, flow and absolute positioning, rows/columns, alignment/justification, spacing/insets, nesting, and horizontal/vertical Split. Added vertical and horizontal ScrollViews and demonstrations for all runtime-backed widget/container types; Tooltips remain attached to target widgets and styled through the `Tooltip` selector.
+- Value callbacks now update adjacent text for text entry, checkbox/checklist, switch/toggle, radio/segmented selection, slider/progress, dropdown, color picker, date picker, keybind, breadcrumb, rating, stepper, scroll offset, selected tab, and action count. C++ only handles the event/value bridge; it contains no demo layout or theme values.
+- Exposed the layout engine's existing absolute-child support through backend-neutral `.xui position: Absolute` and logical `left`/`top`/`right`/`bottom` insets. The demo reserves flow width so the anchored badge does not overlap text. Did not expose Grid/Stack because their track/stack runtime integration is a separate unfinished capability; docs name this limitation.
+- No layout solver rewrite was needed: its explicit floors and root-shrink behavior already existed. Added runtime showcase assertions for `.xui minSize`, `.xss min-size`, nested containers, split pane floors, root shrink, absolute inset placement/non-overlap, vertical Split, and a complete runtime-widget inventory. Keeping the existing floor implementation avoids unnecessary solver risk while making its behavior regression-tested.
+
+### Trade-offs and verification
+
+- A six-tab categorized gallery keeps each view manageable; longer sections use ScrollView so the complete gallery remains reachable at smaller window sizes. This is a usable reference, not a claim that every unsupported schema token renders.
+- `.xui minSize` accepts a fixed pixel pair; individual `.xui minWidth`/`minHeight` and `.xss min-size`/longhands accept percentage constraints. Floors are explicit rather than implicit for every container. When a min constraint exceeds parent space, geometry can overflow; scrollable parents keep content reachable. Split panes can jointly satisfy floors only when the Split is sized to fit their sum and gutters.
+- Windows Release build succeeded for `xui_tests` and `xui_glfw_demo`. The suite passed: **159 tests, 0 failures**, including full showcased-type presence, per-tab layout, min floors at 1080×760 and 400×300, absolute placement without overlap, and vertical/horizontal split/scroll examples.
+- Headless GLFW/OpenGL profile after the final asset/ID cleanup: **2,307 frames / 5.0008 s / 461.326 FPS**. This confirms the bounded hidden profile loop is above 60 FPS, not visible interactive FPS.
+- No desktop screenshot or mouse/keyboard session was available in this run. Actual visual readability, all-widget appearance, popup interactions, live resize smoothness, and manual close remain unverified. Do not report the >60 FPS target as visually accepted.
+
+### Current status and next steps
+
+- The showcase assets parse, build, and lay out across all six tabs; state/value wiring and explicit minimum/positioning behavior are covered by automated tests.
+- Perform a visible GLFW smoke pass across all tabs, then exercise hover/focus/press/disabled, typing/editing, popup interactions, scroll, horizontal/vertical split drag, continuous resize, and normal close while watching FPS. Capture representative normal and narrow-window views.
+- Decide whether to implement XUI runtime materialization for Grid/Stack after this showcase slice; until then, they remain lower-level solver capabilities and are explicitly excluded from runtime widget coverage.
+
 ## Documentation consolidation — 2026-10-16
 
 ### Audit, changes, and decisions

@@ -711,6 +711,16 @@ TEST(showcase_example_assets_parse_validate_and_build) {
 	StringInterner strings; UiAssetBundle assets; std::string error;
 	CHECK(loadUiAssets(xuiSource, xssSource, strings, assets, error, "showcase.xui", "showcase.xss"));
 	if (!error.empty()) { std::cerr << error << '\n'; return; }
+	const std::string_view showcasedTypes[] = { "Text", "Label", "Button", "TextBox", "TextArea", "CheckBox", "CheckItem",
+		"RadioGroup", "Switch", "ToggleButton", "Slider", "Dropdown", "ColorPicker", "Tabs", "Tab", "ScrollView",
+		"ProgressBar", "Panel", "Split", "CheckList", "FpsCounter", "Image", "Spinner", "Separator", "Divider",
+		"Toolbar", "StatusBar", "NumberField", "SearchField", "DatePicker", "SegmentedControl", "Stepper", "Rating",
+		"Breadcrumb", "KeybindField" };
+	for (const std::string_view type : showcasedTypes) {
+		bool found = false;
+		for (const XNode& node : assets.document.nodes) found |= strings.view(node.type) == type;
+		CHECK(found);
+	}
 	TextSystem text; UiRuntime ui;
 	CHECK(ui.build(assets.document, assets.styles, strings, text, {}, error));
 	if (!error.empty()) { std::cerr << error << '\n'; return; }
@@ -726,6 +736,7 @@ TEST(showcase_example_assets_parse_validate_and_build) {
 	CHECK(ui.value("accent-color").has_value());
 	CHECK(ui.value("demo-sections").has_value());
 	CHECK(ui.value("task-layout").has_value());
+	CHECK(ui.value("task-resize").has_value());
 	CHECK(ui.value("query").has_value());
 	CHECK(ui.value("delay").has_value());
 	CHECK(ui.value("whitespace-toggle").has_value());
@@ -773,11 +784,27 @@ TEST(showcase_example_assets_parse_validate_and_build) {
 		CHECK(ui.setValue("demo-sections", section));
 		ui.layout(1080, 760);
 		if (section == 0) {
-			// Layout tab: the min-size box holds its 220x64 floor and the sizing boxes stay ordered.
+			// Layout tab: both authored XUI and XSS floors hold, and sibling sizing stays ordered.
 			const Rect fixedBox = rectFor("sizing-fixed"), pct = rectFor("sizing-pct"), minBox = rectFor("sizing-min");
 			CHECK(fixedBox.w > 0.f && pct.w > 0.f && minBox.w > 0.f);
 			CHECK(fixedBox.right() <= pct.x + 0.01f); CHECK(pct.right() <= minBox.x + 0.01f);
 			CHECK(minBox.w >= 220.f - 0.01f && minBox.h >= 64.f - 0.01f);
+			CHECK(rectFor("style-floor").w >= 200.f - 0.01f);
+			CHECK(rectFor("layout-split").w >= 420.f - 0.01f);
+			CHECK(rectFor("nested-left").w >= 180.f - 0.01f && rectFor("nested-left").h >= 90.f - 0.01f);
+			const Rect positionBox = rectFor("position-box"), positionLabel = rectFor("position-label"), positionTag = rectFor("position-tag");
+			CHECK(!positionBox.empty() && !positionLabel.empty() && !positionTag.empty());
+			CHECK(positionTag.x >= positionBox.x && positionTag.right() <= positionBox.right() + 0.01f);
+			CHECK(positionTag.y >= positionBox.y && positionTag.bottom() <= positionBox.bottom() + 0.01f);
+			CHECK(positionLabel.right() <= positionTag.x);
+			const Rect verticalSplit = rectFor("vertical-split"), verticalTop = rectFor("vertical-top"), verticalBottom = rectFor("vertical-bottom");
+			CHECK(verticalSplit.h >= 132.f - 0.01f && verticalTop.h >= 56.f - 0.01f && verticalBottom.h >= 56.f - 0.01f);
+			CHECK(verticalTop.bottom() <= verticalBottom.y + 0.01f);
+			ui.layout(400, 300);
+			CHECK(rectFor("sizing-min").w >= 220.f - 0.01f);
+			CHECK(rectFor("style-floor").w >= 200.f - 0.01f);
+			CHECK(rectFor("layout-split").w >= 420.f - 0.01f);
+			CHECK(rectFor("nested-left").w >= 180.f - 0.01f);
 		}
 		else if (section == 2) {
 			const Rect volume = rectFor("volume"), progress = rectFor("progress-demo"), busy = rectFor("busy-bar");

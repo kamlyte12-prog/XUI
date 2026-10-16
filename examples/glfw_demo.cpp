@@ -23,42 +23,59 @@ namespace {
 		return std::nullopt;
 	}
 
+	void setText(xui::Xui& app, std::string_view id, std::string value) {
+		app.runtime().setValue(id, std::move(value));
+	}
+
+	std::string checklistSummary(xui::Xui& app) {
+		xui::u32 checked = 0, total = 0;
+		for (const std::string_view id : { "task-layout", "task-styles", "task-backend", "task-resize" }) {
+			if (const auto value = valueAs<bool>(app, id)) { ++total; checked += *value ? 1u : 0u; }
+		}
+		return "Tasks checked: " + std::to_string(checked) + " / " + std::to_string(total);
+	}
+
 	void onUiEvent(void* context, std::string_view name) {
 		auto& action = *static_cast<ActionContext*>(context);
 		xui::Xui& app = *action.app;
-		if (name == "onAction") app.setWindowTitle("Xui showcase - action " + std::to_string(++action.actions));
+		if (name == "onAction") {
+			setText(app, "action-readout", "Action count: " + std::to_string(++action.actions));
+			app.setWindowTitle("Xui showcase - action " + std::to_string(action.actions));
+		}
 		else if (name == "onNameChange") {
-			if (const auto value = valueAs<std::string>(app, "display-name")) app.setWindowTitle("Name: " + *value);
+			if (const auto value = valueAs<std::string>(app, "display-name")) setText(app, "name-readout", value->empty() ? "(empty)" : *value);
 		}
 		else if (name == "onNotesChange") {
-			if (const auto value = valueAs<std::string>(app, "notes")) app.setWindowTitle("Notes updated (" + std::to_string(value->size()) + " UTF-8 bytes)");
+			if (const auto value = valueAs<std::string>(app, "notes")) setText(app, "notes-readout", value->empty() ? "(empty)" : *value);
 		}
 		else if (name == "onCheckChange") {
-			if (const auto value = valueAs<bool>(app, "updates")) app.setWindowTitle(*value ? "Updates enabled" : "Updates disabled");
+			if (const auto value = valueAs<bool>(app, "updates")) setText(app, "check-readout", *value ? "Updates: on" : "Updates: off");
 		}
 		else if (name == "onSliderChange") {
 			if (const auto value = valueAs<xui::f64>(app, "volume")) {
-				const std::string label = "Volume: " + std::to_string(static_cast<int>(*value * 100.0 + 0.5)) + "%";
-				app.runtime().setValue("volume-readout", label);
-				app.setWindowTitle(label);
+				const int percent = static_cast<int>(*value * 100.0 + 0.5);
+				setText(app, "volume-readout", "Volume: " + std::to_string(percent) + "%");
+				app.runtime().setValue("progress-demo", *value);
+				setText(app, "progress-readout", "Progress: " + std::to_string(percent) + "%");
 			}
 		}
 		else if (name == "onDensityChange") {
-			if (const auto value = valueAs<std::string>(app, "density")) app.setWindowTitle("Density: " + *value);
+			if (const auto value = valueAs<std::string>(app, "density")) setText(app, "density-readout", "Density: " + *value);
 		}
 		else if (name == "onColorChange") {
 			if (const auto value = valueAs<xui::Color>(app, "accent-color")) {
-				char rgba[9]; std::snprintf(rgba, sizeof(rgba), "%08x", value->toRGBA8());
-				app.setWindowTitle("Accent color: #" + std::string(rgba));
+				char rgba[9]; std::snprintf(rgba, sizeof(rgba), "%08X", value->toRGBA8());
+				setText(app, "color-readout", "Accent: #" + std::string(rgba));
 			}
 		}
 		else if (name == "onTabChange") {
-			if (const auto value = valueAs<xui::u32>(app, "demo-sections")) app.setWindowTitle("Showcase section " + std::to_string(*value + 1));
+			if (const auto value = valueAs<xui::u32>(app, "demo-sections")) {
+				setText(app, "tab-readout", "Section " + std::to_string(*value + 1));
+				app.setWindowTitle("Showcase section " + std::to_string(*value + 1));
+			}
 		}
 		else if (name == "onTaskLayout" || name == "onTaskStyles" || name == "onTaskBackend" || name == "onTaskResize") {
-			const std::string_view id = name == "onTaskLayout" ? "task-layout" : name == "onTaskStyles" ? "task-styles" :
-				name == "onTaskBackend" ? "task-backend" : "task-resize";
-			if (const auto value = valueAs<bool>(app, id)) app.setWindowTitle(std::string(id) + (*value ? " completed" : " unchecked"));
+			setText(app, "tasks-readout", checklistSummary(app));
 		}
 		else if (name == "onSearchChange") {
 			// SearchField: string value by id; the clear glyph and Escape both fire change with "".
@@ -69,54 +86,55 @@ namespace {
 		}
 		else if (name == "onPassphraseChange") {
 			// Password field: the value API reads the stored text; the demo only shows its length.
-			if (const auto value = valueAs<std::string>(app, "passphrase")) app.setWindowTitle("Passphrase length: " + std::to_string(value->size()));
+			if (const auto value = valueAs<std::string>(app, "passphrase"))
+				setText(app, "password-readout", "Password length: " + std::to_string(value->size()));
 		}
 		else if (name == "onNumberChange") {
 			// NumberField: committed f64 by id, clamped to min/max and stepped by Up/Down or the steppers.
 			if (const auto value = valueAs<xui::f64>(app, "delay"))
-				app.runtime().setValue("number-readout", "Delay: " + std::to_string(static_cast<int>(*value)) + " ms");
+				setText(app, "number-readout", "Delay: " + std::to_string(static_cast<int>(*value)) + " ms");
 		}
 		else if (name == "onSwitchChange") {
 			if (const auto value = valueAs<bool>(app, "live-sync"))
-				app.runtime().setValue("switch-readout", std::string("Live sync: ") + (*value ? "on" : "off"));
+				setText(app, "switch-readout", std::string("Live sync: ") + (*value ? "on" : "off"));
 		}
 		else if (name == "onToggleChange") {
 			if (const auto value = valueAs<bool>(app, "mute"))
-				app.runtime().setValue("toggle-readout", std::string("Mute: ") + (*value ? "on" : "off"));
+				setText(app, "toggle-readout", std::string("Mute: ") + (*value ? "on" : "off"));
 		}
 		else if (name == "onRadioChange") {
 			if (const auto value = valueAs<std::string>(app, "density-choice"))
-				app.runtime().setValue("radio-readout", "Layout: " + *value);
+				setText(app, "radio-readout", "Density: " + *value);
 		}
 		else if (name == "onWhitespaceToggle") {
 			// Debug aid: spaces render as a middle dot, tabs as a right arrow inside editable fields.
 			if (const auto value = valueAs<bool>(app, "whitespace-toggle")) app.runtime().setWhitespaceVisible(*value);
 		}
 		else if (name == "onShadingChange") {
-			if (const auto value = valueAs<std::string>(app, "shading")) app.runtime().setValue("shading-readout", "Shading: " + *value);
+			if (const auto value = valueAs<std::string>(app, "shading")) setText(app, "shading-readout", "Shading: " + *value);
 		}
 		else if (name == "onRatingChange") {
 			if (const auto value = valueAs<xui::f64>(app, "priority"))
-				app.runtime().setValue("rating-readout", "Priority: " + std::to_string(static_cast<int>(*value)) + "/5");
+				setText(app, "rating-readout", "Priority: " + std::to_string(static_cast<int>(*value)) + " / 5");
 		}
 		else if (name == "onSubdivChange") {
 			if (const auto value = valueAs<xui::f64>(app, "subdivisions"))
-				app.runtime().setValue("subdiv-readout", "Subdivisions: " + std::to_string(static_cast<int>(*value)));
+				setText(app, "subdiv-readout", "Subdivisions: " + std::to_string(static_cast<int>(*value)));
 		}
 		else if (name == "onDateChange") {
-			if (const auto value = valueAs<std::string>(app, "due-date")) app.runtime().setValue("date-readout", "Due: " + *value);
+			if (const auto value = valueAs<std::string>(app, "due-date")) setText(app, "date-readout", "Date: " + *value);
 		}
 		else if (name == "onKeybindChange") {
 			if (const auto value = valueAs<std::string>(app, "save-key"))
-				app.runtime().setValue("keybind-readout", "Save key: " + (value->empty() ? std::string("(none)") : *value));
+				setText(app, "keybind-readout", "Save key: " + (value->empty() ? std::string("(none)") : *value));
 		}
 		else if (name == "onTrailChange") {
 			if (const auto value = valueAs<std::string>(app, "trail")) {
 				// Rebuild the visible path up to the selected segment from the option list.
 				static const char* options[] = { "Project", "Assets", "Textures", "Wood" };
 				std::string path;
-				for (const char* option : options) { path += path.empty() ? option : std::string(" > ") + option; if (option == *value) break; }
-				app.runtime().setValue("trail-readout", "Trail: " + path);
+				for (const char* option : options) { path += path.empty() ? option : std::string(" > ") + option; if (std::string_view(option) == *value) break; }
+				setText(app, "trail-readout", "Path: " + path);
 			}
 		}
 		else if (name == "onScrollChanged") {

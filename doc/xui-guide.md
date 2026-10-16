@@ -68,16 +68,16 @@ The current `UiRuntime` implements these containers:
 | `Split` | Two or more panes with a draggable gutter. `direction: Horizontal` puts panes side by side; `Vertical` stacks them. |
 | `ScrollView` | Bounded scrolling container with viewport clipping, nested wheel routing, keyboard scrolling, and scroll-into-view support. See the [widget reference](widgets.md#scrollview). |
 
-The layout engine also has lower-level `Grid`, `Stack`, and absolute-layout capabilities; `Grid` and `Stack` are not currently materialized by the ordinary `.xui` runtime path. Absolute positioning is supported through node positioning properties. Consult the [widget reference](widgets.md#schema-recognized-runtime-unsupported-objects) before relying on a parser-recognized object.
+The layout library also has lower-level `Grid` and `Stack` solvers, but the ordinary `.xui` runtime does not yet materialize them. Absolute positioning is available on runtime nodes through `.xui position: Absolute` and `left`/`top`/`right`/`bottom` insets. Consult the [widget reference](widgets.md#schema-recognized-runtime-unsupported-objects) before relying on a parser-recognized object.
 
 ### Sizing and alignment
 
 The backend reports the available window client area in logical pixels. The runtime lays out the `Window` tree in that area, then the painter scales drawing to the physical framebuffer using DPI.
 
-- Put structure and geometry in `.xui`: use `[width: 100%, height: 44px]`, `[grow: 1]`, `[pad: 12px]`, and `[margin: 0x8]`. `size: 800x500` is a unitless width/height pair; `minSize` and `maxSize` use the same pair form. A scalar `pad` or `margin` applies to all edges; a pair such as `8x4` means 8 logical pixels horizontally and 4 vertically.
+- Put structure and geometry in `.xui`: use `[width: 100%, height: 44px]`, `[grow: 1]`, `[pad: 12px]`, and `[margin: 0x8]`. `size: 800x500` is a unitless width/height pair; `minSize` and `maxSize` use the same pixel pair form. `minWidth`/`maxWidth`/`minHeight`/`maxHeight` also accept percentages. A scalar `pad` or `margin` applies to all edges; a pair such as `8x4` means 8 logical pixels horizontally and 4 vertically.
 - Use `Column(gap: 10)` or `Row(gap: 10)` for flow spacing. `CheckList[gap: 8]` sets its vertical item gap. `.xui justify: SpaceBetween` controls main-axis distribution (`Start`, `Center`, `End`, `SpaceBetween`, `SpaceAround`, `SpaceEvenly`).
 - Use `.xui align: Center` on a child to override its parent's cross-axis alignment. On a container, `.xui align` sets the default alignment for its children.
-- `.xss size`, `min-size`, `max-size`, `grow`, `shrink`, `gap`, `pad`, `margin`, `align`, and `justify` remain supported as layout defaults for compatibility; an authored `.xui` layout value takes precedence.
+- `.xss size`, `min-size`, `max-size`, `min-width`, `max-width`, `min-height`, `max-height`, `grow`, `shrink`, `gap`, `pad`, `margin`, `align`, and `justify` remain supported as layout defaults for compatibility; an authored `.xui` layout value takes precedence. Explicit min constraints apply to leaf widgets and containers alike. On `Split`, pane minima constrain gutter dragging; size the Split itself to at least the sum of its pane floors and gutters to preserve all floors simultaneously.
 
 `px`, `%`, and `dp` are supported for `.xui` width/height/min/max values; unitless values and `px`/`dp` are logical pixels. Percentages resolve against the parent's usable content box after its border and padding. Min/max constraints clamp the computed border-box size after percentage resolution, so combinations such as `width: 80%`, `minWidth: 50%`, and an `.xss max-width: 60%` work together. Use camelCase names in `.xui`; `.xss` supports `size`, `min-size`, `max-size`, and the longhands `min-width`, `max-width`, `min-height`, and `max-height`. For padding and margin, use a scalar logical-pixel value or a unitless horizontal-by-vertical pair. The stylesheet parser accepts more units, but runtime layout does not convert `em`, `rem`, `vw`, `vh`, or `sp`. DPI conversion occurs in text rasterization and painter output, not in authored logical layout sizes.
 
@@ -95,6 +95,19 @@ Button.responsive-action { resting: { min-width: 40%, max-width: 600px } }
 ```
 
 Here the button's percentage width and minimum use the column's content width after the 20 px padding and 2 px border on both sides. If minimum and maximum conflict, the minimum wins, matching the layout solver's clamp rule. A percentage cannot resolve against an indefinite auto-sized parent during intrinsic measurement; it behaves as auto until the parent supplies a definite content size.
+
+### Positioning
+
+Flow is the default. Use `position: Absolute` to remove a child from row/column flow and anchor it to its parent with insets. Insets accept logical pixels or percentages relative to the parent border box; explicit width/height and min/max still constrain the result. Absolute children are intended for deliberate overlays or anchored decorations, so keep their bounds clear of flow content unless overlap is intentional.
+
+```xui
+Panel[class: "card", width: 360px, height: 96px, pad: 10px] {
+  Text("Flow content")[width: 65%]
+  Badge("TOP-RIGHT")[position: Absolute, top: 12px, right: 12px, width: 96px, height: 26px]
+}
+```
+
+The showcase's Layout tab also demonstrates fixed and percentage sizes, clamped constraints, both XUI and XSS minimum floors, row/column flow, alignment, justification, padding, margins, nesting, and horizontal/vertical `Split` behavior where applicable.
 
 The native window's title and starting size are configured with `XuiOptions`. `Window(title: ..., size: ...)` is parsed and retained as document metadata, but the `Xui` facade currently creates the native window from `XuiOptions`; set both explicitly if you want matching metadata and window configuration.
 

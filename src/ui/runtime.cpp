@@ -879,6 +879,21 @@ namespace xui {
 				else if (value == "SpaceEvenly") authoredLayout.justify = Justify::SpaceEvenly;
 				else return failLayout(name);
 			}
+			else if (name == "position") {
+				if (expression.kind != XExprKind::Name) return failLayout(name);
+				const std::string_view value = m_strings->view(expression.name);
+				if (value == "Flow" || value == "flow") authoredLayout.position = Position::Flow;
+				else if (value == "Absolute" || value == "absolute") authoredLayout.position = Position::Absolute;
+				else return failLayout(name);
+			}
+			else if (name == "left" || name == "top" || name == "right" || name == "bottom") {
+				Length value;
+				if (!layoutLength(expression, value)) return failLayout(name);
+				if (name == "left") authoredLayout.left = value;
+				else if (name == "top") authoredLayout.top = value;
+				else if (name == "right") authoredLayout.right = value;
+				else authoredLayout.bottom = value;
+			}
 			else if (name == "gap" && typeIs(source.type, *m_strings, "CheckList")) {
 				if (!parseGap(expression, name)) return false;
 			}

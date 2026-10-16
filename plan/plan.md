@@ -9,7 +9,8 @@ This is the canonical readiness plan. The detailed chronology and rationale for 
 - The public `xui::Xui` facade loads fonts, `.xui`, and `.xss`, attaches caller-owned `Renderer` and `Platform` implementations, and runs the standard event/layout/paint lifecycle.
 - `.xui` parsing/schema validation and `.xss` parsing/compilation are separate from runtime rendering. Tests exercise selectors, tokens, state resolution, diagnostics, layout constraints, draw-list rendering, text, and runtime event handling.
 - The retained runtime materializes the controls and containers listed as supported in the [widget reference](../doc/widgets.md), including text input, tabs, dropdown/color picker, split panels, ScrollView, and value retrieval. The GLFW showcase exercises that supported set.
-- Layout supports retained flow, splitter, percentage sizing and min/max constraints, measured text wrapping, scroll viewport clipping, and nested scroll event routing. Runtime behavior is covered by automated tests.
+- Layout supports retained flow, Split, ScrollView, absolute child insets, percentage sizing, explicit min/max constraints on leaves and containers, measured text wrapping, viewport clipping, and nested scroll routing. Runtime behavior is covered by automated tests.
+- The six-tab GLFW showcase now covers all runtime-backed widget/container types and the exposed layout options; typed value changes update neighboring readouts. Automated asset tests check type coverage, authored min floors, narrow-root behavior, and non-overlapping absolute placement.
 - The bundled GLFW/OpenGL example is the interactive backend in this checkout. Windows builds also produce `xui_hello` from the same GLFW/OpenGL example source.
 - The root and `doc/` documentation entry points describe the current API and supported runtime scope. Agent context is indexed in this `plan/` folder.
 
@@ -22,10 +23,10 @@ This is the canonical readiness plan. The detailed chronology and rationale for 
 
 ### What partially works or remains unverified
 
-- The last recorded Windows Release build completed for `xui_tests`, `xui_glfw_demo`, and `xui_hello`; the automated suite passed on 2026-10-15. See [`tracking.md`](tracking.md) for the exact test count and command context. This does not replace a fresh run after later documentation-only edits.
-- Recorded hidden Release loop profiles exceeded 60 FPS in both demo executables. See [`tracking.md`](tracking.md) for the exact results and conditions; they are bounded throughput measurements, not visible interaction/resize FPS measurements.
+- Windows Release build of `xui_tests` and `xui_glfw_demo` succeeded on 2026-10-16; **159 tests passed** after the showcase/layout coverage changes. `xui_hello` was not rebuilt in this slice.
+- The rewritten GLFW demo's hidden Release profile measured **461.326 FPS over 5.0008 seconds** after final asset cleanup. This is loop throughput, not visible interaction/resize FPS; see [`tracking.md`](tracking.md).
 - An optional live-resize hook now invokes the full render-frame path from GLFW size callbacks, including during a native modal resize loop. Source inspection and tests cover the path, but sustained manual border-drag verification is still pending.
-- Visible checks for resize smoothness, normal close, popup editing, caret/tab behavior, cursor states, theme appearance, and clipping across all showcase tabs have not been completed on the current source.
+- Visible checks for resize smoothness, normal close, popup editing, caret/tab behavior, cursor states, theme appearance, clipping, and widget interactivity across all showcase tabs have not been completed on the current source. The demo ran in hidden profile mode only.
 - Theme palette changes update paint/text styles, but theme-dependent layout metrics are not fully re-applied after initial `.xui` precedence resolution. Some compound widget details (for example virtual popup rows and semantic color ramps) have documented subpart styling limits.
 - Linux/macOS builds and behavior have not been verified in this checkout session. The GLFW source is portable, but source portability is not a substitute for platform verification.
 
@@ -42,7 +43,7 @@ User-facing guides are indexed in [`../doc/README.md`](../doc/README.md). Agent 
 - **Performance:** hidden loop throughput exceeds 60 FPS in the recorded Windows Release run, but visible FPS during resize, popup editing, and interaction has not been measured. The CPU `SoftRenderer` is a reference renderer and can be too slow for full-window interactive use.
 - **Rendering and text:** complex-script shaping, automatic fallback fonts, and broad font-format support are absent. Text clipping depends on renderer scissor/texture behavior matching the draw-list contract.
 - **Stability:** the project history contains freeze, glyph-atlas, resize, and input regressions. Headless tests reduce risk but cannot establish native event-loop stability or normal close behavior.
-- **Layout:** percent/min/max and retained layout paths have tests, but no comprehensive visible matrix across window sizes/DPI is recorded. Theme geometry reapplication remains incomplete.
+- **Layout:** percent/min/max floors, nested minima, Split minima, absolute insets, and retained layout paths have automated tests, but no comprehensive visible matrix across window sizes/DPI is recorded. Grid/Stack are solver-only and unavailable in ordinary `.xui` runtime documents. Theme geometry reapplication remains incomplete.
 - **API and packaging:** the facade simplifies startup, but there is no install/export package or stable compatibility/version policy. Lower-level ownership and frame-loop paths still require careful use.
 - **Cross-platform:** only the GLFW/OpenGL path is implemented in the current examples. A native Win32 backend and current Linux/macOS verification are absent.
 - **Accessibility and input:** accessibility semantics, IME/composition, advanced keyboard navigation, touch/gesture behavior, and broad platform text-input testing remain limited or absent.
@@ -79,7 +80,7 @@ Effort estimates are relative, not calendar commitments. Do not start P2/P3 feat
 
 ### M0 — Visible stability acceptance
 
-- Exercise `xui_glfw_demo` and `xui_hello` visibly: every tab, text entry/deletion, popup open/edit/close, hover/cursor, scroll, continuous resize, and normal close.
+- Exercise the six-tab `xui_glfw_demo` and `xui_hello` visibly: every widget category, text entry/deletion, popup open/edit/close, hover/cursor, scroll, horizontal/vertical split drag, continuous resize, and normal close.
 - Exit when no regression from [`agents.md`](agents.md) reproduces; resize is visibly live and freeze-free; text/clipping/hit-test are correct; and results, platform, window/DPI, build mode, and FPS are recorded.
 - **Blocker:** the previous desktop helper did not complete a sustained resize/interaction session.
 

@@ -42,7 +42,7 @@ target_include_directories(xui_assets PRIVATE src/style)
 target_link_libraries(xui_assets PUBLIC xui_core PRIVATE xui_warnings)
 
 # --- xui_layout: flex/grid/stack/split layout engine. Depends only on xui_core. ---
-add_library(xui_layout STATIC src/layout/layout_tree.cpp src/layout/layout_solve.cpp)
+add_library(xui_layout STATIC src/layout/layout_tree.cpp src/layout/layout_solve.cpp src/layout/docking.cpp)
 target_include_directories(xui_layout PRIVATE src/layout)
 target_link_libraries(xui_layout PUBLIC xui_core PRIVATE xui_warnings)
 

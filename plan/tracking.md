@@ -1062,3 +1062,36 @@ Premise corrections worth recording: this checkout has a GLFW + OpenGL 2.1 backe
 - Confirmed `doc/showcase.png` exists and visually shows the tabbed GLFW/OpenGL showcase, themed controls, a checklist, splitter panels, and the FPS/readout area.
 - A fresh compile could not be run in this environment because `cmake`, `cl`, and `msbuild` are not available on `PATH`. Existing prebuilt demo binaries are present, but they do not constitute a fresh verification of this README snippet. No framework code or build files were changed.
 - Current status: README content and internal links were source-checked; compile verification of the exact inline sample remains unconfirmed. The user can follow the linked getting-started build instructions to compile the bundled GLFW example.
+
+## DockHost implementation slice — 2026-10-16
+
+### Changes and decisions
+
+- Added the recursive `DockTree` model and runtime `DockHost`/`DockSpace` plus `DockPanel` support. A host accepts direct panel children; panels can form nested edge splits, center tab groups, close, and float as overlays inside the host window. Splitter drag updates ratios live, panel layout honors explicit min/max and percent constraints, and Escape cancels an in-progress panel drag.
+- Added `.xui` `region`, `target`, `floating`, `closable`, `icon`, `preferredSize`, `gutter`, and `headerHeight` handling; common `minSize`/`maxSize` rules still apply. Added `DockPanelValue` retrieval/set and `dock`/`undock`/`resize`/`tabChange`/`close` handler routing.
+- Added XSS-resolved subparts `DockHeader`, `DockTab`, `DockCloseButton`, `DockSplitter`, and `DockPreview`, with hover/selected/pressed/dragging states. Added a Docking tab to `examples/showcase.xui` and matching theme rules in `examples/showcase.xss`; the GLFW app reflects dock state in a readout.
+- Added `doc/docking.md`, linked it from the docs index and widget/layout/architecture guides, and updated the runtime support list.
+- During integration, overlay hit-testing and paint initially considered dock hosts inside inactive showcase tabs. This stole pointer input from other pages and could draw hidden dock chrome. The dock paint, hit-test, cursor, and pointer-start passes now skip hosts whose tab ancestry is inactive.
+- Floating is in-app as requested. Recursive splits use a dedicated tree rather than ordinary `.xui` Split nodes. Initial placement uses `region` because `dock` names the runtime event. The model's move/split-drag paths do not allocate; dock topology changes may grow storage at drop time. Closed panels currently cannot be reopened through the value API.
+
+### Verification and status
+
+- Configured a fresh Visual Studio Ninja Release build; rebuilt `xui_tests` and `xui_glfw_demo` with MSVC `/W4 /WX`.
+- Automated suite: **161 tests passed**, including a new runtime case for nested/center placement, panel minimums, splitter resize, release-outside floating, and value-API redocking. Existing showcase asset and interaction checks pass with the seventh tab.
+- Final hidden GLFW profile from the freshly linked verification binary: **3,345 frames / 5.00007 s / 668.991 FPS**. The hidden `xui_hello` profile measured **2,886 frames / 5.00116 s / 577.066 FPS**. Both exceed 60 FPS in the hidden loop, but neither measures visible frame cadence, resize, or user interaction.
+- Added and ran the Release `bench_docking` harness (four authored panels, 200,000 operations, MSVC Release): latest drag-preview pointer updates measured **0.77 μs/move** and splitter resize updates **2.00 μs/move**. An earlier run measured 0.69/1.87 μs; these small differences show normal host-load variance. The harness exercises the `UiRuntime` path headlessly; it excludes painter work, OpenGL submission, event pumping, vsync, and display presentation, so these numbers are not visible FPS or end-to-end latency.
+- Launched the rebuilt GLFW demo in a visible window. This environment has no native-window inspection/input control, so I could not verify the visible appearance or manually exercise dock tabs, previews, close, Escape, and splitters. A normal close request was not acknowledged by the process, so the visible window/close behavior remains unverified. The final binary was freshly linked to an alternate verification output directory while that original process held its executable open.
+- No interactive docking screenshot or visible resize/drag FPS has been recorded. The visible acceptance list remains: tab/header paint, cursor, close, Escape cancel, live preview, nested edge drops, float movement, ordinary resize, and >60 FPS during docking.
+- Current status: source, sample assets, and user docs are implemented and headlessly verified. Docking remains partially verified pending a visible desktop pass.
+- Next steps: run the rebuilt demo visibly; test each drop zone and cancel path; capture visible FPS during tab and splitter drags; test close and re-dock another panel; verify the other six tabs remain interactive.
+
+### Docking drag-release regression fix — 2026-10-16
+
+- Root cause: `dockPointerUp()` preferred the last valid in-host preview before checking where the release occurred. A fast pointer release outside the host, with no final move event, could therefore dock to a stale target instead of floating.
+- Changed the release decision to use the pointer-up coordinates as authoritative: a preview is committed only when pointer-up is inside the host; an outside release floats the panel. This also covers event streams that omit a final pointer-move.
+- Extended the runtime test to perform a real tab drag with an in-host preview followed directly by pointer-up outside the host. It verifies the panel becomes floating and can be redocked through `setValue`.
+- Rebuilt `xui_tests`, `xui_glfw_demo`, `xui_hello`, and `bench_docking` in the Windows Release Ninja build using MSVC `/W4 /WX`. Automated suite: **161 tests, 0 failures**.
+- Latest hidden profiles: GLFW demo **3,399 frames / 8.04815 s / 422.333 FPS**; hello **3,467 frames / 8.11852 s / 427.048 FPS**. These exceed 60 FPS in the hidden loop only; they do not measure visible rendering cadence or input latency.
+- Latest four-panel headless docking benchmark: **0.67 μs/drag-preview move**, **1.88 μs/splitter-resize move** over 200,000 operations. The benchmark excludes paint, OpenGL submission, event pumping, vsync, and presentation.
+- `git diff --check` passes. A visible GLFW window was started for a smoke check, but this environment did not provide native window input/inspection and its graceful-close request was not acknowledged. The process was absent at the final process check. Appearance, visible docking gestures, responsive resize, and normal close remain unverified.
+- Current status: the outside-release edge case is fixed and covered headlessly. Docking remains partially verified pending an interactive desktop pass; no visible FPS or manual gesture claim is made.

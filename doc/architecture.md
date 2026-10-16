@@ -10,7 +10,7 @@ Xui separates authored document data, style resolution, retained layout, drawing
 | `.xui` parser/loader/schema | Parses the widget tree and imports, validates known object parameters, and reports source diagnostics. |
 | `.xss` parser/compiler | Parses selectors, tokens, states, transitions/keyframes; compiles declarations into a `StyleSheet`. |
 | `UiRuntime` | Builds the supported widget subset, matches styles, handles layout and interactions, and emits paint operations. |
-| `LayoutTree` | Retained logical-pixel layout for flow rows/columns, panels, splitters, scroll views, and leaves; caches measurements and invalidates changed geometry. |
+| `LayoutTree` / `DockTree` | Retained logical-pixel layout for flow rows/columns, Split panes, scroll views, and leaves; `DockTree` owns recursive docking groups, tabs, split ratios, floating panel bounds, and min/max constraints. |
 | `TextSystem` / glyph atlas | Loads TTF faces, shapes/wraps text, rasterizes glyphs, and stores coverage textures. |
 | `Painter` / `DrawList` | Converts logical paint operations into clipped, DPI-scaled, batched backend-neutral geometry and glyph quads. |
 | `Renderer` | Owns drawing device/surface/textures and executes `DrawList` frames. |
@@ -46,7 +46,7 @@ main.cpp
           Platform swap/presentation hook
 ```
 
-Input travels in the opposite direction: `Platform::pumpEvents()` yields normalized pointer/key/text/wheel/window events; `Xui::run()` dispatches supported input to `UiRuntime`; a changed interaction requests another frame. Scroll offsets are updated without remeasuring the subtree. ScrollView clips are applied to each visible descendant's draw and hit rectangles. Smooth scroll and delayed tooltip deadlines are passed into the platform wait timeout, so idle apps do not need a polling loop. Resizes update renderer framebuffer dimensions/DPI and rerun layout using logical client dimensions. Backends whose native resize enters a modal loop can use the optional `Platform::setLiveResizeHook`; the GLFW example invokes the facade's full render-frame path from each size callback.
+Input travels in the opposite direction: `Platform::pumpEvents()` yields normalized pointer/key/text/wheel/window events; `Xui::run()` dispatches supported input to `UiRuntime`; a changed interaction requests another frame. Scroll offsets are updated without remeasuring the subtree. ScrollView clips are applied to each visible descendant's draw and hit rectangles. Docking pointer events update only the DockTree and the affected host subtree; panel headers, tab groups, splitters, and previews are painted by the normal overlay path with XSS-resolved styles. Smooth scroll and delayed tooltip deadlines are passed into the platform wait timeout, so idle apps do not need a polling loop. Resizes update renderer framebuffer dimensions/DPI and rerun layout using logical client dimensions. Backends whose native resize enters a modal loop can use the optional `Platform::setLiveResizeHook`; the GLFW example invokes the facade's full render-frame path from each size callback.
 
 ## Backend-neutral coordinate and event contract
 
@@ -56,7 +56,7 @@ The runtime does not handle native messages. The platform queues and returns `xu
 
 ### Paint order and pointer targeting
 
-The retained tree paints parents before descendants and earlier siblings before later siblings. Pointer targeting walks visible nodes in reverse paint order, stops at the first painted hit surface, and updates only that target's hover/focus/press state. Transparent `Row` and `Column` nodes pass through; painted panels, text, disabled controls, and controls block widgets behind them. Inactive tab subtrees are excluded from painting and pointer targeting, and events outside the logical window are ignored. ScrollView clips child drawing and targeting to its viewport; nested wheel input bubbles from the deepest matching view to ancestors when the inner view reaches its limit. Scrollbar thumbs are drawn on the shared overlay layer. Dropdown/color-picker popups sit above the tree and tabs; tab headers sit above ordinary tree content; tooltips remain pointer-transparent and are hidden while popups are open. Arbitrary `.xss z-index` and generic `overflow` clipping are not implemented, so ordinary stacking follows tree order and fixed overlay layers.
+The retained tree paints parents before descendants and earlier siblings before later siblings. Pointer targeting walks visible nodes in reverse paint order, stops at the first painted hit surface, and updates only that target's hover/focus/press state. Transparent `Row` and `Column` nodes pass through; painted panels, text, disabled controls, and controls block widgets behind them. Inactive tab and dock-panel subtrees are excluded from painting and pointer targeting, including dock hosts on inactive showcase pages. Dock title/tab chrome, splitters, previews, and floating overlays are styled subparts on the shared overlay layer. Dropdown/color-picker popups remain above the tree and dock chrome; tooltips remain pointer-transparent and are hidden while popups are open. Arbitrary `.xss z-index` and generic `overflow` clipping are not implemented, so ordinary stacking follows tree order and fixed overlay layers.
 
 ## Implement `xui::Renderer`
 

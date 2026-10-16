@@ -49,6 +49,6 @@ int main() {
 			const Rect visible = scrollTree.absRect(lastChild);
 			scrollSink += visible.y;
 		}
-	});
+		});
 	std::printf("scroll offset + descendant absRect (1000 children):            %8.3f us   (%u nodes arranged, checksum %.0f)\n", scrollBatch / 1000.0, scrollTree.stats().nodesArranged, scrollSink);
 }

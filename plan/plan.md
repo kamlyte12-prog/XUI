@@ -10,7 +10,7 @@ This is the canonical readiness plan. The detailed chronology and rationale for 
 - `.xui` parsing/schema validation and `.xss` parsing/compilation are separate from runtime rendering. Tests exercise selectors, tokens, state resolution, diagnostics, layout constraints, draw-list rendering, text, and runtime event handling.
 - The retained runtime materializes the controls and containers listed as supported in the [widget reference](../doc/widgets.md), including text input, tabs, dropdown/color picker, split panels, ScrollView, and value retrieval. The GLFW showcase exercises that supported set.
 - Layout supports retained flow, Split, ScrollView, absolute child insets, percentage sizing, explicit min/max constraints on leaves and containers, measured text wrapping, viewport clipping, and nested scroll routing. Runtime behavior is covered by automated tests.
-- The six-tab GLFW showcase now covers all runtime-backed widget/container types and the exposed layout options; typed value changes update neighboring readouts. Automated asset tests check type coverage, authored min floors, narrow-root behavior, and non-overlapping absolute placement.
+- The GLFW showcase now has seven sections. Its new Docking page authors nested left/right/bottom regions and a center tab group in `.xui`, with all dock chrome in `.xss`; a callback reads dock state into a live value label.
 - The bundled GLFW/OpenGL example is the interactive backend in this checkout. Windows builds also produce `xui_hello` from the same GLFW/OpenGL example source.
 - The root and `doc/` documentation entry points describe the current API and supported runtime scope. Agent context is indexed in this `plan/` folder.
 
@@ -23,10 +23,11 @@ This is the canonical readiness plan. The detailed chronology and rationale for 
 
 ### What partially works or remains unverified
 
-- Windows Release build of `xui_tests` and `xui_glfw_demo` succeeded on 2026-10-16; **159 tests passed** after the showcase/layout coverage changes. `xui_hello` was not rebuilt in this slice.
-- The rewritten GLFW demo's hidden Release profile measured **461.326 FPS over 5.0008 seconds** after final asset cleanup. This is loop throughput, not visible interaction/resize FPS; see [`tracking.md`](tracking.md).
+- Windows Release build of `xui_tests`, `xui_glfw_demo`, and `xui_hello` succeeded on 2026-10-16; **161 tests passed** after the docking runtime changes.
+- Latest hidden GLFW demo profile measured **422.333 FPS over 8.04815 seconds**; latest hidden `xui_hello` profile measured **427.048 FPS over 8.11852 seconds**. These are loop throughput readings, not visible interaction/resize FPS; see [`tracking.md`](tracking.md).
 - An optional live-resize hook now invokes the full render-frame path from GLFW size callbacks, including during a native modal resize loop. Source inspection and tests cover the path, but sustained manual border-drag verification is still pending.
 - Visible checks for resize smoothness, normal close, popup editing, caret/tab behavior, cursor states, theme appearance, clipping, and widget interactivity across all showcase tabs have not been completed on the current source. The demo ran in hidden profile mode only.
+- DockHost/DockPanel build and pass headless tests for authored recursive splits, tab activation, min-size constraints, splitter movement, release-outside floating (including a stale-preview pointer-up case), and value-API redocking. A four-panel Release runtime microbenchmark most recently measured 0.67 μs per drag-preview pointer update and 1.88 μs per splitter resize update. Latest hidden GLFW/hello profiles measured 422.333/427.048 FPS. Docking was not manually exercised in a visible desktop session, so chrome appearance, pointer feel, and docking-specific visible FPS remain unverified.
 - Theme palette changes update paint/text styles, but theme-dependent layout metrics are not fully re-applied after initial `.xui` precedence resolution. Some compound widget details (for example virtual popup rows and semantic color ramps) have documented subpart styling limits.
 - Linux/macOS builds and behavior have not been verified in this checkout session. The GLFW source is portable, but source portability is not a substitute for platform verification.
 
@@ -40,7 +41,7 @@ User-facing guides are indexed in [`../doc/README.md`](../doc/README.md). Agent 
 
 ## Known issues and risks
 
-- **Performance:** hidden loop throughput exceeds 60 FPS in the recorded Windows Release run, but visible FPS during resize, popup editing, and interaction has not been measured. The CPU `SoftRenderer` is a reference renderer and can be too slow for full-window interactive use.
+- **Performance:** hidden loop throughput exceeds 60 FPS in the recorded Windows Release run, but visible FPS during resize, popup editing, docking, and interaction has not been measured. The CPU `SoftRenderer` is a reference renderer and can be too slow for full-window interactive use.
 - **Rendering and text:** complex-script shaping, automatic fallback fonts, and broad font-format support are absent. Text clipping depends on renderer scissor/texture behavior matching the draw-list contract.
 - **Stability:** the project history contains freeze, glyph-atlas, resize, and input regressions. Headless tests reduce risk but cannot establish native event-loop stability or normal close behavior.
 - **Layout:** percent/min/max floors, nested minima, Split minima, absolute insets, and retained layout paths have automated tests, but no comprehensive visible matrix across window sizes/DPI is recorded. Grid/Stack are solver-only and unavailable in ordinary `.xui` runtime documents. Theme geometry reapplication remains incomplete.
@@ -80,7 +81,7 @@ Effort estimates are relative, not calendar commitments. Do not start P2/P3 feat
 
 ### M0 — Visible stability acceptance
 
-- Exercise the six-tab `xui_glfw_demo` and `xui_hello` visibly: every widget category, text entry/deletion, popup open/edit/close, hover/cursor, scroll, horizontal/vertical split drag, continuous resize, and normal close.
+- Exercise the seven-section `xui_glfw_demo` and `xui_hello` visibly: every widget category, text entry/deletion, popup open/edit/close, hover/cursor, scroll, horizontal/vertical Split drag, DockHost tab/edge/float/close/cancel actions, continuous resize, and normal close.
 - Exit when no regression from [`agents.md`](agents.md) reproduces; resize is visibly live and freeze-free; text/clipping/hit-test are correct; and results, platform, window/DPI, build mode, and FPS are recorded.
 - **Blocker:** the previous desktop helper did not complete a sustained resize/interaction session.
 

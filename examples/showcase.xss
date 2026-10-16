@@ -110,3 +110,18 @@ Toolbar.chrome, StatusBar.chrome { resting: { bg: color.surface-raised, fg: colo
 Separator.separator, Divider.divider { resting: { fg: color.outline-soft, margin: 3px 0px } }
 ScrollView.scroll-demo, ScrollView.horizontal-demo { resting: { bg: color.canvas, border: 1px solid color.outline, radius: 6px, pad: 8px, scrollbar-size: 10px, scrollbar-visibility: always, scroll-track: color.surface, scroll-thumb: #405773 } hover: { scroll-thumb: #587493 } pressed: { scroll-thumb: color.accent } focus: { border: 1px solid color.accent } }
 Text.scroll-item { resting: { bg: color.surface-raised, fg: color.text, pad: 7px, radius: 5px } }
+
+DockHost.docking-host { resting: { bg: color.surface, pad: 4px, border: 1px solid color.outline, radius: 7px, min-size: 520px 300px } }
+DockPanel.dock-panel { resting: { bg: color.surface, fg: color.text, pad: 10px, font-size: 13px } }
+DockHeader { resting: { bg: color.surface-raised, fg: color.text, pad: 8px, font-size: 13px, font-weight: 600, radius: 4px }
+  hover: { bg: color.surface-hover } pressed: { bg: color.surface-pressed } disabled: { opacity: 0.48 } }
+DockTab { resting: { bg: color.canvas, fg: color.muted, pad: 8px, font-size: 13px }
+  hover: { bg: color.surface-hover, fg: color.text }
+  selected: { bg: color.surface-raised, fg: color.accent, border: 1px solid color.accent }
+  pressed: { bg: color.surface-pressed } disabled: { opacity: 0.48 } }
+DockCloseButton { resting: { fg: color.muted, font-size: 16px, radius: 4px, align: Center }
+  hover: { bg: #9c3e52, fg: #ffffff } pressed: { bg: #762f40, fg: #ffffff } disabled: { opacity: 0.4 } }
+DockSplitter { resting: { bg: color.outline }
+  hover: { bg: color.accent } pressed: { bg: color.accent-hover } dragging: { bg: color.accent-hover } }
+DockPreview { resting: { bg: #69a7ff55, border: 1px solid color.accent, radius: 5px }
+  dragging: { bg: #69a7ff66 } }

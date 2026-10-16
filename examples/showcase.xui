@@ -335,6 +335,50 @@ Window(title: "Xui widget and layout showcase", size: 1080x760) {
           }
         }
       }
+      // Docking workspace: drag a title/tab to an edge to split, center to tab, or outside to float.
+      Tab(title: "Docking") {
+        Column[class: "page", gap: 10px, pad: 16px, width: 100%, height: 100%, minSize: 0x0] {
+          Text("Dockable workspace")[class: "section-title"]
+          Text("Drag a panel title or tab. Drop near an edge to create a nested split, drop in the center to make a tab, and release outside the workspace to float it. Drag the gutters to resize; press Escape during a drag to cancel.")[class: "help"]
+          Text("Dock values update when you dock, undock, resize, switch tabs, or close a panel.")[id: "dock-readout", class: "value-readout", width: 100%, height: 30px]
+          DockHost[id: "dock-workspace", class: "docking-host", width: 100%, grow: 1, gutter: 7px, headerHeight: 30px, minSize: 520x300] {
+            DockPanel(title: "Editor")[id: "dock-editor", icon: "E", region: "Center", closable: false, preferredSize: 420x320, minSize: 220x170, class: "dock-panel", dock: onDockChange, undock: onDockChange, resize: onDockChange, tabChange: onDockChange, close: onDockChange] {
+              Column[width: 100%, height: 100%, pad: 12px, gap: 8px] {
+                Text("Central editor panel")[class: "panel-title"]
+                Text("This panel begins in the center. Dock another tab here, or drag it to an edge to create a nested split.")[class: "body-copy"]
+                TextBox[id: "dock-editor-input", value: "Edit this text", class: "field", width: 100%, height: 38px]
+              }
+            }
+            DockPanel(title: "Hierarchy")[id: "dock-hierarchy", icon: "H", region: "Left", target: "dock-editor", closable: true, preferredSize: 220x300, minSize: 150x160, class: "dock-panel", dock: onDockChange, undock: onDockChange, resize: onDockChange, tabChange: onDockChange, close: onDockChange] {
+              Column[width: 100%, height: 100%, pad: 10px, gap: 6px] {
+                Text("Scene objects")[class: "panel-title"]
+                CheckBox[id: "dock-visible", label: "Show active object", checked: true, class: "checkbox", width: 100%, height: 34px]
+                Text("Drag this tab to another edge or group.")[class: "help"]
+              }
+            }
+            DockPanel(title: "Inspector")[id: "dock-inspector", icon: "I", region: "Right", target: "dock-editor", closable: true, preferredSize: 240x300, minSize: 160x160, class: "dock-panel", dock: onDockChange, undock: onDockChange, resize: onDockChange, tabChange: onDockChange, close: onDockChange] {
+              Column[width: 100%, height: 100%, pad: 10px, gap: 8px] {
+                Text("Properties")[class: "panel-title"]
+                Slider[id: "dock-inspector-slider", value: 0.65, class: "slider", width: 100%, height: 30px, change: onDockChange]
+                Text("The right pane has an explicit minimum size.")[class: "body-copy"]
+              }
+            }
+            DockPanel(title: "Console")[id: "dock-console", icon: "C", region: "Bottom", target: "dock-editor", closable: true, preferredSize: 420x150, minSize: 240x90, class: "dock-panel", dock: onDockChange, undock: onDockChange, resize: onDockChange, tabChange: onDockChange, close: onDockChange] {
+              Column[width: 100%, height: 100%, pad: 10px, gap: 6px] {
+                Text("Build output")[class: "panel-title"]
+                Text("Ready. Drag a panel header to rearrange this workspace.")[class: "body-copy"]
+              }
+            }
+            DockPanel(title: "Preview")[id: "dock-preview", icon: "P", region: "Center", target: "dock-editor", closable: true, preferredSize: 320x240, minSize: 180x140, class: "dock-panel", dock: onDockChange, undock: onDockChange, resize: onDockChange, tabChange: onDockChange, close: onDockChange] {
+              Column[width: 100%, height: 100%, pad: 12px, gap: 8px] {
+                Text("Tabbed center panel")[class: "panel-title"]
+                ProgressBar[id: "dock-preview-progress", value: 0.72, class: "progress", width: 100%, height: 18px]
+                Text("Use the tab strip to switch between Editor and Preview.")[class: "body-copy"]
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

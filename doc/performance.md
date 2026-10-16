@@ -4,11 +4,11 @@ Xui is retained: it keeps a layout tree and caches measurements, resolves style 
 
 ## What measurements mean
 
-Recorded benchmark values and their build conditions are kept in the canonical [project tracking history](../plan/tracking.md), so measurement snapshots have one home. The recorded hidden Windows Release loop profiles exceeded 60 FPS, but those are throughput measurements from one machine and build; they do not establish visible interaction or resize performance.
+Recorded benchmark values and their build conditions are kept in the canonical [project tracking history](../plan/tracking.md), so measurement snapshots have one home. The current hidden Windows Release loop profile exceeds 60 FPS, and the docking runtime microbenchmark reports pointer-path cost for a small synthetic tree. Neither establishes visible interaction or resize performance.
 
 No benchmark guarantees a particular FPS on other GPUs, drivers, display sizes, operating systems, or under vsync. Uncapped hidden frame-loop FPS is a throughput ceiling, not a displayed monitor refresh rate or an interaction-latency guarantee. Visible scrolling, clipping, resize smoothness, and ordinary close still need an interactive smoke test.
 
-Run the examples with `--profile` to measure their actual shared assets and loop. Use dedicated benchmarks for stage-level profiling; the simple sample profile reports frame count, elapsed seconds, and effective FPS.
+Run the examples with `--profile` to measure their actual shared assets and loop. Use `bench_docking` for headless DockTree/UiRuntime drag-preview and splitter-update timings. It measures runtime calls only, not event pumping, painting, GPU submission, or display presentation. Use dedicated benchmarks for stage-level profiling; the simple sample profile reports frame count, elapsed seconds, and effective FPS.
 
 ## Keep layout inexpensive
 

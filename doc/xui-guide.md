@@ -67,6 +67,7 @@ The current `UiRuntime` implements these containers:
 | `CheckList` | Vertical list container for `CheckItem` children. |
 | `Split` | Two or more panes with a draggable gutter. `direction: Horizontal` puts panes side by side; `Vertical` stacks them. |
 | `ScrollView` | Bounded scrolling container with viewport clipping, nested wheel routing, keyboard scrolling, and scroll-into-view support. See the [widget reference](widgets.md#scrollview). |
+| `DockHost` / `DockSpace` | Recursive docking workspace that accepts direct `DockPanel` children. See the [docking guide](docking.md). |
 
 The layout library also has lower-level `Grid` and `Stack` solvers, but the ordinary `.xui` runtime does not yet materialize them. Absolute positioning is available on runtime nodes through `.xui position: Absolute` and `left`/`top`/`right`/`bottom` insets. Consult the [widget reference](widgets.md#schema-recognized-runtime-unsupported-objects) before relying on a parser-recognized object.
 

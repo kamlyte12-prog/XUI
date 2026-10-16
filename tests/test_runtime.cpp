@@ -24,6 +24,7 @@ namespace {
 		if (name == "onSubmit") ++*static_cast<u32*>(context);
 		if (name == "onChange") ++static_cast<u32*>(context)[1];
 	}
+	void recordDock(void* context, std::string_view) { ++*static_cast<u32*>(context); }
 
 	std::string readTestFont() {
 		std::vector<std::filesystem::path> candidates;
@@ -157,6 +158,84 @@ Split { resting: { fg: #52627b } }
 		const Rect leftAfter = ui.bounds({ 2, 1 });
 		CHECK(leftAfter.w > leftBefore.w + 10.f);
 		ui.pointerUp({ gutterCenter.x + 24.f, gutterCenter.y });
+	}
+
+	TEST(ui_runtime_dock_host_tabs_split_resize_float_and_restore) {
+		constexpr std::string_view xuiSource = R"(
+Window(title: "Dock test", size: 640x420) {
+  DockHost[id: "workspace", class: "workspace", width: 100%, height: 100%, gutter: 8, headerHeight: 30] {
+    DockPanel(title: "Editor")[id: "editor", region: "Center", minSize: 220x140, closable: false] {
+      Text("Editor content")[width: 100%, height: 100%]
+    }
+    DockPanel(title: "Inspector")[id: "inspector", region: "Right", target: "editor", minSize: 130x140] {
+      Text("Inspector content")
+    }
+    DockPanel(title: "Console")[id: "console", region: "Center", target: "editor", minSize: 140x80] {
+      Text("Console content")
+    }
+  }
+}
+)";
+		constexpr std::string_view xssSource = R"(
+DockHost.workspace { resting: { bg: #111827, pad: 4px, min-size: 480px 320px } }
+DockPanel { resting: { bg: #182438, pad: 8px, font-size: 14px, fg: #eef4ff } }
+DockHeader { resting: { bg: #27364d, fg: #eef4ff, pad: 8px, radius: 4px } hover: { bg: #354a68 } }
+DockTab { resting: { bg: #202c40, fg: #bac9df, pad: 6px } hover: { bg: #344760 } selected: { bg: #344760, fg: #8fc0ff } }
+DockCloseButton { resting: { fg: #bac9df } hover: { bg: #9c3e52, fg: #ffffff } }
+DockSplitter { resting: { bg: #465a74 } hover: { bg: #69a7ff } pressed: { bg: #91bdff } }
+DockPreview { resting: { bg: #5386d866, border: 1px solid #69a7ff, radius: 4px } }
+)";
+		StringInterner strings;
+		auto document = parseXui(xuiSource, "dock-runtime.xui", strings);
+		auto styles = compileXss(xssSource, "dock-runtime.xss", strings);
+		CHECK(document.has_value()); CHECK(styles.has_value());
+		if (!document || !styles) return;
+		TextSystem text; UiRuntime ui; std::string error;
+		CHECK(ui.build(*document, *styles, strings, text, {}, error));
+		if (!error.empty()) return;
+		ui.layout(640.f, 420.f);
+		const Rect editor = ui.bounds({ 2, 1 }), inspector = ui.bounds({ 4, 1 }), console = ui.bounds({ 6, 1 });
+		CHECK(editor.w >= 220.f); CHECK(editor.h >= 140.f);
+		CHECK(inspector.w >= 130.f); CHECK(console.h >= 80.f);
+		CHECK(inspector.x >= editor.right());
+		CHECK(!std::get<DockPanelValue>(*ui.value("editor")).active);
+		CHECK(std::get<DockPanelValue>(*ui.value("console")).activeTab == "console");
+
+		// Splitter drag updates the adjacent regions while the panel tree is nested.
+		const Vec2 splitPoint{ inspector.x - 3.5f, inspector.y + 90.f };
+		CHECK(ui.pointerDown(splitPoint));
+		CHECK(ui.pointerMove({ splitPoint.x - 24.f, splitPoint.y }));
+		ui.layout(640.f, 420.f);
+		CHECK(ui.bounds({ 4, 1 }).w > inspector.w);
+		ui.pointerUp({ splitPoint.x - 24.f, splitPoint.y });
+
+		// Clicking a tab activates it; dragging another region onto the group center creates a tab.
+		const Rect editorAfterSplit = ui.bounds({ 2, 1 });
+		const Vec2 editorTab{ editorAfterSplit.x + editorAfterSplit.w * 0.25f, editorAfterSplit.y + 14.f };
+		CHECK(ui.pointerDown(editorTab)); CHECK(ui.pointerUp(editorTab));
+		CHECK(std::get<DockPanelValue>(*ui.value("editor")).active);
+		const Rect inspectorBeforeDock = ui.bounds({ 4, 1 });
+		const Vec2 inspectorHeader{ inspectorBeforeDock.x + 28.f, inspectorBeforeDock.y + 14.f };
+		CHECK(ui.pointerDown(inspectorHeader));
+		const Vec2 editorBody{ editorAfterSplit.x + editorAfterSplit.w * 0.5f, editorAfterSplit.y + editorAfterSplit.h * 0.6f };
+		CHECK(ui.pointerMove(editorBody));
+		ui.pointerUp(editorBody);
+		CHECK(!std::get<DockPanelValue>(*ui.value("inspector")).floating);
+		CHECK(std::get<DockPanelValue>(*ui.value("inspector")).activeTab == "inspector");
+
+		// A drag released beyond the host creates an in-app floating overlay.
+		const Rect consoleAfterSplit = ui.bounds({ 6, 1 });
+		const Vec2 tabPoint{ consoleAfterSplit.x + consoleAfterSplit.w * 0.5f, consoleAfterSplit.y + 14.f };
+		CHECK(ui.pointerDown(tabPoint));
+		CHECK(ui.pointerMove({ tabPoint.x + 20.f, tabPoint.y + 14.f }));
+		CHECK(ui.pointerUp({ 650.f, 430.f }));
+		auto floating = std::get<DockPanelValue>(*ui.value("console"));
+		CHECK(floating.floating);
+
+		DockPanelValue restore = floating;
+		restore.floating = false; restore.targetPanel = "editor"; restore.region = DockZone::Center; restore.active = true;
+		CHECK(ui.setValue("console", restore));
+		CHECK(!std::get<DockPanelValue>(*ui.value("console")).floating);
 	}
 
 	std::string readExample(std::string_view filename) {
@@ -852,7 +931,7 @@ TEST(showcase_example_assets_parse_validate_and_build) {
 	CHECK(std::get<std::string>(*ui.value("display-name")) == "Guest!");
 
 	const Rect tabs = rectFor("demo-sections");
-	const Vec2 controlsHeader{ tabs.x + tabs.w * 0.4167f, tabs.y + 12.f };   // center of the third of six equal tabs
+	const Vec2 controlsHeader{ tabs.x + tabs.w * 0.3571f, tabs.y + 12.f };   // center of the third of seven equal tabs
 	CHECK(ui.pointerDown(controlsHeader)); (void)ui.pointerUp(controlsHeader);
 	CHECK_EQ(std::get<u32>(*ui.value("demo-sections")), 2u);
 	ui.layout(1080, 760);
@@ -865,7 +944,7 @@ TEST(showcase_example_assets_parse_validate_and_build) {
 	CHECK(ui.pointerDown(updatesPoint)); CHECK(ui.pointerUp(updatesPoint));
 	CHECK(!std::get<bool>(*ui.value("updates")));
 
-	const Vec2 pickersHeader{ tabs.x + tabs.w * 0.5833f, tabs.y + 12.f };   // center of the fourth of six equal tabs
+	const Vec2 pickersHeader{ tabs.x + tabs.w * 0.5f, tabs.y + 12.f };   // center of the fourth of seven equal tabs
 	CHECK(ui.pointerDown(pickersHeader)); (void)ui.pointerUp(pickersHeader);
 	CHECK_EQ(std::get<u32>(*ui.value("demo-sections")), 3u);
 	ui.layout(1080, 760);
@@ -882,7 +961,7 @@ TEST(showcase_example_assets_parse_validate_and_build) {
 	CHECK(ui.pointerDown({ color.x + 150.f, colorPopupY + 90.f }));
 	CHECK(std::get<Color>(*ui.value("accent-color")) != beforeColor);
 
-	const Vec2 containersHeader{ tabs.x + tabs.w * 0.9167f, tabs.y + 12.f };   // center of the sixth of six equal tabs
+	const Vec2 containersHeader{ tabs.x + tabs.w * 0.7857f, tabs.y + 12.f };   // center of the sixth of seven equal tabs
 	CHECK(ui.pointerDown(containersHeader)); (void)ui.pointerUp(containersHeader);
 	CHECK_EQ(std::get<u32>(*ui.value("demo-sections")), 5u);
 	ui.layout(1080, 760);
@@ -928,31 +1007,31 @@ ScrollView { resting: { scroll-behavior: instant, scrollbar-visibility: always, 
 	TextSystem text; UiRuntime ui; std::string error; CHECK(ui.build(*assets, *styles, strings, text, {}, error)); if (!error.empty()) return;
 	ui.layout(420, 300);
 	u32 counts[2]{}; ui.setEventHandler(recordPress, counts);
-	const Rect outer = ui.bounds({1, 1}); CHECK(outer.w == 220.f); CHECK(outer.h == 180.f);
-	CHECK(ui.scrollWheel({outer.x + 20.f, outer.y + 20.f}, {0.f, -2.f}));
+	const Rect outer = ui.bounds({ 1, 1 }); CHECK(outer.w == 220.f); CHECK(outer.h == 180.f);
+	CHECK(ui.scrollWheel({ outer.x + 20.f, outer.y + 20.f }, { 0.f, -2.f }));
 	CHECK(ui.scrollOffset("outer").y > 0.f);
 	CHECK(counts[1] > 0u);
 	CHECK(std::get<Vec2>(*ui.value("outer")) == ui.scrollOffset("outer"));
 	CHECK(ui.scrollIntoView("last", false)); CHECK(ui.scrollOffset("outer").y > 0.f);
 	const u32 beforeProgrammatic = counts[1];
-	CHECK(ui.setValue("outer", UiValue{Vec2{0.f, 0.f}})); CHECK(ui.scrollOffset("outer") == Vec2{});
+	CHECK(ui.setValue("outer", UiValue{ Vec2{0.f, 0.f} })); CHECK(ui.scrollOffset("outer") == Vec2{});
 	CHECK_EQ(counts[1], beforeProgrammatic); // setValue is silent by default
-	CHECK(ui.setValue("outer", UiValue{Vec2{0.f, 12.f}}, true)); CHECK_EQ(counts[1], beforeProgrammatic + 1u);
-	CHECK(ui.setValue("outer", UiValue{Vec2{0.f, 0.f}}));
+	CHECK(ui.setValue("outer", UiValue{ Vec2{0.f, 12.f} }, true)); CHECK_EQ(counts[1], beforeProgrammatic + 1u);
+	CHECK(ui.setValue("outer", UiValue{ Vec2{0.f, 0.f} }));
 	CHECK(ui.keyDown(Key::Tab)); CHECK(ui.keyDown(Key::Down)); CHECK(ui.scrollOffset("outer").y > 0.f);
-	CHECK(ui.setValue("outer", UiValue{Vec2{0.f, 0.f}}));
-	const Rect inner = ui.bounds({4, 1});
-	CHECK(ui.scrollWheel({inner.x + 20.f, inner.y + 20.f}, {0.f, -2.f}));
+	CHECK(ui.setValue("outer", UiValue{ Vec2{0.f, 0.f} }));
+	const Rect inner = ui.bounds({ 4, 1 });
+	CHECK(ui.scrollWheel({ inner.x + 20.f, inner.y + 20.f }, { 0.f, -2.f }));
 	CHECK(ui.scrollOffset("inner").y > 0.f); // deepest scrollable ancestor consumes first
-	(void)ui.scrollTo("inner", {0.f, 10000.f}, false);
-	CHECK(ui.scrollWheel({inner.x + 20.f, inner.y + 20.f}, {0.f, -2.f}));
+	(void)ui.scrollTo("inner", { 0.f, 10000.f }, false);
+	CHECK(ui.scrollWheel({ inner.x + 20.f, inner.y + 20.f }, { 0.f, -2.f }));
 	CHECK(ui.scrollOffset("outer").y > 0.f); // at its limit, inner lets the outer view consume
-	CHECK(ui.scrollTo("outer", {0.f, 0.f}, false));
-	CHECK(ui.pointerDown({outer.right() - 5.f, outer.y + 15.f}));
-	CHECK(ui.pointerMove({outer.right() - 5.f, outer.y + 35.f}));
+	CHECK(ui.scrollTo("outer", { 0.f, 0.f }, false));
+	CHECK(ui.pointerDown({ outer.right() - 5.f, outer.y + 15.f }));
+	CHECK(ui.pointerMove({ outer.right() - 5.f, outer.y + 35.f }));
 	CHECK(ui.scrollOffset("outer").y > 0.f);
-	CHECK(ui.pointerUp({outer.right() - 5.f, outer.y + 35.f}));
-	CHECK(ui.scrollTo("outer", {0.f, 10000.f}, false)); CHECK(ui.scrollOffset("outer").y < 10000.f);
+	CHECK(ui.pointerUp({ outer.right() - 5.f, outer.y + 35.f }));
+	CHECK(ui.scrollTo("outer", { 0.f, 10000.f }, false)); CHECK(ui.scrollOffset("outer").y < 10000.f);
 }
 
 TEST(ui_runtime_can_activate_stylesheet_themes) {

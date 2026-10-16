@@ -1,5 +1,6 @@
 #include "xtest.hpp"
 #include <xui/layout/layout.hpp>
+#include <xui/layout/docking.hpp>
 #include <cmath>
 #include <cstdio>
 namespace xtest { extern std::size_t allocCount; }
@@ -239,6 +240,39 @@ TEST(layout_split_drag_when_a_pane_was_pinned_at_its_minimum_does_not_jump) {
 	f32 bBefore = t.rect(b).w, cBefore = t.rect(c).w;
 	SplitDrag d = t.splitDragBegin(sp, 1); t.splitDragUpdate(d, 0); t.layout(sp, 100, 10);
 	CHECK(near(t.rect(a).w, 70)); CHECK(near(t.rect(b).w, bBefore)); CHECK(near(t.rect(c).w, cBefore));
+}
+TEST(docking_tree_nested_regions_tabs_floats_and_minimums) {
+	DockTree tree; tree.reserve(5, 9);
+	CHECK(tree.addPanel(1, { 180, 100 }, { 320, 220 }));
+	CHECK(tree.addPanel(2, { 160, 100 }, { 260, 220 }));
+	CHECK(tree.addPanel(3, { 140, 90 }, { 240, 180 }));
+	CHECK(tree.addPanel(4, { 120, 80 }, { 220, 160 }));
+	CHECK(tree.dock(2, 1, DockZone::Right));
+	CHECK(tree.dock(3, 1, DockZone::Center));
+	CHECK(tree.dock(4, 1, DockZone::Bottom));
+	tree.layout({ 0, 0, 900, 620 }, 6);
+	CHECK(tree.panelCount(1) == 2u);
+	CHECK(tree.activePanel(1) == 3u);
+	CHECK(tree.zone(2) == DockZone::Right);
+	CHECK(tree.zone(4) == DockZone::Left);
+	const Rect shared = tree.panelBounds(1), right = tree.panelBounds(2), bottom = tree.panelBounds(4);
+	CHECK(shared.w >= 180.f && shared.h >= 100.f);
+	CHECK(right.w >= 160.f && right.h >= 100.f);
+	CHECK(bottom.w >= 120.f && bottom.h >= 80.f);
+	CHECK(!shared.intersects(right));
+	CHECK(!shared.intersects(bottom));
+	CHECK(tree.preview(1, DockZone::Left).valid);
+	CHECK(tree.activate(1));
+	CHECK(tree.activePanel(1) == 1u);
+	CHECK(tree.undock(4, { 100, 90, 220, 160 }));
+	CHECK(tree.floating(4));
+	tree.layout({ 0, 0, 900, 620 }, 6);
+	CHECK((tree.panelBounds(4) == Rect{ 100, 90, 220, 160 }));
+	CHECK(tree.dock(4, 2, DockZone::Center));
+	tree.layout({ 0, 0, 900, 620 }, 6);
+	CHECK(tree.panelCount(2) == 2u);
+	CHECK(tree.close(4));
+	CHECK(!tree.contains(4));
 }
 TEST(layout_blender_like_nested_workspace) {
 	LayoutTree t; t.setLeafMeasure(leafZero, nullptr);

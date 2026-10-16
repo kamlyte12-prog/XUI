@@ -146,6 +146,30 @@ namespace {
 		else if (name == "onScrollToTarget") {
 			app.runtime().scrollIntoView("scroll-target-last", true);
 		}
+		else if (name == "onDockChange") {
+			std::string summary = "Dock state: ";
+			for (const std::string_view id : { "dock-editor", "dock-hierarchy", "dock-inspector", "dock-console", "dock-preview" }) {
+				const auto value = app.runtime().value(id);
+				if (!value) continue;
+				const auto* panel = std::get_if<xui::DockPanelValue>(&*value);
+				if (!panel) continue;
+				std::string_view region = "center";
+				if (panel->floating) region = "floating";
+				else if (panel->region == xui::DockZone::Left) region = "left";
+				else if (panel->region == xui::DockZone::Right) region = "right";
+				else if (panel->region == xui::DockZone::Top) region = "top";
+				else if (panel->region == xui::DockZone::Bottom) region = "bottom";
+				if (id == "dock-editor") summary += "Editor ";
+				else if (id == "dock-hierarchy") summary += "Hierarchy ";
+				else if (id == "dock-inspector") summary += "Inspector ";
+				else if (id == "dock-console") summary += "Console ";
+				else summary += "Preview ";
+				summary += region;
+				if (panel->active) summary += " (active)";
+				summary += "; ";
+			}
+			setText(app, "dock-readout", summary);
+		}
 	}
 
 	std::vector<std::filesystem::path> fontCandidates() {

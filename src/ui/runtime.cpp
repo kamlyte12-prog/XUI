@@ -332,6 +332,7 @@ namespace xui {
 			return false;
 		}
 
+		m_dockHosts.clear();
 		m_styles = &styles;
 		m_strings = &strings;
 		m_text = &text;
@@ -363,6 +364,78 @@ namespace xui {
 			return false;
 		}
 		m_root = m_nodes.front().layout;
+		for (u32 hostIndex = 0; hostIndex < m_nodes.size(); ++hostIndex) {
+			Node& hostNode = m_nodes[hostIndex];
+			if (!hostNode.dockHost) continue;
+			DockHostState host;
+			host.node = hostIndex;
+			host.gutter = hostNode.dockGutter;
+			for (u32 panelIndex = 0; panelIndex < m_nodes.size(); ++panelIndex)
+				if (m_nodes[panelIndex].parentIndex == hostIndex) {
+					if (!m_nodes[panelIndex].dockPanel) {
+						error = "DockHost may contain only DockPanel children";
+						return false;
+					}
+					host.panelNodes.push_back(panelIndex);
+				}
+			if (host.panelNodes.empty()) { error = "DockHost must contain at least one DockPanel"; return false; }
+			host.tree.reserve(static_cast<u32>(host.panelNodes.size()), static_cast<u32>(host.panelNodes.size() * 2 + 1));
+			host.appliedBounds.resize(host.panelNodes.size(), Rect{ -1.f, -1.f, -1.f, -1.f });
+			for (u32 ordinal = 0; ordinal < host.panelNodes.size(); ++ordinal) {
+				const u32 panelIndex = host.panelNodes[ordinal];
+				Node& panel = m_nodes[panelIndex];
+				panel.dockHeaderHeight = hostNode.dockHeaderHeight;
+				const LayoutStyle& style = m_layout.style(panel.layout);
+				host.authoredPanelStyles.push_back(style);
+				auto resolve = [](Length length, f32 base, f32 fallback) {
+					if (length.k == LenKind::Px) return std::max(0.f, length.v);
+					if (length.k == LenKind::Percent) return std::max(0.f, length.v * base * 0.01f);
+					return fallback;
+				};
+				const Vec2 minimum{
+					std::max(style.minW, resolve(style.minWidth, f32(m_windowWidth), 0.f)),
+					std::max(style.minH, resolve(style.minHeight, f32(m_windowHeight), 0.f)) };
+				const Vec2 maximum{
+					std::min(style.maxW, resolve(style.maxWidth, f32(m_windowWidth), kInf)),
+					std::min(style.maxH, resolve(style.maxHeight, f32(m_windowHeight), kInf)) };
+				Vec2 preferred = panel.dockPreferredSize;
+				if (style.width.k != LenKind::Auto) preferred.x = resolve(style.width, f32(m_windowWidth), preferred.x);
+				if (style.height.k != LenKind::Auto) preferred.y = resolve(style.height, f32(m_windowHeight), preferred.y);
+				preferred.x = std::max(preferred.x, minimum.x);
+				preferred.y = std::max(preferred.y, minimum.y);
+				if (!host.tree.addPanel(panelIndex, minimum, preferred,
+					{ 28.f + f32(ordinal) * 18.f, 28.f + f32(ordinal) * 18.f, preferred.x, preferred.y }, maximum)) {
+					error = "duplicate DockPanel runtime key";
+					return false;
+				}
+				if (panel.dockFloatingInitial || panel.dockZoneName == "Floating")
+					host.tree.undock(panelIndex, { 28.f + f32(ordinal) * 18.f, 28.f + f32(ordinal) * 18.f, preferred.x, preferred.y });
+			}
+			u32 firstDocked = 0xFFFFFFFFu;
+			for (u32 panelIndex : host.panelNodes) {
+				Node& panel = m_nodes[panelIndex];
+				if (panel.dockFloatingInitial || panel.dockZoneName == "Floating") continue;
+				if (host.tree.root() == 0xFFFFFFFFu) {
+					host.tree.dockRoot(panelIndex);
+					firstDocked = panelIndex;
+					continue;
+				}
+				if (!host.tree.floating(panelIndex)) { if (firstDocked == 0xFFFFFFFFu) firstDocked = panelIndex; continue; }
+				u32 target = firstDocked;
+				if (!panel.dockTargetId.empty()) {
+					target = 0xFFFFFFFFu;
+					for (u32 candidate : host.panelNodes)
+						if (m_nodes[candidate].id.v && m_strings->view(m_nodes[candidate].id) == panel.dockTargetId) { target = candidate; break; }
+					if (target == 0xFFFFFFFFu) { error = "DockPanel target '" + panel.dockTargetId + "' is not in its DockHost"; return false; }
+				}
+				if (target == 0xFFFFFFFFu || !host.tree.contains(target)) { host.tree.dockRoot(panelIndex); firstDocked = panelIndex; continue; }
+				DockZone zone = panel.dockZoneName == "Left" ? DockZone::Left : panel.dockZoneName == "Right" ? DockZone::Right :
+					panel.dockZoneName == "Top" ? DockZone::Top : panel.dockZoneName == "Bottom" ? DockZone::Bottom : DockZone::Center;
+				if (!host.tree.dock(panelIndex, target, zone)) { error = "could not build the authored DockHost layout"; return false; }
+				if (firstDocked == 0xFFFFFFFFu) firstDocked = panelIndex;
+			}
+			m_dockHosts.push_back(std::move(host));
+		}
 		// Picker editors are retained TextBox nodes owned by the picker, but laid out in its popup
 		// overlay. They use the same focus, selection, clipboard and text-input paths as authored fields.
 		const u32 authoredNodeCount = static_cast<u32>(m_nodes.size());
@@ -474,6 +547,8 @@ namespace xui {
 		node.checkItem = typeIs(source.type, *m_strings, "CheckItem");
 		node.checkBox = typeIs(source.type, *m_strings, "CheckBox");
 		node.split = typeIs(source.type, *m_strings, "Split");
+		node.dockHost = typeIs(source.type, *m_strings, "DockHost") || typeIs(source.type, *m_strings, "DockSpace");
+		node.dockPanel = typeIs(source.type, *m_strings, "DockPanel");
 		node.scrollView = typeIs(source.type, *m_strings, "ScrollView");
 		node.slider = typeIs(source.type, *m_strings, "Slider");
 		node.progressBar = typeIs(source.type, *m_strings, "ProgressBar");
@@ -506,9 +581,10 @@ namespace xui {
 		if (node.stepper) { node.value = 0.f; node.minValue = 0.f; node.maxValue = 100.f; }
 
 		if (typeIs(source.type, *m_strings, "Window") || typeIs(source.type, *m_strings, "Column") ||
-			typeIs(source.type, *m_strings, "Panel") || typeIs(source.type, *m_strings, "CheckList")) {
+			typeIs(source.type, *m_strings, "Panel") || typeIs(source.type, *m_strings, "CheckList") || node.dockPanel) {
 			node.layout = m_layout.create(LayoutKind::Column);
 		}
+		else if (node.dockHost) node.layout = m_layout.create(LayoutKind::Stack);
 		else if (typeIs(source.type, *m_strings, "Row") || typeIs(source.type, *m_strings, "Toolbar") || typeIs(source.type, *m_strings, "StatusBar")) {
 			node.layout = m_layout.create(LayoutKind::Row);
 		}
@@ -537,11 +613,19 @@ namespace xui {
 			error = "could not attach .xui child to its parent";
 			return false;
 		}
+		if (node.dockPanel && (parentIndex == 0xFFFFFFFFu || !m_nodes[parentIndex].dockHost)) {
+			error = "DockPanel must be a direct child of DockHost";
+			return false;
+		}
 
 		if ((typeIs(source.type, *m_strings, "Text") || node.button || node.checkItem || node.checkBox || node.fpsCounter || node.label || node.badge || node.toggleButton) && source.argCount) {
 			node.text.assign(literal(document, *m_strings, document.args[source.argFirst].expr));
 		}
 		if (node.tab && source.argCount) node.tabTitle.assign(literal(document, *m_strings, document.args[source.argFirst].expr));
+		if (node.dockPanel) {
+			for (const XArg& arg : document.argsOf(source))
+				if (m_strings->view(arg.name) == "title") node.text.assign(literal(document, *m_strings, arg.expr));
+		}
 		if (node.image && source.argCount) node.imageSource.assign(literal(document, *m_strings, document.args[source.argFirst].expr));
 		for (const XArg& arg : document.argsOf(source)) {
 			const std::string_view name = m_strings->view(arg.name);
@@ -555,6 +639,21 @@ namespace xui {
 		for (const XProp& prop : document.propsOf(source)) {
 			const std::string_view name = m_strings->view(prop.name);
 			const std::string_view value = literal(document, *m_strings, prop.expr);
+			if (node.dockHost && prop.role == XPropRole::Value && prop.expr < document.exprs.size() && document.exprs[prop.expr].kind == XExprKind::Number) {
+				if (name == "gutter") node.dockGutter = std::max(0.f, document.exprs[prop.expr].num);
+				else if (name == "headerHeight") node.dockHeaderHeight = std::clamp(document.exprs[prop.expr].num, 20.f, 64.f);
+			}
+			if (node.dockPanel && prop.role == XPropRole::Value) {
+				if (name == "dock" || name == "region") node.dockZoneName.assign(value);
+				else if (name == "target") node.dockTargetId.assign(value);
+				else if (name == "icon") node.dockIcon.assign(value);
+				else if (name == "floating" && prop.expr < document.exprs.size())
+					node.dockFloatingInitial = document.exprs[prop.expr].kind == XExprKind::Bool && document.exprs[prop.expr].bval;
+				else if (name == "closable" && prop.expr < document.exprs.size())
+					node.dockClosable = document.exprs[prop.expr].kind != XExprKind::Bool || document.exprs[prop.expr].bval;
+				else if (name == "preferredSize" && prop.expr < document.exprs.size() && document.exprs[prop.expr].kind == XExprKind::Size)
+					node.dockPreferredSize = { document.exprs[prop.expr].num, document.exprs[prop.expr].num2 };
+			}
 			if (node.scrollView && name == "scrollSpeed" && prop.expr < document.exprs.size() && document.exprs[prop.expr].kind == XExprKind::Number)
 				{ node.scrollSpeed = std::clamp(document.exprs[prop.expr].num, 1.f, 400.f); node.xuiScrollSpeed = true; }
 			else if (node.scrollView && name == "scrollBehavior") { node.scrollSmooth = value == "smooth" || value == "Smooth"; node.xuiScrollBehavior = true; }
@@ -691,6 +790,17 @@ namespace xui {
 				const XExpr& handler = document.exprs[prop.expr];
 				if (handler.kind == XExprKind::Name) node.pressHandler = handler.name;
 			}
+			else if ((name == "dock" || name == "undock" || name == "resize" || name == "tabChange" || name == "close") &&
+				prop.role == XPropRole::Event && prop.expr < document.exprs.size()) {
+				const XExpr& handler = document.exprs[prop.expr];
+				if (handler.kind == XExprKind::Name) {
+					if (name == "dock") node.dockHandler.assign(m_strings->view(handler.name));
+					else if (name == "undock") node.undockHandler.assign(m_strings->view(handler.name));
+					else if (name == "resize") node.resizeHandler.assign(m_strings->view(handler.name));
+					else if (name == "tabChange") node.tabChangeHandler.assign(m_strings->view(handler.name));
+					else node.closeHandler.assign(m_strings->view(handler.name));
+				}
+			}
 			else if (name == "disabled" && prop.role == XPropRole::Value && prop.expr < document.exprs.size()) {
 				node.disabled = document.exprs[prop.expr].kind == XExprKind::Bool && document.exprs[prop.expr].bval;
 			}
@@ -736,6 +846,20 @@ namespace xui {
 		match.id = node.id;
 		match.classes = node.classes;
 		node.styleSet = m_styles->match(match);
+		if (node.dockPanel || node.dockHost) {
+			auto partSet = [&](std::string_view type) {
+				MatchInput part;
+				part.type = m_strings->intern(type);
+				part.id = node.id;
+				part.classes = node.classes;
+				return m_styles->match(part);
+			};
+			node.dockHeaderStyleSet = partSet("DockHeader");
+			node.dockTabStyleSet = partSet("DockTab");
+			node.dockCloseStyleSet = partSet("DockCloseButton");
+			node.dockSplitterStyleSet = partSet("DockSplitter");
+			node.dockPreviewStyleSet = partSet("DockPreview");
+		}
 		m_styles->resolve(node.styleSet, stateBit(State::Resting), m_theme, node.style);
 		if (node.scrollView) {
 			if (node.style.has(PropId::ScrollbarSize)) node.scrollBarSize = std::clamp(number(node.style.get(PropId::ScrollbarSize), 0, 10.f), 4.f, 24.f);
@@ -864,7 +988,7 @@ namespace xui {
 				else return failLayout(name);
 				const bool container = typeIs(source.type, *m_strings, "Window") || typeIs(source.type, *m_strings, "Column") ||
 					typeIs(source.type, *m_strings, "Row") || typeIs(source.type, *m_strings, "Panel") ||
-					typeIs(source.type, *m_strings, "CheckList") || typeIs(source.type, *m_strings, "Tab");
+					typeIs(source.type, *m_strings, "CheckList") || typeIs(source.type, *m_strings, "Tab") || node.dockPanel || node.dockHost;
 				if (container) authoredLayout.alignItems = alignValue;
 				else authoredLayout.alignSelf = alignValue;
 			}
@@ -898,6 +1022,7 @@ namespace xui {
 				if (!parseGap(expression, name)) return false;
 			}
 		}
+		if (node.dockPanel && parentIndex < m_nodes.size()) authoredLayout.padding.t += m_nodes[parentIndex].dockHeaderHeight;
 		m_layout.setStyle(node.layout, authoredLayout);
 		m_nodes.push_back(std::move(node));
 		if (m_nodes[runtimeIndex].dropdown || m_nodes[runtimeIndex].colorPicker) {
@@ -965,6 +1090,273 @@ namespace xui {
 			m_lastLayoutWidth = width; m_lastLayoutHeight = height;
 		}
 		if (m_root.valid()) m_layout.layout(m_root, width, height);
+		updateDockLayouts();
+	}
+
+	void UiRuntime::updateDockLayouts() {
+		for (DockHostState& host : m_dockHosts) updateDockHostLayout(host);
+	}
+
+	void UiRuntime::updateDockHostLayout(DockHostState& host, bool force) {
+		if (host.node >= m_nodes.size()) return;
+		Node& hostNode = m_nodes[host.node];
+		const Rect hostRect = m_layout.absRect(hostNode.layout);
+		const LayoutStyle& hostStyle = m_layout.style(hostNode.layout);
+		const f32 borderLeft = hostStyle.border.l, borderRight = hostStyle.border.r;
+		const f32 borderTop = hostStyle.border.t, borderBottom = hostStyle.border.b;
+		const Rect nextArea{ 0.f, 0.f,
+			std::max(0.f, hostRect.w - borderLeft - borderRight - hostStyle.padding.l - hostStyle.padding.r),
+			std::max(0.f, hostRect.h - borderTop - borderBottom - hostStyle.padding.t - hostStyle.padding.b) };
+		const bool areaChanged = nextArea.w != host.contentArea.w || nextArea.h != host.contentArea.h;
+		host.contentArea = nextArea;
+		for (std::size_t panelOrdinal = 0; panelOrdinal < host.panelNodes.size(); ++panelOrdinal) {
+			const u32 panelIndex = host.panelNodes[panelOrdinal];
+			if (panelIndex >= m_nodes.size() || !host.tree.contains(panelIndex)) continue;
+			if (panelOrdinal >= host.authoredPanelStyles.size()) continue;
+			const LayoutStyle& panelStyle = host.authoredPanelStyles[panelOrdinal];
+			auto resolve = [](Length length, f32 base, f32 fallback) {
+				if (length.k == LenKind::Px) return std::max(0.f, length.v);
+				if (length.k == LenKind::Percent) return std::max(0.f, length.v * base * 0.01f);
+				return fallback;
+			};
+			const Vec2 minimum{
+				std::max(panelStyle.minW, resolve(panelStyle.minWidth, nextArea.w, 0.f)),
+				std::max(panelStyle.minH, resolve(panelStyle.minHeight, nextArea.h, 0.f)) };
+			const Vec2 maximum{
+				std::min(panelStyle.maxW, resolve(panelStyle.maxWidth, nextArea.w, kInf)),
+				std::min(panelStyle.maxH, resolve(panelStyle.maxHeight, nextArea.h, kInf)) };
+			Vec2 preferred = m_nodes[panelIndex].dockPreferredSize;
+			if (panelStyle.width.k != LenKind::Auto) preferred.x = resolve(panelStyle.width, nextArea.w, preferred.x);
+			if (panelStyle.height.k != LenKind::Auto) preferred.y = resolve(panelStyle.height, nextArea.h, preferred.y);
+			host.tree.setPanelConstraints(panelIndex, minimum, preferred, maximum);
+		}
+		host.tree.layout(host.contentArea, host.gutter);
+		bool changed = force || areaChanged;
+		const std::span<const DockPanelLayout> panels = host.tree.panels();
+		for (u32 ordinal = 0; ordinal < host.panelNodes.size(); ++ordinal) {
+			const u32 panelIndex = host.panelNodes[ordinal];
+			if (panelIndex >= m_nodes.size()) continue;
+			const bool exists = host.tree.contains(panelIndex);
+			Rect bounds = ordinal < panels.size() && exists ? panels[ordinal].bounds : Rect{};
+			if (ordinal >= host.appliedBounds.size()) continue;
+			if (!force && host.appliedBounds[ordinal] == bounds) continue;
+			host.appliedBounds[ordinal] = bounds;
+			LayoutStyle style = m_layout.style(m_nodes[panelIndex].layout);
+			style.position = Position::Absolute;
+			style.left = Length::px(bounds.x);
+			style.top = Length::px(bounds.y);
+			style.right = Length::autoLen();
+			style.bottom = Length::autoLen();
+			style.width = Length::px(bounds.w);
+			style.height = Length::px(bounds.h);
+			m_layout.setStyle(m_nodes[panelIndex].layout, style);
+			m_nodes[panelIndex].dockClosed = !exists;
+			changed = true;
+		}
+		if (changed && hostRect.w > 0.f && hostRect.h > 0.f) m_layout.layout(hostNode.layout, hostRect.w, hostRect.h);
+	}
+
+	UiRuntime::DockHostState* UiRuntime::dockHostForPanel(u32 panelNode) {
+		for (DockHostState& host : m_dockHosts)
+			if (std::find(host.panelNodes.begin(), host.panelNodes.end(), panelNode) != host.panelNodes.end()) return &host;
+		return nullptr;
+	}
+
+	const UiRuntime::DockHostState* UiRuntime::dockHostForPanel(u32 panelNode) const {
+		for (const DockHostState& host : m_dockHosts)
+			if (std::find(host.panelNodes.begin(), host.panelNodes.end(), panelNode) != host.panelNodes.end()) return &host;
+		return nullptr;
+	}
+
+	UiRuntime::DockHostState* UiRuntime::dockHostAt(Vec2 point) {
+		for (auto it = m_dockHosts.rbegin(); it != m_dockHosts.rend(); ++it)
+			if (m_layout.absRect(m_nodes[it->node].layout).contains(point)) return &*it;
+		return nullptr;
+	}
+
+	void UiRuntime::addDockDamage(const DockHostState& host) {
+		addDamage(m_layout.absRect(m_nodes[host.node].layout));
+	}
+
+	void UiRuntime::fireDockHandler(u32 panelNode, const std::string& handler) {
+		if (m_eventFn && panelNode < m_nodes.size() && !handler.empty()) m_eventFn(m_eventContext, handler);
+	}
+
+	u32 UiRuntime::dockTabAt(const DockHostState& host, u32 groupPanel, Vec2 point) const {
+		const Rect group = host.tree.groupBounds(groupPanel);
+		if (!group.contains(point) || point.y >= group.y + m_nodes[host.node].dockHeaderHeight) return 0xFFFFFFFFu;
+		const u32 count = host.tree.panelCount(groupPanel);
+		if (!count) return 0xFFFFFFFFu;
+		const f32 width = group.w / f32(count);
+		for (u32 panelNode : host.panelNodes) {
+			if (host.tree.groupOf(panelNode) != host.tree.groupOf(groupPanel)) continue;
+			const u32 order = host.tree.panelOrder(panelNode);
+			if (point.x >= group.x + width * f32(order) && point.x < group.x + width * f32(order + 1)) return panelNode;
+		}
+		return 0xFFFFFFFFu;
+	}
+
+	bool UiRuntime::dockPointerDown(Vec2 point) {
+		for (std::size_t hostIndex = m_dockHosts.size(); hostIndex > 0; --hostIndex) {
+			DockHostState& host = m_dockHosts[hostIndex - 1];
+			if (!isNodeVisible(host.node)) continue;
+			Node& hostNode = m_nodes[host.node];
+			if (hostNode.disabled) continue;
+			const Rect rect = m_layout.absRect(hostNode.layout);
+			const LayoutStyle& style = m_layout.style(hostNode.layout);
+			const Vec2 origin{ rect.x + style.border.l + style.padding.l, rect.y + style.border.t + style.padding.t };
+			const Vec2 local{ point.x - origin.x, point.y - origin.y };
+			const Rect area{ 0, 0, host.contentArea.w, host.contentArea.h };
+			if (area.contains(local)) {
+				bool horizontal = true;
+				const u32 split = host.tree.splitAt(local, &horizontal);
+				if (split != 0xFFFFFFFFu) {
+					const Rect bounds = host.tree.splitBounds(split);
+					m_dockDragHost = static_cast<u32>(hostIndex - 1);
+					m_dockDragSplit = split;
+					m_dockSplitDragging = true;
+					m_dockSplitHorizontal = horizontal;
+					m_dockSplitStartRatio = host.tree.splitRatio(split);
+					m_dockSplitStartPointer = horizontal ? local.x : local.y;
+					m_dockSplitExtent = std::max(1.f, horizontal ? bounds.w : bounds.h);
+					addDockDamage(host);
+					return true;
+				}
+			}
+			u32 panel = 0xFFFFFFFFu;
+			u32 active = host.tree.panelAt(local);
+			if (active != 0xFFFFFFFFu) panel = dockTabAt(host, active, local);
+			if (panel == 0xFFFFFFFFu) panel = active;
+			if (panel >= m_nodes.size() || !m_nodes[panel].dockPanel || m_nodes[panel].disabled || m_nodes[panel].dockClosed) continue;
+			const Rect panelBounds = host.tree.panelBounds(panel);
+			const f32 headerHeight = std::min(panelBounds.h, hostNode.dockHeaderHeight);
+			const Rect header{ panelBounds.x, panelBounds.y, panelBounds.w, headerHeight };
+			if (!header.contains(local)) continue;
+			const u32 count = host.tree.panelCount(panel);
+			const f32 tabWidth = count ? host.tree.groupBounds(panel).w / f32(count) : panelBounds.w;
+			const f32 tabX = count > 1 ? host.tree.groupBounds(panel).x + tabWidth * f32(host.tree.panelOrder(panel)) : panelBounds.x;
+			const Rect closeRect{ tabX + std::max(0.f, tabWidth - headerHeight), panelBounds.y, std::min(headerHeight, tabWidth), headerHeight };
+			if (m_nodes[panel].dockClosable && closeRect.contains(local)) {
+				const u32 previousActive = host.tree.activePanel(panel);
+				if (host.tree.close(panel)) {
+					m_nodes[panel].dockClosed = true;
+					updateDockHostLayout(host, true);
+					addDockDamage(host);
+					fireDockHandler(panel, m_nodes[panel].closeHandler);
+					const u32 activeAfterClose = host.tree.activePanel(panel);
+					if (previousActive != activeAfterClose && activeAfterClose < m_nodes.size())
+						fireDockHandler(activeAfterClose, m_nodes[activeAfterClose].tabChangeHandler);
+					return true;
+				}
+			}
+			m_dockCandidate = panel;
+			m_dockDragPanel = panel;
+			m_dockDragHost = static_cast<u32>(hostIndex - 1);
+			m_dockDragStart = local;
+			m_dockFloatStart = panelBounds;
+			m_dockTabDragX = tabX;
+			m_dockPreview = {};
+			m_dockDragging = false;
+			return true;
+		}
+		return false;
+	}
+
+	bool UiRuntime::dockPointerMove(Vec2 point) {
+		if (m_dockSplitDragging && m_dockDragHost < m_dockHosts.size()) {
+			DockHostState& host = m_dockHosts[m_dockDragHost];
+			const Rect hostRect = m_layout.absRect(m_nodes[host.node].layout);
+			const LayoutStyle& style = m_layout.style(m_nodes[host.node].layout);
+			const f32 origin = m_dockSplitHorizontal ? hostRect.x + style.border.l + style.padding.l : hostRect.y + style.border.t + style.padding.t;
+			const f32 pointer = (m_dockSplitHorizontal ? point.x : point.y) - origin;
+			const f32 nextRatio = m_dockSplitStartRatio + (pointer - m_dockSplitStartPointer) / m_dockSplitExtent;
+			const bool moved = host.tree.resizeSplit(m_dockDragSplit, nextRatio);
+			if (moved) { updateDockHostLayout(host); addDockDamage(host); }
+			return moved;
+		}
+		if (m_dockCandidate == 0xFFFFFFFFu || m_dockDragHost >= m_dockHosts.size()) return false;
+		DockHostState& host = m_dockHosts[m_dockDragHost];
+		const Rect hostRect = m_layout.absRect(m_nodes[host.node].layout);
+		const LayoutStyle& style = m_layout.style(m_nodes[host.node].layout);
+		const Vec2 origin{ hostRect.x + style.border.l + style.padding.l, hostRect.y + style.border.t + style.padding.t };
+		const Vec2 local{ point.x - origin.x, point.y - origin.y };
+		const f32 distance = std::fabs(local.x - m_dockDragStart.x) + std::fabs(local.y - m_dockDragStart.y);
+		if (!m_dockDragging && distance < 5.f) return false;
+		m_dockDragging = true;
+		m_dockPreview = {};
+		const Rect area{ 0, 0, host.contentArea.w, host.contentArea.h };
+		if (area.contains(local)) {
+			const u32 target = host.tree.panelAt(local);
+			if (target != 0xFFFFFFFFu && target != m_dockDragPanel) {
+				const Rect group = host.tree.groupBounds(target);
+				DockZone zone = DockZone::Center;
+				const f32 edgeX = std::min(group.w * 0.25f, 72.f);
+				const f32 edgeY = std::min(group.h * 0.25f, 72.f);
+				if (local.x < group.x + edgeX) zone = DockZone::Left;
+				else if (local.x >= group.right() - edgeX) zone = DockZone::Right;
+				else if (local.y < group.y + edgeY) zone = DockZone::Top;
+				else if (local.y >= group.bottom() - edgeY) zone = DockZone::Bottom;
+				m_dockPreview = host.tree.preview(target, zone);
+			}
+		}
+		addDockDamage(host);
+		return true;
+	}
+
+	bool UiRuntime::dockPointerUp(Vec2 point) {
+		if (m_dockSplitDragging && m_dockDragHost < m_dockHosts.size()) {
+			DockHostState& host = m_dockHosts[m_dockDragHost];
+			m_dockSplitDragging = false;
+			for (u32 panel : host.panelNodes) fireDockHandler(panel, m_nodes[panel].resizeHandler);
+			addDockDamage(host);
+			m_dockDragHost = m_dockDragSplit = 0xFFFFFFFFu;
+			return true;
+		}
+		if (m_dockCandidate == 0xFFFFFFFFu || m_dockDragHost >= m_dockHosts.size()) return false;
+		DockHostState& host = m_dockHosts[m_dockDragHost];
+		const u32 panel = m_dockDragPanel;
+		bool changed = false;
+		if (m_dockDragging && panel < m_nodes.size()) {
+			const Rect hostRect = m_layout.absRect(m_nodes[host.node].layout);
+			const LayoutStyle& style = m_layout.style(m_nodes[host.node].layout);
+			const Vec2 origin{ hostRect.x + style.border.l + style.padding.l, hostRect.y + style.border.t + style.padding.t };
+			const Vec2 local{ point.x - origin.x, point.y - origin.y };
+			const DockZone oldZone = host.tree.zone(panel);
+			const bool wasFloating = host.tree.floating(panel);
+			const bool releasedInsideHost = Rect{ 0, 0, host.contentArea.w, host.contentArea.h }.contains(local);
+			// The release position is authoritative. A pointer-up can arrive outside
+			// without an intervening move event (for example, a fast native drag), so
+			// never apply a stale in-host preview to an outside release.
+			if (releasedInsideHost && m_dockPreview.valid)
+				changed = host.tree.dock(panel, m_dockPreview.targetPanel, m_dockPreview.zone);
+			else if (!releasedInsideHost) {
+				Rect floating = m_dockFloatStart;
+				floating.x = local.x - (m_dockDragStart.x - m_dockFloatStart.x);
+				floating.y = local.y - (m_dockDragStart.y - m_dockFloatStart.y);
+				changed = wasFloating ? host.tree.moveFloating(panel, floating) : host.tree.undock(panel, floating);
+			}
+			if (changed) {
+				updateDockHostLayout(host, true);
+				addDockDamage(host);
+				if (wasFloating && !host.tree.floating(panel)) fireDockHandler(panel, m_nodes[panel].dockHandler);
+				else if (!wasFloating && host.tree.floating(panel)) fireDockHandler(panel, m_nodes[panel].undockHandler);
+				else if (!wasFloating && !host.tree.floating(panel) && oldZone != host.tree.zone(panel)) fireDockHandler(panel, m_nodes[panel].dockHandler);
+			}
+		}
+		else if (panel < m_nodes.size()) {
+			const u32 previous = host.tree.activePanel(panel);
+			changed = host.tree.activate(panel);
+			if (changed) {
+				updateDockHostLayout(host);
+				addDockDamage(host);
+				fireDockHandler(panel, m_nodes[panel].tabChangeHandler);
+				if (previous < m_nodes.size()) fireDockHandler(previous, m_nodes[previous].tabChangeHandler);
+			}
+		}
+		m_dockCandidate = m_dockDragPanel = m_dockDragHost = 0xFFFFFFFFu;
+		m_dockDragging = false;
+		m_dockPreview = {};
+		return true;
 	}
 
 	Rect UiRuntime::scrollBarRect(u32 index, bool horizontal, Rect* trackOut) const {
@@ -1540,7 +1932,8 @@ namespace xui {
 			}
 			const bool placeholderText = (node.textBox || node.textArea) && node.text.empty() && !node.placeholder.empty();
 			std::string passwordMask;
-			std::string_view displayText = placeholderText ? std::string_view(node.placeholder) : std::string_view(node.text);
+			std::string_view displayText = node.dockPanel ? std::string_view{} :
+				(placeholderText ? std::string_view(node.placeholder) : std::string_view(node.text));
 			if (node.password && !node.text.empty()) {
 				for (std::size_t i = 0; i < node.text.size(); i = nextUtf8(node.text, i)) appendUtf8(passwordMask, 0x2022u);
 				displayText = passwordMask;
@@ -1706,6 +2099,122 @@ namespace xui {
 					painter.roundRect(header, RectStyle{ Color{0,0,0,0}, edge, number(border, 0), CornerRadii{} });
 				}
 				drawLabel(tab.tabTitle, header, tab.font, tabStyle, Color::fromRGBA8(0xDDE7F8FFu), 8.f, false);
+			}
+		}
+		// Dock chrome is a backend-neutral overlay. Every visual part resolves through .xss selectors.
+		for (const DockHostState& host : m_dockHosts) {
+			if (host.node >= m_nodes.size() || !isNodeVisible(host.node)) continue;
+			const Node& hostNode = m_nodes[host.node];
+			const Rect hostRect = m_layout.absRect(hostNode.layout);
+			const LayoutStyle& hostLayout = m_layout.style(hostNode.layout);
+			const Vec2 origin{ hostRect.x + hostLayout.border.l + hostLayout.padding.l,
+				hostRect.y + hostLayout.border.t + hostLayout.padding.t };
+			const auto resolvePart = [&](StyleSetId set, StateMask states, PropTable& table) {
+				m_styles->resolve(set, states, m_theme, table);
+			};
+			const auto drawChrome = [&](const Node& owner, StyleSetId set, Rect bounds, StateMask states,
+				Color fallbackBg, Color fallbackFg, std::string_view label, f32 inset) {
+				PropTable style;
+				resolvePart(set, states, style);
+				const Color background = color(style, PropId::Bg, fallbackBg);
+				const f32 radius = style.has(PropId::Radius) ? number(style.get(PropId::Radius), 0) : 0.f;
+				const f32 opacity = style.has(PropId::Opacity) ? std::clamp(number(style.get(PropId::Opacity), 0, 1.f), 0.f, 1.f) : 1.f;
+				const f32 textInset = style.has(PropId::Pad) ? number(style.get(PropId::Pad), 3, inset) : inset;
+				painter.pushOpacity(opacity);
+				if (background.a > 0.f) painter.fillRect(bounds, background, CornerRadii::all(radius));
+				if (style.has(PropId::Border) && style.get(PropId::Border).count >= 3) {
+					const StyleValue& border = style.get(PropId::Border);
+					const Color edge = border.atoms[2].kind == AtomKind::Color ? Color::fromRGBA8(border.atoms[2].bits) : Color{};
+					painter.roundRect(bounds, RectStyle{ Color{0,0,0,0}, edge, number(border, 0), CornerRadii::all(radius) });
+				}
+				const FontHandle styledFont = selectFont(style);
+				drawLabel(label, bounds, styledFont.valid() ? styledFont : owner.font, style, fallbackFg, textInset, false);
+				painter.popOpacity();
+			};
+			const std::span<const DockPanelLayout> panels = host.tree.panels();
+			for (const DockPanelLayout& panelLayout : panels) {
+				const u32 panelIndex = panelLayout.panel;
+				if (!panelLayout.active || panelIndex >= m_nodes.size() || panelLayout.bounds.empty()) continue;
+				const Node& panel = m_nodes[panelIndex];
+				const Rect group = panelLayout.bounds;
+				const u32 count = host.tree.panelCount(panelIndex);
+				if (panelLayout.floating || count <= 1) {
+					const Rect header{ origin.x + group.x, origin.y + group.y, group.w,
+						std::min(group.h, panel.dockHeaderHeight) };
+					StateMask states = stateBit(State::Resting) | (panel.disabled ? stateBit(State::Disabled) : stateBit(State::Enabled));
+					if (!panel.disabled && header.contains(m_pointerPosition)) states |= stateBit(State::Hover);
+					if (m_dockCandidate == panelIndex) states |= stateBit(State::Pressed);
+					drawChrome(panel, panel.dockHeaderStyleSet, header, states,
+						Color::fromRGBA8(0x263247FFu), Color::fromRGBA8(0xE6EDF7FFu), panel.text, 10.f);
+					if (panel.dockClosable) {
+						const f32 side = header.h;
+						const Rect close{ header.right() - side, header.y, side, side };
+						StateMask closeStates = stateBit(State::Resting) | (panel.disabled ? stateBit(State::Disabled) : stateBit(State::Enabled));
+						if (!panel.disabled && close.contains(m_pointerPosition)) closeStates |= stateBit(State::Hover);
+						drawChrome(panel, panel.dockCloseStyleSet, close, closeStates,
+							Color{0,0,0,0}, Color::fromRGBA8(0xCBD5E1FFu), "×", 0.f);
+					}
+				}
+				else {
+					const f32 tabWidth = group.w / f32(count);
+					for (u32 order = 0; order < count; ++order) {
+						u32 tabNode = 0xFFFFFFFFu;
+						for (u32 candidate : host.panelNodes)
+							if (host.tree.groupOf(candidate) == panelLayout.group && host.tree.panelOrder(candidate) == order) { tabNode = candidate; break; }
+						if (tabNode >= m_nodes.size()) continue;
+						const Node& tab = m_nodes[tabNode];
+						const Rect bounds{ origin.x + group.x + tabWidth * f32(order), origin.y + group.y,
+							tabWidth, std::min(group.h, tab.dockHeaderHeight) };
+						StateMask states = stateBit(State::Resting) | (tab.disabled ? stateBit(State::Disabled) : stateBit(State::Enabled));
+						if (order == panelLayout.order) states |= stateBit(State::Selected);
+						if (!tab.disabled && bounds.contains(m_pointerPosition)) states |= stateBit(State::Hover);
+						if (m_dockCandidate == tabNode) states |= stateBit(State::Pressed);
+						drawChrome(tab, tab.dockTabStyleSet, bounds, states,
+							order == panelLayout.order ? Color::fromRGBA8(0x33445EFFu) : Color::fromRGBA8(0x202A3AFFu),
+							Color::fromRGBA8(0xE6EDF7FFu), tab.text, tab.dockIcon.empty() ? 8.f : 28.f);
+						if (!tab.dockIcon.empty()) {
+							PropTable iconStyle;
+							resolvePart(tab.dockTabStyleSet, states, iconStyle);
+							const FontHandle iconFont = selectFont(iconStyle);
+							drawLabel(tab.dockIcon, bounds, iconFont.valid() ? iconFont : tab.font, iconStyle,
+								Color::fromRGBA8(0xE6EDF7FFu), 8.f, false);
+						}
+						if (tab.dockClosable) {
+							const Rect close{ bounds.right() - bounds.h, bounds.y, bounds.h, bounds.h };
+						StateMask closeStates = stateBit(State::Resting) | (tab.disabled ? stateBit(State::Disabled) : stateBit(State::Enabled));
+						if (!tab.disabled && close.contains(m_pointerPosition)) closeStates |= stateBit(State::Hover);
+						drawChrome(tab, tab.dockCloseStyleSet, close, closeStates,
+							Color{0,0,0,0}, Color::fromRGBA8(0xCBD5E1FFu), "×", 0.f);
+					}
+					}
+				}
+			}
+			for (u32 ordinal = 0; ordinal < host.tree.splitterCount(); ++ordinal) {
+				const DockSplitterLayout split = host.tree.splitterAt(ordinal);
+				Rect bounds = split.bounds;
+				bounds.x += origin.x; bounds.y += origin.y;
+				StateMask states = stateBit(State::Resting) | stateBit(State::Enabled);
+				if (bounds.contains(m_pointerPosition)) states |= stateBit(State::Hover);
+				if (m_dockSplitDragging && m_dockDragHost == static_cast<u32>(&host - m_dockHosts.data()) &&
+					m_dockDragSplit == split.node) states |= stateBit(State::Pressed) | stateBit(State::Dragging);
+				drawChrome(hostNode, hostNode.dockSplitterStyleSet, bounds, states,
+					Color::fromRGBA8(0x46546AFFu), Color::fromRGBA8(0x46546AFFu), {}, 0.f);
+			}
+			if (m_dockPreview.valid && m_dockDragHost == static_cast<u32>(&host - m_dockHosts.data())) {
+				Rect preview = m_dockPreview.bounds;
+				preview.x += origin.x; preview.y += origin.y;
+				PropTable style;
+				resolvePart(hostNode.dockPreviewStyleSet, stateBit(State::Resting) | stateBit(State::Dragging), style);
+				const f32 radius = style.has(PropId::Radius) ? number(style.get(PropId::Radius), 0, 4.f) : 4.f;
+				const f32 opacity = style.has(PropId::Opacity) ? std::clamp(number(style.get(PropId::Opacity), 0, 1.f), 0.f, 1.f) : 1.f;
+				painter.pushOpacity(opacity);
+				painter.fillRect(preview, color(style, PropId::Bg, Color::fromRGBA8(0x5386D866u)), CornerRadii::all(radius));
+				if (style.has(PropId::Border) && style.get(PropId::Border).count >= 3) {
+					const StyleValue& border = style.get(PropId::Border);
+					const Color edge = border.atoms[2].kind == AtomKind::Color ? Color::fromRGBA8(border.atoms[2].bits) : Color{};
+					painter.roundRect(preview, RectStyle{ Color{0,0,0,0}, edge, number(border, 0, 1.f), CornerRadii::all(radius) });
+				}
+				painter.popOpacity();
 			}
 		}
 		// Popups render after the retained tree, so they always remain on top of later siblings.
@@ -1875,7 +2384,7 @@ namespace xui {
 
 	bool UiRuntime::pointerMove(Vec2 point) {
 		m_pointerPosition = point;
-		bool changed = false;
+		bool changed = dockPointerMove(point);
 		if (m_dragScroll < m_nodes.size()) {
 			const u32 index = m_dragScroll;
 			Rect track;
@@ -1982,6 +2491,20 @@ namespace xui {
 	}
 
 	CursorShape UiRuntime::cursorAt(Vec2 point) const {
+		for (auto it = m_dockHosts.rbegin(); it != m_dockHosts.rend(); ++it) {
+			const DockHostState& host = *it;
+			if (host.node >= m_nodes.size() || !isNodeVisible(host.node)) continue;
+			const Rect rect = m_layout.absRect(m_nodes[host.node].layout);
+			const LayoutStyle& style = m_layout.style(m_nodes[host.node].layout);
+			const Vec2 origin{ rect.x + style.border.l + style.padding.l, rect.y + style.border.t + style.padding.t };
+			const Vec2 local{ point.x - origin.x, point.y - origin.y };
+			bool horizontal = true;
+			if (host.tree.splitAt(local, &horizontal) != 0xFFFFFFFFu)
+				return horizontal ? CursorShape::ResizeEW : CursorShape::ResizeNS;
+			const u32 panel = host.tree.panelAt(local);
+			if (panel < m_nodes.size() && host.tree.panelBounds(panel).contains(local) &&
+				local.y < host.tree.panelBounds(panel).y + m_nodes[panel].dockHeaderHeight) return CursorShape::Hand;
+		}
 		for (std::size_t i = m_nodes.size(); i > 0; --i) {
 			const u32 index = static_cast<u32>(i - 1);
 			if (m_nodes[index].scrollView && pointInsideScrollAncestors(index, point)) {
@@ -2048,6 +2571,7 @@ namespace xui {
 				popupCoversPoint = true; break;
 			}
 		}
+		if (!popupCoversPoint && dockPointerDown(point)) return true;
 		for (std::size_t i = popupCoversPoint ? 0 : m_nodes.size(); i > 0; --i) {
 			const u32 index = static_cast<u32>(i - 1);
 			if (!m_nodes[index].scrollView || m_nodes[index].disabled || !pointInsideScrollAncestors(index, point)) continue;
@@ -2343,6 +2867,7 @@ namespace xui {
 	}
 
 	bool UiRuntime::pointerUp(Vec2 point) {
+		if (m_dockCandidate != 0xFFFFFFFFu || m_dockSplitDragging) return dockPointerUp(point);
 		if (m_dragScroll < m_nodes.size()) {
 			const u32 index = m_dragScroll;
 			m_dragScroll = 0xFFFFFFFFu;
@@ -2383,6 +2908,13 @@ namespace xui {
 	bool UiRuntime::keyDown(Key key) { return keyDown(key, 0, nullptr); }
 
 	bool UiRuntime::keyDown(Key key, u8 mods, Platform* platform) {
+		if (key == Key::Escape && (m_dockCandidate != 0xFFFFFFFFu || m_dockSplitDragging)) {
+			if (m_dockDragHost < m_dockHosts.size()) addDockDamage(m_dockHosts[m_dockDragHost]);
+			m_dockCandidate = m_dockDragPanel = m_dockDragHost = m_dockDragSplit = 0xFFFFFFFFu;
+			m_dockDragging = m_dockSplitDragging = false;
+			m_dockPreview = {};
+			return true;
+		}
 		if (key == Key::F3) {
 			m_fpsEnabled = !m_fpsEnabled;
 			m_fpsElapsed = 0;
@@ -2928,6 +3460,21 @@ namespace xui {
 	u32 UiRuntime::hitTestNode(Vec2 point) const {
 		if (point.x < 0.f || point.y < 0.f || point.x >= m_lastLayoutWidth || point.y >= m_lastLayoutHeight)
 			return 0xFFFFFFFFu;
+		// Dock tabs and panel headers are chrome above the retained panel contents.
+		for (auto it = m_dockHosts.rbegin(); it != m_dockHosts.rend(); ++it) {
+			const DockHostState& host = *it;
+			if (host.node >= m_nodes.size() || !isNodeVisible(host.node)) continue;
+			const Rect hostRect = m_layout.absRect(m_nodes[host.node].layout);
+			const LayoutStyle& hostStyle = m_layout.style(m_nodes[host.node].layout);
+			const Vec2 origin{ hostRect.x + hostStyle.border.l + hostStyle.padding.l, hostRect.y + hostStyle.border.t + hostStyle.padding.t };
+			const Vec2 local{ point.x - origin.x, point.y - origin.y };
+			const u32 active = host.tree.panelAt(local);
+			if (active < m_nodes.size()) {
+				const Rect panel = host.tree.panelBounds(active);
+				if (point.y >= origin.y + panel.y && point.y < origin.y + panel.y + m_nodes[active].dockHeaderHeight)
+					return active;
+			}
+		}
 		// Tab headers are painted in the overlay layer above the retained node tree.
 		for (std::size_t i = m_nodes.size(); i > 0; --i) {
 			const u32 index = static_cast<u32>(i - 1);
@@ -2964,7 +3511,7 @@ namespace xui {
 			const bool structuralBlocker = typeIs(node.type, *m_strings, "Window") || typeIs(node.type, *m_strings, "Text") ||
 				typeIs(node.type, *m_strings, "Panel") || typeIs(node.type, *m_strings, "Split") ||
 				typeIs(node.type, *m_strings, "CheckList") || typeIs(node.type, *m_strings, "Tab") ||
-				node.progressBar || node.fpsCounter || node.label || node.badge || node.spinner || node.image;
+				node.progressBar || node.fpsCounter || node.label || node.badge || node.spinner || node.image || node.dockHost || node.dockPanel;
 			const bool styledBlocker = node.style.has(PropId::Bg) && color(node.style, PropId::Bg, Color{}).a > 0.f;
 			// Node storage follows paint order: descendants and later siblings are on top.
 			// Transparent Row/Column containers pass input through; painted containers block
@@ -3016,6 +3563,12 @@ namespace xui {
 
 	bool UiRuntime::isNodeVisible(u32 index) const {
 		if (index >= m_nodes.size()) return false;
+		if (m_nodes[index].dockPanel) {
+			if (m_nodes[index].dockClosed) return false;
+			const DockHostState* host = dockHostForPanel(index);
+			if (!host || !host->tree.contains(index)) return false;
+			if (!host->tree.floating(index) && host->tree.activePanel(index) != index) return false;
+		}
 		if (m_nodes[index].pickerEditor) {
 			const u32 owner = m_nodes[index].pickerOwner;
 			return owner < m_nodes.size() && m_nodes[owner].popupOpen && isNodeVisible(owner) &&
@@ -3024,6 +3577,7 @@ namespace xui {
 		u32 child = index;
 		while (m_nodes[child].parentIndex != 0xFFFFFFFFu) {
 			const u32 parent = m_nodes[child].parentIndex;
+			if (m_nodes[parent].dockPanel && !isNodeVisible(parent)) return false;
 			if (m_nodes[parent].tabs && m_nodes[child].tab) {
 				u32 ordinal = 0;
 				for (NodeId page = m_layout.firstChild(m_nodes[parent].layout); page.valid(); page = m_layout.nextSibling(page), ++ordinal)
@@ -3160,6 +3714,21 @@ namespace xui {
 	std::optional<UiValue> UiRuntime::value(std::string_view id) const {
 		for (const Node& node : m_nodes) {
 			if (!node.id.v || m_strings->view(node.id) != id) continue;
+			if (node.dockPanel) {
+				const DockHostState* host = dockHostForPanel(static_cast<u32>(&node - m_nodes.data()));
+				if (!host || !host->tree.contains(static_cast<u32>(&node - m_nodes.data()))) return std::nullopt;
+				const u32 panelIndex = static_cast<u32>(&node - m_nodes.data());
+				DockPanelValue value;
+				value.region = host->tree.zone(panelIndex);
+				value.floating = host->tree.floating(panelIndex);
+				value.bounds = host->tree.panelBounds(panelIndex);
+				value.order = host->tree.panelOrder(panelIndex);
+				value.active = host->tree.activePanel(panelIndex) == panelIndex;
+				value.host = m_nodes[host->node].id.v ? std::string(m_strings->view(m_nodes[host->node].id)) : std::string{};
+				const u32 active = host->tree.activePanel(panelIndex);
+				if (active < m_nodes.size() && m_nodes[active].id.v) value.activeTab.assign(m_strings->view(m_nodes[active].id));
+				return UiValue{ std::move(value) };
+			}
 			if (node.checkItem || node.checkBox || node.switchToggle || node.toggleButton) return UiValue{ node.checked };
 			if (node.slider || node.rating || node.progressBar) return UiValue{ static_cast<f64>(node.value) };
 			if (node.numberField || node.stepper) return UiValue{ static_cast<f64>(node.value) };
@@ -3176,6 +3745,40 @@ namespace xui {
 		for (Node& node : m_nodes) {
 			if (!node.id.v || m_strings->view(node.id) != id) continue;
 			bool changed = false;
+			if (node.dockPanel) {
+				const DockPanelValue* requested = std::get_if<DockPanelValue>(&valueToSet);
+				if (!requested) return false;
+				const u32 panelIndex = static_cast<u32>(&node - m_nodes.data());
+				DockHostState* host = dockHostForPanel(panelIndex);
+				if (!host || !host->tree.contains(panelIndex)) return false;
+				const bool wasFloating = host->tree.floating(panelIndex);
+				if (requested->floating) {
+					Rect floating = requested->bounds;
+					if (floating.w <= 0.f) floating.w = std::max(1.f, node.dockPreferredSize.x);
+					if (floating.h <= 0.f) floating.h = std::max(1.f, node.dockPreferredSize.y);
+					changed = wasFloating ? host->tree.moveFloating(panelIndex, floating) : host->tree.undock(panelIndex, floating);
+				}
+				else if (!requested->targetPanel.empty()) {
+					u32 target = 0xFFFFFFFFu;
+					for (u32 candidate : host->panelNodes)
+						if (candidate != panelIndex && m_nodes[candidate].id.v && m_strings->view(m_nodes[candidate].id) == requested->targetPanel) { target = candidate; break; }
+					if (target == 0xFFFFFFFFu) return false;
+					changed = host->tree.dock(panelIndex, target, requested->region);
+				}
+				else if (requested->active && !wasFloating) changed = host->tree.activate(panelIndex);
+				if (!requested->floating && !host->tree.floating(panelIndex)) {
+					changed |= host->tree.reorder(panelIndex, requested->order);
+					if (requested->active) changed |= host->tree.activate(panelIndex);
+				}
+				if (!changed) return true;
+				updateDockHostLayout(*host, true);
+				addDockDamage(*host);
+				if (notify) {
+					fireDockHandler(panelIndex, requested->floating ? node.undockHandler : node.dockHandler);
+					if (node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
+				}
+				return true;
+			}
 			if (node.checkItem || node.checkBox) {
 				const bool* value = std::get_if<bool>(&valueToSet); if (!value) return false;
 				changed = node.checked != *value; node.checked = *value;

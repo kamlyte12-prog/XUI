@@ -72,6 +72,25 @@ Split(direction: Horizontal)[ratio: 0.35, gutter: 8] {
 }
 ```
 
+### `DockHost` and `DockPanel`
+
+`DockHost` is a recursive split/tab workspace. Its direct children must be `DockPanel` nodes. Panels are declared in `.xui`; region placement, target, minimum/preferred sizes, closability, title, and icon are authored there. `region: "Center"` joins a target group as a tab; edge regions create nested split nodes. Drag headers/tabs to move panels, drop outside the host to create an in-app floating overlay, and drag a gutter to resize adjacent regions. Press Escape before releasing a drag to cancel it.
+
+The runtime paints host, header, tab, close, splitter, and preview chrome from synthetic `.xss` selectors (`DockHeader`, `DockTab`, `DockCloseButton`, `DockSplitter`, and `DockPreview`). These parts use the normal stylesheet/theme resolver. A full guide with syntax, events, values, style examples, and limitations is in [`docking.md`](docking.md).
+
+```xui
+DockHost[id: "workspace", width: 100%, height: 100%, minSize: 520x360] {
+  DockPanel(title: "Editor")[id: "editor", region: "Center", minSize: 240x180] {
+    Text("Editor content")
+  }
+  DockPanel(title: "Inspector")[id: "inspector", region: "Right", target: "editor", closable: true] {
+    Text("Panel content")
+  }
+}
+```
+
+`value(panelId)` returns a `DockPanelValue` with region, floating state, logical bounds, tab order, active state, host ID, and active tab ID. `setValue()` can dock/float/move/reorder/activate an open panel. Panel events are `dock`, `undock`, `resize`, `tabChange`, and `close`; query the value API from the event callback. Closed panels currently cannot be reopened through this API.
+
 ## Text and action controls
 
 ### `Text`
@@ -479,6 +498,6 @@ Limitations: inertial/momentum scrolling, touch/gesture input, scrollbar corner 
 
 ## Schema-recognized, runtime-unsupported objects
 
-The current core schema also recognizes names that are not materialized by `UiRuntime::build()`: `Grid`, `Stack`, `MenuBar`, `Menu`, `MenuItem`, `Popover`, `Modal`, `ContextMenu`, `DockSpace`, `IconButton`, `RangeSlider`, `ComboBox`, `Icon`, `TreeView`, `ListView`, `Table`, `Canvas`, `HUD`, `Crosshair`, `RadialMenu`, `HealthBar`, and `DamageNumber`. (`Toolbar` and `StatusBar` are implemented as plain horizontal containers.)
+The current core schema also recognizes names that are not materialized by `UiRuntime::build()`: `Grid`, `Stack`, `MenuBar`, `Menu`, `MenuItem`, `Popover`, `Modal`, `ContextMenu`, `IconButton`, `RangeSlider`, `ComboBox`, `Icon`, `TreeView`, `ListView`, `Table`, `Canvas`, `HUD`, `Crosshair`, `RadialMenu`, `HealthBar`, and `DamageNumber`. (`DockSpace` aliases the runtime `DockHost`; `Toolbar` and `StatusBar` are implemented as plain horizontal containers.)
 
 Use only the supported object list above in a document passed to `Xui::attach()`. Parser/schema entries are retained for future implementation and language validation; they are not native controls or hidden fallbacks.

@@ -46,7 +46,7 @@ namespace xui::sdf {
 		f32 rad[4] = { 0, 0, 0, 0 };   ///< px
 		f32 border = 0;              ///< px
 		f32 aux0 = 0, aux1 = 0;
-		u32 c0 = 0, c1 = 0;
+		u32 c0 = 0, c1 = 0, c2 = 0, c3 = 0;
 	};
 	/// Samples a texture at normalised (u,v). A8 textures return coverage in .a; RGBA8 return straight-alpha colour.
 	struct SampleResult { f32 r = 1, g = 1, b = 1, a = 1; };
@@ -60,9 +60,21 @@ namespace xui::sdf {
 			const f32 outer = coverage(d);
 			if (f.flags & FlagGradient) {
 				const f32 dx = f.aux0, dy = f.aux1;
-				const f32 den = std::fabs(f.hx * dx) + std::fabs(f.hy * dy);
-				const f32 t = den > 0 ? clamp01(0.5f + 0.5f * (f.u * dx + f.v * dy) / den) : 0.f;
-				return scale(premul(lerp(c0, c1, t)), outer);
+				f32 t = 0.f;
+				if (f.flags & FlagGradientConic) {
+					t = std::atan2(f.v, f.u) / 6.28318530718f + 0.5f - dx / 6.28318530718f;
+					t -= std::floor(t);
+				}
+				else if (f.flags & FlagGradientRadial) t = std::sqrt(f.u * f.u + f.v * f.v) / std::max(std::sqrt(f.hx * f.hx + f.hy * f.hy), 1e-4f);
+				else {
+					const f32 den = std::fabs(f.hx * dx) + std::fabs(f.hy * dy);
+					t = den > 0 ? 0.5f + 0.5f * (f.u * dx + f.v * dy) / den : 0.f;
+				}
+				const int stopCount = (f.flags & FlagGradientFourStops) ? 4 : (f.flags & FlagGradientThreeStops) ? 3 : 2;
+				t = clamp01(t) * f32(stopCount - 1);
+				const Rgba stops[4] = { c0, c1, unpack(f.c2), unpack(f.c3) };
+				const int segment = std::min(stopCount - 2, static_cast<int>(t));
+				return scale(premul(lerp(stops[segment], stops[segment + 1], t - f32(segment))), outer);
 			}
 			if (f.border <= 0.f) return scale(premul(c0), outer);
 			const f32 inner = coverage(d + f.border);           // 1 inside the fill region, 0 in the border band

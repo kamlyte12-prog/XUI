@@ -1,0 +1,5 @@
+Window(title: "Xui Button", size: 760x480) {
+    Column(gap: 10)[class: "page"] {
+        Button(label: "Continue") [class: "bordered"]
+    }
+}

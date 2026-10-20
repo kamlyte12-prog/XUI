@@ -47,7 +47,9 @@ namespace xui {
 	} // namespace
 
 	const TextLayout& TextSystem::layout(FontHandle fh, std::string_view text, f32 sizePx, f32 wrapWidth) {
-		u16 size = u16(std::clamp(sizePx, 1.f, 65535.f));
+		// Match GlyphAtlas::glyph(), which rounds its raster size. Shaping and raster bounds must
+		// use the same pixel size or tight Row children can be measured narrower than their glyphs.
+		u16 size = u16(std::clamp(std::lround(sizePx), 1l, 65535l));
 		CacheKey key{ fh.index, hashText(text), size,
 					 wrapWidth > 0 ? i32(std::floor(wrapWidth)) : 0x7FFFFFFF };
 
@@ -177,7 +179,22 @@ namespace xui {
 		}
 		widest = std::max(widest, pen);
 		out.lineWidths.back() = pen;
-		out.width = widest;
+		out.advanceWidth = widest;
+		// Intrinsic width must contain the rasterized glyphs, not just their pen advances.
+		// Column children are usually stretched, which hid this; auto-sized Row children can
+		// clip glyph ink and the atlas's one-pixel antialiasing border at exactly this width.
+		const f32 inkScale = f->scaleFor(f32(key.sizePx));
+		f32 inkLeft = 0.f, inkRight = widest;
+		for (const ShapedGlyph& glyph : out.glyphs) {
+			const Rect bounds = f->bounds(glyph.glyph);
+			if (bounds.empty()) continue;
+			const f32 rasterLeft = std::floor(bounds.x * inkScale) - 1.f;
+			const f32 rasterRight = std::ceil(bounds.right() * inkScale) + 1.f;
+			inkLeft = std::min(inkLeft, glyph.x + rasterLeft);
+			inkRight = std::max(inkRight, glyph.x + rasterRight);
+		}
+		out.inkLeft = inkLeft;
+		out.width = inkRight - inkLeft;
 		out.height = out.lineHeight * f32(out.lineStarts.size());
 
 		// Cache insert (clear-all when full: a miss storm is cheaper than LRU for small UI working sets).

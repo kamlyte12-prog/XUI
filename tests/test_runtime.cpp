@@ -15,6 +15,7 @@
 #include <iostream>
 #include <limits>
 #include <string>
+#include <thread>
 #include <unordered_map>
 
 using namespace xui;
@@ -263,6 +264,7 @@ Window(size: 400x220) {
     }
   }
 }
+
 )";
 	constexpr std::string_view xssSource = R"(
 Dropdown { resting: { bg: #223344, fg: #ffffff } }
@@ -304,6 +306,262 @@ Button { resting: { bg: #446688, fg: #ffffff } }
 	CHECK(ui.controlText("behind") == "One");
 	CHECK_EQ(events.size(), 2u);
 	CHECK(events.back() == "onFront");
+}
+
+TEST(ui_runtime_button_hugs_nested_children_and_respects_min_max) {
+	constexpr std::string_view xuiSource = R"(
+Window(size: 420x180) {
+  Row(gap: 12) { Button[id: "hug", class: "hug", press: onSubmit] { Text("Nested button content") } }
+}
+)";
+	constexpr std::string_view xssSource = R"(
+Button.hug { resting: { size: auto, pad: 12px, min-width: 90px, max-width: 240px, bg: #304860, fg: #ffffff, radius: 6px } }
+)";
+	StringInterner strings; auto document = parseXui(xuiSource, "button-hug.xui", strings);
+	CHECK(document.has_value()); if (!document) return;
+	auto styles = compileXss(xssSource, "button-hug.xss", strings);
+	CHECK(styles.has_value()); if (!styles) return;
+	SoftRenderer renderer; CHECK(renderer.init({ 420, 180, 1.f, nullptr, false }));
+	TextSystem text; CHECK(text.initAtlas(&renderer)); UiRuntime ui; std::string error;
+	const std::string fontBytes = readTestFont(); const FontHandle font = fontBytes.empty() ? FontHandle{} : text.loadFont(fontBytes, &error);
+	const bool built = ui.build(*document, *styles, strings, text, font, error);
+	if (!built) std::cerr << "nested button build: " << error << '\n';
+	CHECK(built); if (!error.empty()) return;
+	ui.layout(420.f, 180.f);
+	const Rect button = ui.bounds({ 2, 1 }), child = ui.bounds({ 3, 1 });
+	CHECK(button.w >= 90.f && button.w <= 240.f);
+	CHECK(button.w >= child.w + 20.f);
+	CHECK(button.h >= child.h + 20.f);
+}
+
+TEST(ui_runtime_xss_hover_transition_interpolates_without_idle_timer) {
+	constexpr std::string_view xuiSource = R"(Window(size: 240x120) { Button[id: "animated", width: 160px, height: 48px] })";
+	constexpr std::string_view xssSource = R"(
+Button { resting: { bg: #000000ff } hover: { bg: #ffffffff } transition: resting -> hover 120ms linear }
+)";
+	StringInterner strings; auto document = parseXui(xuiSource, "animation.xui", strings);
+	CHECK(document.has_value()); if (!document) return;
+	auto styles = compileXss(xssSource, "animation.xss", strings);
+	CHECK(styles.has_value()); if (!styles) return;
+	TextSystem text; UiRuntime ui; std::string error;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error)); if (!error.empty()) return;
+	ui.layout(240.f, 120.f); Painter painter;
+	auto paintColor = [&]() {
+		painter.begin(240, 120, 1.f); ui.paint(painter, 1.f);
+		const DrawList list = painter.finish(); return list.nVerts ? list.verts[0].c0 : 0u;
+	};
+	const u32 resting = paintColor();
+	const Rect rect = ui.bounds({ 1, 1 });
+	CHECK(ui.pointerMove({ rect.x + 8.f, rect.y + 8.f }));
+	(void)paintColor();
+	std::this_thread::sleep_for(std::chrono::milliseconds(65));
+	const u32 midway = paintColor();
+	CHECK(midway != resting);
+	CHECK(ui.nextTimerDelay() >= 0.0);
+	std::this_thread::sleep_for(std::chrono::milliseconds(90));
+	const u32 complete = paintColor();
+	CHECK(complete == 0xFFFFFFFFu);
+}
+
+TEST(ui_runtime_xss_keyframes_tick_only_while_visible_animation_runs) {
+	constexpr std::string_view xuiSource = R"(Window(size: 240x120) { Panel[id: "animated", class: "animated", width: 160px, height: 48px] })";
+	constexpr std::string_view xssSource = R"(
+Panel.animated { resting: { bg: #000000ff, animation: fade-in 120ms 1 linear } }
+keyframes fade-in { from { opacity: 0, bg: #000000ff } to { opacity: 1, bg: #ffffffff } }
+)";
+	StringInterner strings; auto document = parseXui(xuiSource, "keyframes.xui", strings);
+	CHECK(document.has_value()); if (!document) return;
+	auto styles = compileXss(xssSource, "keyframes.xss", strings);
+	CHECK(styles.has_value()); if (!styles) return;
+	TextSystem text; UiRuntime ui; std::string error;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error)); if (!error.empty()) return;
+	ui.layout(240.f, 120.f); Painter painter;
+	auto paintColor = [&]() {
+		painter.begin(240, 120, 1.f); ui.paint(painter, 1.f);
+		const DrawList list = painter.finish(); return list.nVerts ? list.verts[0].c0 : 0u;
+	};
+	const u32 initial = paintColor();
+	const f64 firstFrameDelay = ui.nextTimerDelay();
+	CHECK(firstFrameDelay > 0.0 && firstFrameDelay <= 1.0 / 60.0);
+	std::this_thread::sleep_for(std::chrono::milliseconds(65));
+	// No pointer or keyboard input is sent: the animation timer alone must wake the runtime.
+	CHECK(ui.updateTimers());
+	const u32 midway = paintColor();
+	CHECK(midway != initial);
+	std::this_thread::sleep_for(std::chrono::milliseconds(90));
+	CHECK(paintColor() == 0xFFFFFFFFu);
+	CHECK(ui.nextTimerDelay() < 0.0);
+}
+
+TEST(ui_runtime_keyframe_play_cancel_and_progress_value) {
+	constexpr std::string_view xuiSource = R"(Window(size: 240x120) { ProgressBar[id: "meter", class: "meter", value: 0, width: 180px, height: 18px] })";
+	constexpr std::string_view xssSource = R"(
+ProgressBar.meter { resting: { animation: fill 120ms paused linear } }
+keyframes fill { from { value: 0 } to { value: 1 } }
+)";
+	StringInterner strings; auto document = parseXui(xuiSource, "animation-control.xui", strings);
+	CHECK(document.has_value()); if (!document) return;
+	auto styles = compileXss(xssSource, "animation-control.xss", strings);
+	CHECK(styles.has_value()); if (!styles) return;
+	TextSystem text; UiRuntime ui; std::string error;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error)); if (!error.empty()) return;
+	ui.layout(240.f, 120.f); Painter painter;
+	auto paint = [&]() { painter.begin(240, 120, 1.f); ui.paint(painter, 1.f); (void)painter.finish(); };
+	paint();
+	CHECK_EQ(std::get<f64>(*ui.value("meter")), 0.0);
+	CHECK(ui.nextTimerDelay() < 0.0); // paused animations do not keep the event loop awake
+	CHECK(ui.playAnimation("meter", AnimationMode::Once));
+	CHECK(ui.nextTimerDelay() > 0.0 && ui.nextTimerDelay() <= 1.0 / 60.0);
+	std::this_thread::sleep_for(std::chrono::milliseconds(65));
+	CHECK(ui.updateTimers()); paint();
+	const f64 halfway = std::get<f64>(*ui.value("meter"));
+	CHECK(halfway > 0.0 && halfway < 1.0);
+	std::this_thread::sleep_for(std::chrono::milliseconds(90));
+	CHECK(ui.updateTimers()); paint();
+	CHECK_EQ(std::get<f64>(*ui.value("meter")), 1.0);
+	CHECK(ui.nextTimerDelay() < 0.0);
+	CHECK(ui.setValue("meter", 0.0));
+	CHECK(ui.playAnimation("meter", AnimationMode::Loop));
+	std::this_thread::sleep_for(std::chrono::milliseconds(65));
+	CHECK(ui.updateTimers()); paint();
+	const f64 loopValue = std::get<f64>(*ui.value("meter"));
+	CHECK(loopValue > 0.0 && loopValue < 1.0);
+	CHECK(ui.cancelAnimation("meter"));
+	paint();
+	CHECK(std::fabs(std::get<f64>(*ui.value("meter")) - loopValue) < 0.01);
+	CHECK(ui.nextTimerDelay() < 0.0);
+	CHECK(!ui.cancelAnimation("meter"));
+}
+
+TEST(ui_runtime_xss_cursor_overrides_widget_default) {
+	constexpr std::string_view xuiSource = R"(Window(size: 180x100) { Button[id: "custom-cursor", class: "crosshair", width: 120px, height: 40px] })";
+	constexpr std::string_view xssSource = R"(Button.crosshair { resting: { cursor: crosshair } })";
+	StringInterner strings; auto document = parseXui(xuiSource, "cursor.xui", strings);
+	CHECK(document.has_value()); if (!document) return;
+	auto styles = compileXss(xssSource, "cursor.xss", strings);
+	CHECK(styles.has_value()); if (!styles) return;
+	TextSystem text; UiRuntime ui; std::string error;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error)); if (!error.empty()) return;
+	ui.layout(180.f, 100.f); const Rect bounds = ui.bounds({ 1, 1 });
+	CHECK(ui.cursorAt({ bounds.x + 8.f, bounds.y + 8.f }) == CursorShape::Crosshair);
+}
+
+TEST(ui_runtime_menu_bar_is_a_styled_row_for_client_area_menus) {
+	constexpr std::string_view xuiSource = R"(
+Window(size: 260x120) {
+  MenuBar[class: "menu", width: 100%, height: 40px] {
+    Dropdown[id: "file-menu", options: "New|Open|Save", value: "Open", width: 112px, height: 32px]
+    Button(label: "Help", width: 72px, height: 32px)
+  }
+})";
+	constexpr std::string_view xssSource = R"(
+MenuBar.menu { resting: { bg: #202a3aff, pad: 4px, gap: 6px } }
+Dropdown { resting: { bg: #33445eff, fg: #ffffffff, radius: 4px } }
+)";
+	StringInterner strings; auto document = parseXui(xuiSource, "menu-bar.xui", strings);
+	CHECK(document.has_value()); if (!document) return;
+	auto styles = compileXss(xssSource, "menu-bar.xss", strings);
+	CHECK(styles.has_value()); if (!styles) return;
+	TextSystem text; UiRuntime ui; std::string error;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error)); if (!error.empty()) return;
+	ui.layout(260.f, 120.f);
+	const Rect menu = ui.bounds({ 1, 1 }), file = ui.bounds({ 2, 1 }), help = ui.bounds({ 3, 1 });
+	CHECK(menu.w == 260.f && menu.h == 40.f && file.x < help.x);
+	CHECK(ui.pointerDown({ file.x + 20.f, file.y + 12.f }));
+	CHECK(ui.pointerDown({ file.x + 20.f, file.bottom() + 70.f }));
+	CHECK(std::get<std::string>(*ui.value("file-menu")) == "Save");
+}
+
+TEST(ui_runtime_transform_moves_paint_and_hit_testing_together) {
+	constexpr std::string_view xuiSource = R"(Window(size: 180x100) { Button[id: "moved", class: "moved", width: 80px, height: 40px, press: onPress] })";
+	constexpr std::string_view xssSource = R"(Button.moved { resting: { bg: #ffffffff, transform: translate(40px, 0px) } })";
+	StringInterner strings; auto document = parseXui(xuiSource, "transform.xui", strings);
+	CHECK(document.has_value()); if (!document) return;
+	auto styles = compileXss(xssSource, "transform.xss", strings);
+	CHECK(styles.has_value()); if (!styles) return;
+	TextSystem text; UiRuntime ui; std::string error; u32 calls = 0;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error)); if (!error.empty()) return;
+	ui.setEventHandler([](void* context, std::string_view name) { if (name == "onPress") ++*static_cast<u32*>(context); }, &calls);
+	ui.layout(180.f, 100.f); Painter painter; painter.begin(180, 100, 1.f); ui.paint(painter); (void)painter.finish();
+	const Rect original = ui.bounds({ 1, 1 });
+	CHECK(ui.pointerDown({ original.x + original.w * 0.5f + 40.f, original.y + original.h * 0.5f }));
+	CHECK(ui.pointerUp({ original.x + original.w * 0.5f + 40.f, original.y + original.h * 0.5f }));
+	CHECK_EQ(calls, 1u);
+}
+
+TEST(ui_runtime_empty_textbox_displays_focused_blinking_caret) {
+	constexpr std::string_view xuiSource = R"(Window(size: 240x100) { TextBox[id: "field", placeholder: "Type here", width: 180px, height: 40px] })";
+	constexpr std::string_view xssSource = R"(TextBox { resting: { fg: #ffffffff, bg: #202a3aff, pad: 8px } })";
+	StringInterner strings; auto document = parseXui(xuiSource, "caret.xui", strings);
+	CHECK(document.has_value()); if (!document) return;
+	auto styles = compileXss(xssSource, "caret.xss", strings);
+	CHECK(styles.has_value()); if (!styles) return;
+	TextSystem text; NullRenderer renderer; CHECK(text.initAtlas(&renderer));
+	const std::string bytes = readTestFont(); std::string error;
+	const FontHandle font = bytes.empty() ? FontHandle{} : text.loadFont(bytes, &error);
+	UiRuntime ui; CHECK(ui.build(*document, *styles, strings, text, font, error)); if (!error.empty()) return;
+	ui.layout(240.f, 100.f); const Rect bounds = ui.bounds({ 1, 1 });
+	CHECK(ui.pointerDown({ bounds.x + 12.f, bounds.y + bounds.h * 0.5f }));
+	Painter painter;
+	auto hasCaret = [&]() {
+		painter.begin(240, 100, 1.f); ui.paint(painter, 1.f); const DrawList list = painter.finish();
+		for (u32 i = 0; i < list.nVerts; ++i) if (list.verts[i].prim == static_cast<u8>(Prim::Capsule)) return true;
+		return false;
+	};
+	CHECK(hasCaret());
+	std::this_thread::sleep_for(std::chrono::milliseconds(540));
+	CHECK(ui.updateTimers());
+	CHECK(!hasCaret());
+}
+
+TEST(ui_runtime_transparent_background_remains_hit_testable) {
+	constexpr std::string_view xuiSource = R"(Window(size: 180x100) { Button[id: "transparent", class: "alpha", width: 120px, height: 40px, press: onSubmit] })";
+	constexpr std::string_view xssSource = R"(Button.alpha { resting: { bg: #ff000000 } })";
+	StringInterner strings; auto document = parseXui(xuiSource, "alpha.xui", strings);
+	CHECK(document.has_value()); if (!document) return;
+	auto styles = compileXss(xssSource, "alpha.xss", strings);
+	CHECK(styles.has_value()); if (!styles) return;
+	TextSystem text; UiRuntime ui; std::string error; u32 calls = 0;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error)); if (!error.empty()) return;
+	ui.setEventHandler([](void* p, std::string_view) { ++*static_cast<u32*>(p); }, &calls);
+	ui.layout(180.f, 100.f); const Rect rect = ui.bounds({ 1, 1 });
+	CHECK(ui.pointerDown({ rect.x + 10.f, rect.y + 10.f })); CHECK(ui.pointerUp({ rect.x + 10.f, rect.y + 10.f }));
+	CHECK_EQ(calls, 1u);
+}
+
+TEST(ui_runtime_nested_tabs_respect_visibility_of_all_ancestors) {
+	constexpr std::string_view xuiSource = R"(
+Window(size: 320x180) {
+  Tabs[id: "outer", selected: 0, width: 100%, height: 100%] {
+    Tab(title: "Visible") {
+      Button[id: "visible", label: "Visible", press: onVisible, width: 180px, height: 44px]
+    }
+    Tab(title: "Hidden") {
+      Tabs[id: "inner", selected: 0, width: 100%, height: 100%] {
+        Tab(title: "Inner") {
+          Button[id: "hidden", label: "Must not intercept", press: onHidden, width: 180px, height: 44px]
+        }
+        Tab(title: "Other") { Text("Other page") }
+      }
+    }
+  }
+})";
+	StringInterner strings; auto document = parseXui(xuiSource, "nested-tabs.xui", strings);
+	CHECK(document.has_value()); if (!document) return;
+	auto styles = compileXss("", "nested-tabs.xss", strings);
+	CHECK(styles.has_value()); if (!styles) return;
+	TextSystem text; UiRuntime ui; std::string error;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error)); if (!error.empty()) return;
+	std::vector<std::string> events;
+	ui.setEventHandler([](void* context, std::string_view name) {
+		static_cast<std::vector<std::string>*>(context)->emplace_back(name);
+	}, &events);
+	ui.layout(320.f, 180.f);
+	const Rect active = ui.bounds({ 3, 1 });
+	const Vec2 point{ active.x + active.w * 0.5f, active.y + active.h * 0.5f };
+	CHECK(ui.pointerDown(point)); CHECK(ui.pointerUp(point));
+	CHECK_EQ(events.size(), std::size_t{ 1 });
+	if (!events.empty()) CHECK_EQ(events.front(), "onVisible");
 }
 
 TEST(cross_platform_example_assets_parse_and_build_in_shared_runtime) {
@@ -519,6 +777,116 @@ Text.clipped { resting: { size: 48px 20px, font-size: 13px, fg: #ffffff, pad: 0p
 	text.atlas()->shutdown(); renderer.shutdown();
 }
 
+TEST(ui_runtime_row_keeps_text_ink_inside_intrinsic_child_bounds) {
+	constexpr std::string_view xuiSource = R"(
+Window(title: "Xui Button", size: 760x480) {
+    Column(gap: 10)[class: "page"] { Text("Hello My Little Pony") }
+    Row(gap: 10)[class: "bar"] { Text("World! Extension") }
+    Row(gap: 10) { Text("!") }
+    Row(gap: 10) { Text("World!") }
+    Row[width: 140px] { Text("Long text wraps inside a narrow row without losing its final glyph.")[width: 120px] }
+    Row(gap: 10) { Button(label: "Non-text child") }
+}
+)";
+	constexpr std::string_view xssSource = R"(
+Row.bar { resting: { bg: #cbd5e1 } }
+)";
+	StringInterner strings; UiAssetBundle assets; std::string error;
+	CHECK(loadUiAssets(xuiSource, xssSource, strings, assets, error));
+	const std::string fontBytes = readTestFont();
+	if (fontBytes.empty()) return;
+	SoftRenderer renderer; CHECK(renderer.init({ 760, 480, 1.f, nullptr, false }));
+	TextSystem text; CHECK(text.initAtlas(&renderer));
+	const FontHandle font = text.loadFont(fontBytes, &error); CHECK(font.valid());
+	UiRuntime ui; CHECK(ui.build(assets.document, assets.styles, strings, text, font, error));
+	for (const f32 dpi : { 1.f, 1.25f, 1.5f }) {
+		ui.layout(760.f, 480.f, dpi);
+		CHECK(ui.bounds({ 2, 1 }).w > 700.f); // Column still stretches text on its cross axis.
+		for (const auto [index, sample] : { std::pair{ 4u, std::string_view("World! Extension") },
+			std::pair{ 6u, std::string_view("!") },
+			std::pair{ 8u, std::string_view("World!") } }) {
+			const Rect rect = ui.bounds({ index, 1 });
+			const TextLayout& measured = text.layout(font, sample, 16.f * dpi);
+			CHECK_EQ(measured.glyphs.size(), static_cast<std::size_t>(std::count_if(sample.begin(), sample.end(), [](char ch) { return ch != ' '; })));
+			CHECK_NEAR(rect.w, measured.width / dpi, 0.01f);
+		}
+	}
+	const Rect wrapped = ui.bounds({ 10, 1 });
+	CHECK_NEAR(wrapped.w, 120.f, 0.01f);
+	CHECK(wrapped.h > text.layout(font, "Long text wraps inside a narrow row without losing its final glyph.", 24.f, 180.f).lineHeight / 1.5f);
+	CHECK(ui.bounds({ 12, 1 }).w >= 96.f); // A button remains content-sized when hosted by Row.
+	Painter painter; painter.begin(1140, 720, 1.5f); text.beginFrame(); ui.paint(painter, 1.5f);
+	const DrawList list = painter.finish();
+	for (const auto [index, expectedGlyphs] : { std::pair{ 4u, 15u }, std::pair{ 6u, 1u }, std::pair{ 8u, 6u } }) {
+		const Rect rect = ui.bounds({ index, 1 });
+		bool matchedClip = false;
+		f32 rightmostGlyph = -std::numeric_limits<f32>::infinity();
+		for (u32 ci = 0; ci < list.nCmds; ++ci) {
+			const DrawCmd& command = list.cmds[ci];
+			if (!command.tex.valid() || command.clip.y != static_cast<i32>(std::floor(rect.y * 1.5f))) continue;
+			if (command.clip.x <= static_cast<i32>(std::floor(rect.x * 1.5f)) &&
+				command.clip.x + command.clip.w >= static_cast<i32>(std::ceil(rect.right() * 1.5f))) {
+				matchedClip = true;
+				CHECK_EQ(command.idxCount / 6, expectedGlyphs);
+				for (u32 ii = command.idxOffset; ii < command.idxOffset + command.idxCount; ++ii)
+					rightmostGlyph = std::max(rightmostGlyph, list.verts[list.idx[ii]].x);
+			}
+		}
+		CHECK(matchedClip);
+		if (index == 4u) {
+			const f32 firstWordRight = rect.x * 1.5f + text.layout(font, "World!", 24.f).width;
+			CHECK(rightmostGlyph > firstWordRight + 4.f); // the Extension glyphs must be in the actual draw geometry
+		}
+	}
+	text.atlas()->shutdown(); renderer.shutdown();
+}
+
+TEST(ui_runtime_row_keeps_two_long_text_children_on_one_visible_line) {
+	constexpr std::string_view xuiSource = R"(
+Window(size: 760x480) {
+    Row[class: "bar"] {
+        Text("World! Extension")[id: "first"]
+        Text("World! Extension")[id: "second"]
+    }
+}
+)";
+	constexpr std::string_view xssSource = R"(
+Row.bar { resting: { bg: #cbd5e1, fg: #111827 } }
+)";
+	StringInterner strings; UiAssetBundle assets; std::string error;
+	CHECK(loadUiAssets(xuiSource, xssSource, strings, assets, error));
+	const std::string fontBytes = readTestFont();
+	if (fontBytes.empty()) return;
+	SoftRenderer renderer; CHECK(renderer.init({ 760, 480, 1.f, nullptr, false }));
+	TextSystem text; CHECK(text.initAtlas(&renderer));
+	const FontHandle font = text.loadFont(fontBytes, &error); CHECK(font.valid());
+	UiRuntime ui; CHECK(ui.build(assets.document, assets.styles, strings, text, font, error));
+	ui.layout(760.f, 480.f, 1.f);
+	CHECK_EQ(ui.controlText("first"), "World! Extension");
+	CHECK_EQ(ui.controlText("second"), "World! Extension");
+	const Rect first = ui.bounds({ 2, 1 }), second = ui.bounds({ 3, 1 });
+	const TextLayout& natural = text.layout(font, "World! Extension", 16.f);
+	CHECK(first.w >= natural.width);
+	CHECK(second.w >= natural.width);
+	CHECK(second.x >= first.right());
+	CHECK_EQ(text.layout(font, "World! Extension", 16.f, first.w).lineStarts.size(), std::size_t(1));
+	CHECK_EQ(text.layout(font, "World! Extension", 16.f, second.w).lineStarts.size(), std::size_t(1));
+	Painter painter; painter.begin(760, 480, 1.f); text.beginFrame(); ui.paint(painter);
+	const DrawList list = painter.finish();
+	for (const Rect rect : { first, second }) {
+		bool found = false;
+		for (u32 ci = 0; ci < list.nCmds; ++ci) {
+			const DrawCmd& command = list.cmds[ci];
+			if (!command.tex.valid() || command.clip.x != static_cast<i32>(std::floor(rect.x)) ||
+				command.clip.y != static_cast<i32>(std::floor(rect.y))) continue;
+			found = true;
+			CHECK_EQ(command.idxCount / 6, 15u);
+		}
+		CHECK(found);
+	}
+	text.atlas()->shutdown(); renderer.shutdown();
+}
+
 TEST(ui_runtime_check_item_text_respects_padding_before_clip) {
 	constexpr std::string_view xuiSource = R"(
 Window(size: 240x80) { CheckItem(label: "Alpha", checked: false)[class: "item"] }
@@ -606,17 +974,31 @@ ColorPicker.control { resting: { size: 220px 36px, bg: #223344, fg: #ffffff } ho
 	CHECK(ui.pointerMove({ picker.x + 220.f, popupY + 110.f }));
 	CHECK(ui.controlColor("accent") != clickedColor);
 	ui.pointerUp({ picker.x + 220.f, popupY + 110.f });
-	CHECK(ui.pointerDown({ picker.x + 90.f,popupY + 315.f }));
+	CHECK(ui.pointerDown({ picker.x + 90.f,popupY + 283.f }));
 	CHECK(ui.keyDown(Key::A, static_cast<u8>(Mod::Ctrl), nullptr));
 	CHECK(ui.textInput("#ff00ff80"));
 	CHECK(ui.controlColor("accent").r > 0.99f && ui.controlColor("accent").b > 0.99f);
 	CHECK(ui.controlColor("accent").a > 0.49f && ui.controlColor("accent").a < 0.51f);
-	CHECK(ui.pointerDown({ picker.x + 30.f,popupY + 280.f }));
+	CHECK(ui.pointerDown({ picker.x + 90.f,popupY + 228.f })); // HEX -> RGB
+	ui.pointerUp({ picker.x + 90.f,popupY + 228.f });
+	CHECK(ui.controlText("accent").starts_with("rgba("));
+	CHECK(ui.pointerDown({ picker.x + 30.f,popupY + 283.f })); // R channel field
 	CHECK(ui.keyDown(Key::A, static_cast<u8>(Mod::Ctrl), nullptr));
 	CHECK(ui.textInput("0"));
 	CHECK(ui.controlColor("accent").r < 0.01f);
+	const Color channelEdited = ui.controlColor("accent");
+	for (int i = 0; i < 3; ++i) {
+		CHECK(ui.pointerDown({ picker.x + 90.f,popupY + 228.f }));
+		ui.pointerUp({ picker.x + 90.f,popupY + 228.f });
+		CHECK(ui.controlColor("accent") == channelEdited);
+	}
+	CHECK(ui.controlText("accent").starts_with("#"));
+	CHECK(ui.pointerDown({ picker.x + 90.f,popupY + 283.f })); // HEX field is active again
+	CHECK(ui.keyDown(Key::A, static_cast<u8>(Mod::Ctrl), nullptr));
+	CHECK(ui.textInput("#ff00ff80"));
+	CHECK(ui.controlColor("accent").r > 0.99f && ui.controlColor("accent").b > 0.99f);
 	CHECK(ui.pointerDown({ picker.x + 200.f,popupY + 225.f }));
-	CHECK(ui.controlText("accent").starts_with("rgba("));
+	CHECK(ui.controlText("accent").starts_with("rgb"));
 	CHECK(std::get<Color>(*ui.value("accent")) == ui.controlColor("accent"));
 	ui.pointerUp({ picker.x + 10.f,popupY + 170.f });
 }
@@ -937,7 +1319,7 @@ TEST(showcase_example_assets_parse_validate_and_build) {
 	CHECK(std::get<std::string>(*ui.value("display-name")) == "Guest!");
 
 	const Rect tabs = rectFor("demo-sections");
-	const Vec2 controlsHeader{ tabs.x + tabs.w * 0.3571f, tabs.y + 12.f };   // center of the third of seven equal tabs
+	const Vec2 controlsHeader{ tabs.x + tabs.w * 0.3125f, tabs.y + 12.f };   // center of the third of eight equal tabs
 	CHECK(ui.pointerDown(controlsHeader)); (void)ui.pointerUp(controlsHeader);
 	CHECK_EQ(std::get<u32>(*ui.value("demo-sections")), 2u);
 	ui.layout(1080, 760);
@@ -950,7 +1332,7 @@ TEST(showcase_example_assets_parse_validate_and_build) {
 	CHECK(ui.pointerDown(updatesPoint)); CHECK(ui.pointerUp(updatesPoint));
 	CHECK(!std::get<bool>(*ui.value("updates")));
 
-	const Vec2 pickersHeader{ tabs.x + tabs.w * 0.5f, tabs.y + 12.f };   // center of the fourth of seven equal tabs
+	const Vec2 pickersHeader{ tabs.x + tabs.w * 0.4375f, tabs.y + 12.f };   // center of the fourth of eight equal tabs
 	CHECK(ui.pointerDown(pickersHeader)); (void)ui.pointerUp(pickersHeader);
 	CHECK_EQ(std::get<u32>(*ui.value("demo-sections")), 3u);
 	ui.layout(1080, 760);
@@ -967,7 +1349,7 @@ TEST(showcase_example_assets_parse_validate_and_build) {
 	CHECK(ui.pointerDown({ color.x + 150.f, colorPopupY + 90.f }));
 	CHECK(std::get<Color>(*ui.value("accent-color")) != beforeColor);
 
-	const Vec2 containersHeader{ tabs.x + tabs.w * 0.7857f, tabs.y + 12.f };   // center of the sixth of seven equal tabs
+	const Vec2 containersHeader{ tabs.x + tabs.w * 0.6875f, tabs.y + 12.f };   // center of the sixth of eight equal tabs
 	CHECK(ui.pointerDown(containersHeader)); (void)ui.pointerUp(containersHeader);
 	CHECK_EQ(std::get<u32>(*ui.value("demo-sections")), 5u);
 	ui.layout(1080, 760);
@@ -1059,4 +1441,140 @@ TEST(ui_runtime_can_activate_stylesheet_themes) {
 	const DrawList draw = painter.finish();
 	CHECK(draw.nVerts >= 4u);
 	if (draw.nVerts >= 4u) CHECK_EQ(draw.verts[0].c0, Color::fromRGBA8(0x101010FFu).toRGBA8());
+}
+
+TEST(ui_runtime_titlebar_regions_caption_actions_and_drag_rules) {
+	constexpr std::string_view xuiSource = R"(
+Window(title: "Chrome", size: 320x180)[platformTopMenu: false] {
+  TitleBar[id: "bar", platformButtons: true, width: 100%, height: 36px] {
+    Button(label: "Menu")[id: "bar-button", width: 70px, height: 26px, press: onMenu]
+    Text("App")[id: "bar-title", grow: 1, height: 26px]
+  }
+  Text("Body")
+}
+)";
+	constexpr std::string_view xssSource = R"(
+TitleBar { resting: { bg: #172235 } }
+TitleButton { resting: { fg: #edf3fb } hover: { bg: #293d59 } pressed: { bg: #142033 } }
+)";
+	StringInterner strings;
+	auto document = parseXui(xuiSource, "chrome.xui", strings);
+	auto styles = compileXss(xssSource, "chrome.xss", strings);
+	CHECK(document.has_value()); CHECK(styles.has_value());
+	if (!document || !styles) return;
+	TextSystem text; UiRuntime ui; std::string error;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error));
+	if (!error.empty()) { std::printf("  build error: %s\n", error.c_str()); return; }
+	CHECK(ui.hasTitleBars());
+
+	NullPlatform platform;
+	const WindowHandle window = platform.createWindow({});
+	ui.setPlatformWindow(&platform, window);
+	ui.layout(320.f, 180.f);
+
+	const std::vector<TitleBarRegion> regions = ui.titleBarRegions();
+	CHECK_EQ(regions.size(), 1u);
+	if (regions.empty()) return;
+	const TitleBarRegion& region = regions.front();
+	CHECK_EQ(region.bar.w, 320.f);
+	CHECK_EQ(region.bar.h, 36.f);
+	CHECK(region.buttons);
+	// Caption zones: three equal zones ending at the bar's right edge, min | max | close.
+	CHECK_NEAR(region.close.right(), region.bar.right(), 0.5f);
+	CHECK_NEAR(region.close.w, region.maximize.w, 0.5f);
+	CHECK_NEAR(region.minimize.right(), region.maximize.x, 0.5f);
+	CHECK(region.minimize.x < region.maximize.x && region.maximize.x < region.close.x);
+
+	const Vec2 zoneCenter = [](const Rect& r) { return Vec2{ r.x + r.w * 0.5f, r.y + r.h * 0.5f }; };
+	// Close triggers once, on release inside the zone.
+	ui.pointerDown(zoneCenter(region.close));
+	CHECK_EQ(platform.closeCount(), 0u);
+	ui.pointerUp(zoneCenter(region.close));
+	CHECK_EQ(platform.closeCount(), 1u);
+	// Maximize toggles and reports the resulting state.
+	ui.pointerDown(zoneCenter(region.maximize)); ui.pointerUp(zoneCenter(region.maximize));
+	CHECK_EQ(platform.maximizeToggleCount(), 1u);
+	CHECK(platform.windowMaximized(window));
+	ui.pointerDown(zoneCenter(region.maximize)); ui.pointerUp(zoneCenter(region.maximize));
+	CHECK_EQ(platform.maximizeToggleCount(), 2u);
+	CHECK(!platform.windowMaximized(window));
+	// Minimize.
+	ui.pointerDown(zoneCenter(region.minimize)); ui.pointerUp(zoneCenter(region.minimize));
+	CHECK_EQ(platform.minimizeCount(), 1u);
+	// Releasing outside the zone cancels the caption action.
+	ui.pointerDown(zoneCenter(region.minimize));
+	ui.pointerUp({ zoneCenter(region.minimize).x, region.bar.bottom() + 10.f });
+	CHECK_EQ(platform.minimizeCount(), 1u);
+
+	// Double-click on the bar's empty stretch (the growing title text is non-interactive)
+	// toggles maximize on the second press (press-to-press window).
+	ui.pointerDown({ region.bar.x + 100.f, region.bar.y + 18.f });
+	ui.pointerUp({ region.bar.x + 100.f, region.bar.y + 18.f });
+	CHECK_EQ(platform.maximizeToggleCount(), 2u);
+	CHECK_EQ(platform.systemMoveCount(), 1u);
+	ui.pointerDown({ region.bar.x + 101.f, region.bar.y + 19.f });
+	CHECK_EQ(platform.maximizeToggleCount(), 3u);
+	CHECK(platform.windowMaximized(window));
+	ui.pointerUp({ region.bar.x + 101.f, region.bar.y + 19.f });
+	// A plain press elsewhere starts a native move but never toggles.
+	ui.pointerDown({ region.bar.x + 170.f, region.bar.y + 18.f });
+	CHECK_EQ(platform.systemMoveCount(), 2u);
+	CHECK_EQ(platform.maximizeToggleCount(), 3u);
+	ui.pointerUp({ region.bar.x + 170.f, region.bar.y + 18.f });
+	// A non-interactive child (the bar title text) still drags the window.
+	const Rect titleRect = ui.bounds(NodeId{ 3, 1 });
+	ui.pointerDown({ titleRect.x + titleRect.w * 0.5f, titleRect.y + titleRect.h * 0.5f });
+	CHECK_EQ(platform.systemMoveCount(), 3u);
+	ui.pointerUp({ titleRect.x + titleRect.w * 0.5f, titleRect.y + titleRect.h * 0.5f });
+
+	// Interactive children keep their clicks: no window move, no caption action.
+	u32 menuPresses = 0;
+	ui.setEventHandler([](void* ctx, std::string_view) { ++*static_cast<u32*>(ctx); }, &menuPresses);
+	const Rect buttonRect = ui.bounds(NodeId{ 2, 1 });
+	const Vec2 buttonCenter{ buttonRect.x + buttonRect.w * 0.5f, buttonRect.y + buttonRect.h * 0.5f };
+	ui.pointerDown(buttonCenter);
+	ui.pointerUp(buttonCenter);
+	CHECK_EQ(menuPresses, 1u);
+	CHECK_EQ(platform.systemMoveCount(), 3u);
+	CHECK_EQ(platform.closeCount(), 1u);
+
+	// The bar and its caption chrome paint without crashing.
+	Painter painter; painter.begin(320, 180, 1.f);
+	ui.paint(painter);
+	const DrawList draw = painter.finish();
+	CHECK(draw.nVerts > 0u);
+}
+
+TEST(ui_runtime_titlebar_requires_matching_platform_top_menu) {
+	TextSystem text;
+	{
+		StringInterner strings;
+		auto document = parseXui(R"(Window(size: 200x120)[platformTopMenu: false] { Text("x") })", "chrome-missing.xui", strings);
+		auto styles = compileXss("", "chrome-missing.xss", strings);
+		CHECK(document.has_value() && styles.has_value());
+		if (document && styles) {
+			UiRuntime ui; std::string error;
+			CHECK(!ui.build(*document, *styles, strings, text, {}, error));
+			CHECK(error.find("TitleBar") != std::string::npos);
+		}
+	}
+	{
+		StringInterner strings;
+		auto document = parseXui(R"(Window(size: 200x120) { TitleBar[width: 100%, height: 32px] { Text("t") } })", "chrome-extra.xui", strings);
+		auto styles = compileXss("", "chrome-extra.xss", strings);
+		CHECK(document.has_value() && styles.has_value());
+		if (document && styles) {
+			UiRuntime ui; std::string error;
+			CHECK(!ui.build(*document, *styles, strings, text, {}, error));
+			CHECK(error.find("platformTopMenu") != std::string::npos);
+		}
+	}
+	{
+		StringInterner strings;
+		auto withAttr = parseXui(R"(Window(size: 200x120)[platformTopMenu: false] { TitleBar[width: 100%, height: 32px] { Text("t") } })", "chrome-a.xui", strings);
+		auto withoutAttr = parseXui(R"(Window(size: 200x120) { Text("x") })", "chrome-b.xui", strings);
+		CHECK(withAttr.has_value() && withoutAttr.has_value());
+		if (withAttr) CHECK(documentUsesClientChrome(*withAttr, strings));
+		if (withoutAttr) CHECK(!documentUsesClientChrome(*withoutAttr, strings));
+	}
 }

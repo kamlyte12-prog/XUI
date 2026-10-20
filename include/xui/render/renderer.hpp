@@ -2,6 +2,7 @@
 /// @file renderer.hpp  The backend-agnostic Renderer interface. Widgets and application code never see a backend type.
 #include <xui/core/color.hpp>
 #include <xui/render/drawlist.hpp>
+#include <string_view>
 
 namespace xui {
 
@@ -53,6 +54,8 @@ namespace xui {
 		virtual void present() = 0;
 
 		virtual RendererCaps caps() const = 0;
+		/// Optional backend diagnostic from the last failed initialization or rendering operation.
+		virtual std::string_view lastError() const { return {}; }
 		virtual void setCustomHandler(CustomDrawFn, void*) {}
 	};
 }

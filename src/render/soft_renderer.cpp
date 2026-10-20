@@ -83,7 +83,8 @@ namespace xui {
 		const i32 px0 = std::max(cx0, static_cast<i32>(std::ceil(tl.x - 0.5f))), px1 = std::min(cx1, static_cast<i32>(std::ceil(br.x - 0.5f)));
 		const i32 py0 = std::max(cy0, static_cast<i32>(std::ceil(tl.y - 0.5f))), py1 = std::min(cy1, static_cast<i32>(std::ceil(br.y - 0.5f)));
 		sdf::Frag f;
-		f.prim = tl.prim; f.flags = tl.flags; f.hx = tl.hx; f.hy = tl.hy; f.aux0 = tl.aux0; f.aux1 = tl.aux1; f.c0 = tl.c0; f.c1 = tl.c1;
+		f.prim = tl.prim; f.flags = tl.flags; f.hx = tl.hx; f.hy = tl.hy; f.aux0 = tl.aux0; f.aux1 = tl.aux1;
+		f.c0 = tl.c0; f.c1 = tl.c1; f.c2 = tl.c2; f.c3 = tl.c3;
 		for (int i = 0; i < 4; ++i) f.rad[i] = f32(tl.rad[i]) * 0.25f;
 		f.border = f32(tl.border) * 0.25f;
 		auto sampler = [&](f32 u, f32 v) -> sdf::SampleResult {

@@ -47,6 +47,27 @@ namespace xui {
 		u32 clipboardWriteCount() const { return m_clipboardWrites; }
 		u32 pendingTicks() const { return m_pendingTicks; }
 		void setDpiScale(f32 s) { m_dpi = s; }
+
+		// ---- custom chrome recording (TitleBar support) --------------------------------------------
+		bool setDecorated(WindowHandle, bool decorated) override { m_lastDecorated = decorated; ++m_setDecoratedCount; return true; }
+		bool beginSystemMove(WindowHandle) override { ++m_systemMoveCount; return true; }
+		bool beginSystemResize(WindowHandle, WindowEdge edge) override { m_lastResizeEdge = edge; ++m_systemResizeCount; return true; }
+		void minimizeWindow(WindowHandle) override { ++m_minimizeCount; }
+		bool toggleMaximize(WindowHandle) override { m_maximized = !m_maximized; ++m_maximizeToggleCount; return m_maximized; }
+		bool windowMaximized(WindowHandle) const override { return m_maximized; }
+		void closeWindow(WindowHandle) override { ++m_closeCount; }
+
+		bool lastDecorated() const { return m_lastDecorated; }
+		u32 setDecoratedCount() const { return m_setDecoratedCount; }
+		u32 systemMoveCount() const { return m_systemMoveCount; }
+		u32 systemResizeCount() const { return m_systemResizeCount; }
+		WindowEdge lastResizeEdge() const { return m_lastResizeEdge; }
+		u32 minimizeCount() const { return m_minimizeCount; }
+		u32 maximizeToggleCount() const { return m_maximizeToggleCount; }
+		u32 closeCount() const { return m_closeCount; }
+		void resetChromeCounts() {
+			m_setDecoratedCount = m_systemMoveCount = m_systemResizeCount = m_minimizeCount = m_maximizeToggleCount = m_closeCount = 0;
+		}
 		/// Simulate a resize: stores the new size and queues Resize + DpiChange events.
 		void simulateResize(WindowHandle w, u32 logicalW, u32 logicalH, f32 newDpi = 0.f);
 		/// Simulate a full click (down + up at the same position) with given modifiers.
@@ -68,6 +89,12 @@ namespace xui {
 		f32 m_dpi = 1.f;
 		f64 m_time = 0;
 		u32 m_cursorCount = 0, m_clipboardWrites = 0, m_pendingTicks = 0;
+		// custom chrome recording
+		bool m_lastDecorated = true;
+		WindowEdge m_lastResizeEdge = WindowEdge::Left;
+		bool m_maximized = false;
+		u32 m_setDecoratedCount = 0, m_systemMoveCount = 0, m_systemResizeCount = 0;
+		u32 m_minimizeCount = 0, m_maximizeToggleCount = 0, m_closeCount = 0;
 	};
 
 } // namespace xui

@@ -38,8 +38,11 @@ namespace xui {
 	enum class Mod : u8 { Shift = 1, Ctrl = 2, Alt = 4, Super = 8 };
 	enum class MouseButton : u8 { Left = 0, Right, Middle, X1, X2 };
 	enum class CursorShape : u8 {
-		Arrow, IBeam, Crosshair, Hand, ResizeEW, ResizeNS, ResizeNWSE, ResizeNESW, ResizeAll, NotAllowed, Hidden
+		Arrow, IBeam, Crosshair, Hand, ResizeEW, ResizeNS, ResizeNWSE, ResizeNESW, ResizeAll, NotAllowed, Hidden, Grab, Grabbing
 	};
+
+	/// Window edge/corner for client-driven resizing (beginSystemResize).
+	enum class WindowEdge : u8 { Left, Right, Top, Bottom, TopLeft, TopRight, BottomLeft, BottomRight };
 
 	enum class EventType : u8 {
 		None = 0,
@@ -76,6 +79,10 @@ namespace xui {
 		bool visible = true;
 		bool glContext = false;            ///< ask the platform for an OpenGL context on this window (WGL/GLFW)
 		bool alwaysOnTop = false;
+		/// Native decorations (title bar, caption buttons, frame). False asks for a borderless
+		/// window so the application can draw its own chrome (see the TitleBar widget). A backend
+		/// that cannot host custom chrome keeps decorations and reports it through setDecorated().
+		bool decorations = true;
 	};
 
 	struct PlatformDesc {
@@ -117,6 +124,28 @@ namespace xui {
 		/// Such backends invoke this hook from their size callback to render each live step.
 		/// Default no-op keeps headless and non-modal backends unchanged.
 		virtual void setLiveResizeHook(WindowHandle, void (*)(void*), void*) {}
+
+		// ---- client-drawn window chrome (TitleBar support) ---------------------------------------
+		// All defaults are conservative no-ops: a backend without custom-chrome support simply
+		// keeps its native decorations and the framework reports the fallback.
+
+		/// Show/hide native decorations on a live window. Returns false when the backend cannot
+		/// host custom chrome (native chrome is then retained and callers must not draw over it).
+		virtual bool setDecorated(WindowHandle, bool decorated) { return !decorated ? false : true; }
+		/// Begin a native interactive window move (the OS runs the drag loop). Returns false when
+		/// unsupported; the window then cannot be moved from client chrome on this backend.
+		virtual bool beginSystemMove(WindowHandle) { return false; }
+		/// Begin a native interactive resize from a window edge/corner. Returns false when unsupported.
+		virtual bool beginSystemResize(WindowHandle, WindowEdge) { return false; }
+		/// Minimize (iconify) the window.
+		virtual void minimizeWindow(WindowHandle) {}
+		/// Toggle maximize/restore. Returns the resulting maximized state.
+		virtual bool toggleMaximize(WindowHandle) { return false; }
+		/// Current maximize/restore state (for painting a restore glyph on client chrome).
+		virtual bool windowMaximized(WindowHandle) const { return false; }
+		/// Request a window close (equivalent to the user clicking the native close button);
+		/// delivered as a CloseRequest/Quit event, not an immediate teardown.
+		virtual void closeWindow(WindowHandle) {}
 	};
 
 } // namespace xui

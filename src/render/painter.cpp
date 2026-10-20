@@ -11,6 +11,7 @@ namespace xui {
 		m_dpi = dpi > 0 ? dpi : 1.f; m_w = w; m_h = h; m_layer = 0; m_nextCustom = 1;
 		m_cellsX = (w + (1u << kCellShift) - 1) >> kCellShift; m_cellsY = (h + (1u << kCellShift) - 1) >> kCellShift;
 		m_clips.clear(); m_clips.push_back({ 0, 0, static_cast<i32>(w), static_cast<i32>(h) });
+		m_transforms.clear(); m_transforms.push_back({});
 		m_opacity.clear(); m_verts.clear(); m_prims.clear(); m_indices.clear(); m_cmds.clear();
 		for (Layer& l : m_layers) {
 			l.batches.clear(); l.entries.clear(); l.used = false; l.cellHead.assign(std::size_t(m_cellsX) * m_cellsY, kNil);
@@ -19,14 +20,21 @@ namespace xui {
 	}
 	void Painter::setLayer(u32 l) { m_layer = std::min(l, kMaxLayers - 1); }
 	void Painter::pushClip(Rect r) {
-		ClipI c{ static_cast<i32>(std::floor(r.x * m_dpi)), static_cast<i32>(std::floor(r.y * m_dpi)),
-				static_cast<i32>(std::ceil((r.x + r.w) * m_dpi)), static_cast<i32>(std::ceil((r.y + r.h) * m_dpi)) };
+		const Mat3& transform = m_transforms.back();
+		const Vec2 corners[] = { transform.apply({r.x, r.y}), transform.apply({r.right(), r.y}),
+			transform.apply({r.right(), r.bottom()}), transform.apply({r.x, r.bottom()}) };
+		f32 x0 = corners[0].x, x1 = corners[0].x, y0 = corners[0].y, y1 = corners[0].y;
+		for (const Vec2 p : corners) { x0 = std::min(x0, p.x); x1 = std::max(x1, p.x); y0 = std::min(y0, p.y); y1 = std::max(y1, p.y); }
+		ClipI c{ static_cast<i32>(std::floor(x0 * m_dpi)), static_cast<i32>(std::floor(y0 * m_dpi)),
+				static_cast<i32>(std::ceil(x1 * m_dpi)), static_cast<i32>(std::ceil(y1 * m_dpi)) };
 		const ClipI& t = m_clips.back();
 		c = { std::max(c.x0, t.x0), std::max(c.y0, t.y0), std::min(c.x1, t.x1), std::min(c.y1, t.y1) };
 		if (c.empty()) c = { t.x0, t.y0, t.x0, t.y0 };          // canonical empty clip: everything inside is culled
 		m_clips.push_back(c);
 	}
 	void Painter::popClip() { if (m_clips.size() > 1) m_clips.pop_back(); }
+	void Painter::pushTransform(Mat3 logical) { m_transforms.push_back(m_transforms.back() * logical); }
+	void Painter::popTransform() { if (m_transforms.size() > 1) m_transforms.pop_back(); }
 	void Painter::pushOpacity(f32 a) { m_opacity.push_back((m_opacity.empty() ? 1.f : m_opacity.back()) * std::min(std::max(a, 0.f), 1.f)); }
 	void Painter::popOpacity() { if (!m_opacity.empty()) m_opacity.pop_back(); }
 
@@ -35,6 +43,11 @@ namespace xui {
 	Vertex Painter::makeVertex(f32 x, f32 y) const { Vertex v; v.x = x; v.y = y; return v; }
 
 	bool Painter::admit(f32 x0, f32 y0, f32 x1, f32 y1, ClipI& b) const {
+		const Mat3& transform = m_transforms.back();
+		const Vec2 corners[] = { transform.apply({x0 / m_dpi, y0 / m_dpi}), transform.apply({x1 / m_dpi, y0 / m_dpi}),
+			transform.apply({x1 / m_dpi, y1 / m_dpi}), transform.apply({x0 / m_dpi, y1 / m_dpi}) };
+		x0 = x1 = corners[0].x * m_dpi; y0 = y1 = corners[0].y * m_dpi;
+		for (const Vec2 p : corners) { x0 = std::min(x0, p.x * m_dpi); x1 = std::max(x1, p.x * m_dpi); y0 = std::min(y0, p.y * m_dpi); y1 = std::max(y1, p.y * m_dpi); }
 		const ClipI& c = m_clips.back();
 		b = { std::max(c.x0, static_cast<i32>(std::floor(x0))), std::max(c.y0, static_cast<i32>(std::floor(y0))),
 			 std::min(c.x1, static_cast<i32>(std::ceil(x1))), std::min(c.y1, static_cast<i32>(std::ceil(y1))) };
@@ -73,19 +86,25 @@ namespace xui {
 
 	void Painter::quad(const Vertex& t, f32 x0, f32 y0, f32 x1, f32 y1, f32 u0, f32 v0, f32 u1, f32 v1) {
 		Vertex v = t;
-		v.x = x0; v.y = y0; v.u = u0; v.v = v0; m_verts.push_back(v);   // TL
-		v.x = x1; v.y = y0; v.u = u1; v.v = v0; m_verts.push_back(v);   // TR
-		v.x = x1; v.y = y1; v.u = u1; v.v = v1; m_verts.push_back(v);   // BR
-		v.x = x0; v.y = y1; v.u = u0; v.v = v1; m_verts.push_back(v);   // BL
+		const Mat3& transform = m_transforms.back();
+		auto write = [&](f32 x, f32 y, f32 u, f32 vv) {
+			const Vec2 p = transform.apply({ x / m_dpi, y / m_dpi });
+			v.x = p.x * m_dpi; v.y = p.y * m_dpi; v.u = u; v.v = vv; m_verts.push_back(v);
+		};
+		write(x0, y0, u0, v0); // TL
+		write(x1, y0, u1, v0); // TR
+		write(x1, y1, u1, v1); // BR
+		write(x0, y1, u0, v1); // BL
 	}
 
 	// ---- primitives -----------------------------------------------------------------------------------------
 	void Painter::fillRect(Rect r, Color c, CornerRadii radius) { RectStyle s; s.fill = c; s.radius = radius; roundRect(r, s); }
 
 	void Painter::roundRect(Rect r, const RectStyle& s) {
-		if (s.gradient && s.borderWidth > 0 && s.border.a > 0) {        // gradient + border = gradient prim, then a ring prim on top
+		const bool gradient = s.gradient || s.gradientStopCount >= 2;
+		if (gradient && s.borderWidth > 0 && s.border.a > 0) {        // gradient + border = gradient prim, then a ring prim on top
 			RectStyle g = s; g.borderWidth = 0; rectPrim(r, g, false);
-			RectStyle ring = s; ring.gradient = false; ring.fill = Color{ 0, 0, 0, 0 }; rectPrim(r, ring, true);
+			RectStyle ring = s; ring.gradient = false; ring.gradientStopCount = 0; ring.fill = Color{ 0, 0, 0, 0 }; rectPrim(r, ring, true);
 			return;
 		}
 		rectPrim(r, s, false);
@@ -93,8 +112,9 @@ namespace xui {
 
 	void Painter::rectPrim(Rect r, const RectStyle& s, bool) {
 		++m_stats.prims;
-		const bool hasBorder = s.borderWidth > 0 && s.border.a > 0 && !s.gradient;
-		if (!s.gradient && s.fill.a <= 0 && !hasBorder) { ++m_stats.culled; return; }
+		const bool gradient = s.gradient || s.gradientStopCount >= 2;
+		const bool hasBorder = s.borderWidth > 0 && s.border.a > 0 && !gradient;
+		if (!gradient && s.fill.a <= 0 && !hasBorder) { ++m_stats.culled; return; }
 		const f32 x0 = snapv(r.x * m_dpi), y0 = snapv(r.y * m_dpi), x1 = snapv((r.x + r.w) * m_dpi), y1 = snapv((r.y + r.h) * m_dpi);
 		if (x1 <= x0 || y1 <= y0) { ++m_stats.culled; return; }
 		ClipI b;
@@ -103,10 +123,23 @@ namespace xui {
 		const f32 hx = (x1 - x0) * 0.5f, hy = (y1 - y0) * 0.5f, cx = x0 + hx, cy = y0 + hy, maxR = std::min(hx, hy);
 		Vertex t;
 		t.prim = static_cast<u8>(::xui::Prim::RoundRect); t.hx = hx; t.hy = hy;
-		t.c0 = packAlpha(s.fill); t.c1 = packAlpha(s.gradient ? s.gradientEnd : s.border);
+		t.c0 = packAlpha(gradient && s.gradientStopCount >= 2 ? s.gradientStops[0] : s.fill);
+		t.c1 = packAlpha(gradient && s.gradientStopCount >= 2 ? s.gradientStops[1] : (s.gradient ? s.gradientEnd : s.border));
+		t.c2 = packAlpha(s.gradientStopCount >= 3 ? s.gradientStops[2] : (s.gradientStopCount >= 2 ? s.gradientStops[1] : Color{}));
+		t.c3 = packAlpha(s.gradientStopCount >= 4 ? s.gradientStops[3] : (s.gradientStopCount >= 2 ? s.gradientStops[s.gradientStopCount - 1] : Color{}));
 		t.rad[0] = q4(std::min(s.radius.tl * m_dpi, maxR)); t.rad[1] = q4(std::min(s.radius.tr * m_dpi, maxR));
 		t.rad[2] = q4(std::min(s.radius.br * m_dpi, maxR)); t.rad[3] = q4(std::min(s.radius.bl * m_dpi, maxR));
-		if (s.gradient) { t.flags |= FlagGradient; t.aux0 = std::cos(s.gradientAngle); t.aux1 = std::sin(s.gradientAngle); }
+		if (gradient) {
+			t.flags |= FlagGradient;
+			if (s.gradientStopCount >= 2) {
+				if (s.gradientKind == 1) t.flags |= FlagGradientRadial;
+				else if (s.gradientKind == 2) t.flags |= FlagGradientConic;
+				if (s.gradientStopCount == 3) t.flags |= FlagGradientThreeStops;
+				else if (s.gradientStopCount >= 4) t.flags |= FlagGradientFourStops;
+			}
+			if (s.gradientStopCount >= 2 && s.gradientKind == 2) t.aux0 = s.gradientAngle;
+			else { t.aux0 = std::cos(s.gradientAngle); t.aux1 = std::sin(s.gradientAngle); }
+		}
 		else if (hasBorder) {
 			f32 bw = s.borderWidth * m_dpi; if (m_opt.snap) bw = std::max(1.f, std::round(bw));
 			t.border = q4(std::min(bw, maxR));

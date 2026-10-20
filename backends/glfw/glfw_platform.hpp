@@ -28,11 +28,33 @@ public:
 	std::string clipboardText() const override;
 	void requestRedraw(xui::WindowHandle) override;
 	void setLiveResizeHook(xui::WindowHandle, void (*fn)(void*), void*) override;
-private:
+
+	// ---- custom window chrome -------------------------------------------------------------------
+	// Windows: full support (native frame removed, NCHITTEST resize borders, native drag/snap,
+	// synchronous maximize). Other platforms: GLFW can hide decorations, but provides no native
+	// window-move API, so setDecorated(false) refuses and native chrome is kept (framework policy).
+	bool setDecorated(xui::WindowHandle, bool decorated) override;
+	bool beginSystemMove(xui::WindowHandle) override;
+	bool beginSystemResize(xui::WindowHandle, xui::WindowEdge) override;
+	void minimizeWindow(xui::WindowHandle) override;
+	bool toggleMaximize(xui::WindowHandle) override;
+	bool windowMaximized(xui::WindowHandle) const override;
+	void closeWindow(xui::WindowHandle) override;
+
+	/// One GLFW window. Public so the file-local Win32 chrome helpers in the .cpp can operate
+	/// on records without exposing windows.h types in this header.
 	struct Window { GLFWwindow* native = nullptr; xui::WindowHandle handle; GlfwPlatform* owner = nullptr;
-	                void (*liveResizeFn)(void*) = nullptr; void* liveResizeContext = nullptr; };
+	                void (*liveResizeFn)(void*) = nullptr; void* liveResizeContext = nullptr;
+	                bool customChrome = false; void* chromeState = nullptr; };
+
+private:
 	static Window* record(GLFWwindow* window);
 	static void push(GLFWwindow* window, const xui::Event& event);
+#ifdef _WIN32
+	// Windows client-chrome subclass; implemented in the .cpp where windows.h is available.
+	static void installChrome(Window& window);
+	static void removeChrome(Window& window);
+#endif
 	static void onSize(GLFWwindow*, int, int);
 	static void onCursor(GLFWwindow*, double, double);
 	static void onScroll(GLFWwindow*, double, double);

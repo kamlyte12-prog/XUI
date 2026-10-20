@@ -2,6 +2,39 @@
 
 This file records project changes, design decisions, trade-offs, current status, and next steps. It is updated as implementation work lands.
 
+## Custom window chrome: `platformTopMenu` + `TitleBar` — 2026-10-19
+
+### Audit and findings
+
+- Task: hide the demo window's native decorations and provide a custom draggable top menu with real window controls, as reusable framework capability rather than demo-only code. A prior decision set the placement: the option lives as a `.xui` `Window` attribute (`platformTopMenu: false`), the framework provides optional caption buttons, and platforms that cannot host custom chrome keep native chrome.
+- Audited `include/xui/platform/platform.hpp` (no decoration/drag/window-control surface existed), `src/ui/xui.cpp` (window creation happens before `runtime.build()`, so the document must be consulted first), the GLFW backend (GLFW 3.5.1; `glfw3.h` no longer includes `<windows.h>`), and the runtime's widget materialization/dock-chrome patterns (`DockHeader`/`DockCloseButton` style parts, `Tabs` header reserve trick).
+
+### Changes and decisions
+
+- **`platform_interface`:** added `WindowDesc::decorations`, `WindowEdge`, and `Platform::setDecorated/beginSystemMove/beginSystemResize/minimizeWindow/toggleMaximize/windowMaximized/closeWindow` with conservative default implementations, so custom backends keep compiling. All window actions flow through this interface; no GLFW/OS calls in the demo, runtime, or widget code.
+- **GLFW backend:** on Windows, a `WM_NCCALCSIZE`/`WM_NCHITTEST` subclass strips the native frame while keeping resize borders; `WS_MAXIMIZEBOX|WS_MINIMIZEBOX` are re-added so Aero Snap survives decoration removal. `beginSystemMove/beginSystemResize` post native `WM_NCLBUTTONDOWN` (`HTCAPTION`/edge hits) so drag, snap, drag-to-restore, and modal resize all stay native; the existing live-resize hook keeps rendering during snap resizes. Minimize/maximize/restore/close use GLFW calls on every platform. On non-Windows, `setDecorated(false)` refuses (GLFW has no window-move API), `createWindow` keeps decorations, and the fallback is reported to callers.
+- **Runtime:** new `TitleBar` widget (horizontal Row container). Caption zones (minimize/maximize/close, 46 px each) are framework-painted at the bar's right end from a styleable `TitleButton` style part (`resting`/`hover`/`pressed`); the bar's right padding is reserved so authored children cannot underlap the zones. Drag starts only on non-interactive areas (hit-test aware: interactive children keep clicks; non-interactive children drag). Double-click toggles maximize and is detected press-to-press because native move loops swallow the first release. Caption buttons trigger on release-inside like native buttons. `titleBarRegions()` exposes geometry for tests/tools.
+- **Document contract:** `Window[platformTopMenu: false]` requires at least one `TitleBar`, and a `TitleBar` requires the attribute — either mismatch is a `UiRuntime::build` error, so a window can never end up with neither native nor custom chrome. `documentUsesClientChrome()` lets the facade read the attribute before window creation (no native-chrome flash).
+- **Facade:** `Xui::attach` derives `WindowDesc::decorations` from the document, wires `runtime.setPlatformWindow(platform, window)`, and clears it on shutdown.
+- **Demo:** `showcase.xui` now sets `platformTopMenu: false` and replaces the client-area `MenuBar` row with a `TitleBar` holding the same File/Edit/View dropdowns, a Help button, and a fill title text; `showcase.xss` styles `TitleBar.top-menu`, `TitleButton`, and the title. All menu IDs are unchanged, so demo/profile event wiring still applies.
+- **Tests:** added two runtime tests — caption-zone geometry plus close/maximize-restore/minimize actions (release-inside semantics, release-outside cancel), drag from empty bar and non-interactive title text, no drag from interactive children, double-click toggle, and a paint smoke; and the `platformTopMenu`/`TitleBar` contract errors plus `documentUsesClientChrome`. `NullPlatform` records chrome calls for assertions.
+
+### Trade-offs
+
+- Windows-only custom chrome: hiding decorations elsewhere (macOS/Wayland) would leave an unmovable, unresizable window — worse than the native chrome it replaces. The fallback keeps a fully functional window and the `TitleBar` degrades to a plain bar. Manual move via `setPosition` polling was rejected (janky, and blocked outright on Wayland).
+- GLFW's own `GLFW_DECORATED` attribute drives Win32 styles; the subclass only intercepts `WM_NCCALCSIZE`/`WM_NCHITTEST` and re-adds snap styles, keeping one style path. If GLFW ever reapplies styles on a path we do not hook, worst case is a restored native caption, not a broken window.
+- Caption glyphs are painter primitives (minimize/maximize/restore) plus the proven `×` label for close, avoiding font-coverage risk for geometric glyphs across Segoe UI/Arial/DejaVu.
+- Press-to-press double-click detection accepts that a native drag can start on the first press; the drag threshold and the modal move loop make accidental toggles require a real double press without movement.
+
+### Verification status
+
+- **Not yet verified: none of this code has been compiled or run.** Compile fixes so far came from user-run builds: missing `<windows.h>` include in the GLFW header (GLFW 3.5.1 no longer provides Windows types), and an invalid `this` in the static `installChrome`. A further build/test pass (framework targets, `xui_tests`, `xui_glfw_demo`) is required before any claim lands; visible drag/snap/resize/close behavior on Windows and the non-Windows fallback need a desktop session.
+
+### Next steps
+
+- Build framework targets + tests, fix fallout, run the full suite; run `xui_glfw_demo` visibly: no native title bar, drag from the menu, double-click maximize, min/max/close, edge resize, interactive children not dragging, FPS above target during drag/resize, no idle CPU burn, and the standard regression checklist (docking, animations without input, caret, color picker, `Row` clipping, resize freeze, cursor icons, float visibility).
+- Revisit the paused docking-optimization task (scale benchmark staged in `benchmarks/bench_docking_scale.cpp`); profile numbers must come before any "optimized" claim.
+
 ## Showcase rewrite and layout coverage — 2026-10-16
 
 ### Audit and findings
@@ -1142,3 +1175,132 @@ Premise corrections worth recording: this checkout has a GLFW + OpenGL 2.1 backe
 - Explicit targets make CI intent clearer and prevent an accidental target-selection change from skipping the demo or tests. Linking the GLFW demo compiles both backend adapters through CMake's target dependencies.
 - Retained the current OS matrix because it is already the project's stated target coverage. Linux CI intentionally validates X11, not Wayland; add Wayland only after the required dependencies and support claim are established.
 - Next: inspect the hosted matrix result for this workflow revision, fix any platform-specific build failures, then consider adding an independent YAML/actionlint check if the project adopts that tool.
+
+## Row text tail clipping — 2026-10-18
+
+### Audit and root cause
+
+- Reproduced the authored tree in a runtime regression test: the original window/Column plus a `Row(gap: 10)[class: "bar"]` containing `Text("World! Extension")`, with adjacent cases for `!`, `World!`, a wrapped long line, and a button child.
+- The Row solver was not subtracting an extra trailing gap: it uses exactly `n - 1` gaps. The failure came from text metrics exposed by the tight Row child box. Text measurement used the runtime's previous/default DPI (layout ran before `paint()` assigned the current DPI), while glyph rasterization used the current DPI. Text shaping also truncated fractional pixel sizes, while the atlas rounded them. A Row's intrinsic child width exposed the mismatch and clipped the glyph run; a Column stretched its cross-axis child and masked it.
+- `TextLayout.width` also represented only pen advances, while the glyph atlas emits raster quads with glyph ink bounds and a one-pixel antialiasing border. This left no guaranteed room for glyph overhangs in content-sized text widgets.
+
+### Changes and decisions
+
+- Added a DPI-aware `UiRuntime::layout(width, height, dpiScale)` overload. The existing two-argument overload retains the latest DPI. `Xui::renderFrame()` now supplies the platform DPI before measuring; `paint()` re-lays out if a lower-level caller changes DPI only at paint time.
+- Text layout now rounds to the same pixel size as the atlas. `TextLayout.width` includes rasterized horizontal glyph bounds; the new `advanceWidth` retains the pen measure used for caret, selection, and text-input scrolling. `inkLeft` lets paint align the visual bounds without clipping a negative glyph bearing.
+- Runtime intrinsic measurement now shapes text at physical DPI, converts measured dimensions back to logical units, and uses the visual width for text and labeled controls. Glyph drawing uses the same rounded raster size. This fixes the metric contract centrally rather than adding Row-specific sizing or text hacks.
+- Added text layout and runtime regressions. The runtime case checks `!`, `World!`, `World! Extension`, a constrained wrapping case, a button in Row, the Column stretch case, calculated child widths against measured visual bounds at 1.0×/1.25×/1.5×, and glyph draw clips against child rectangles.
+- Updated the widget/layout guides and architecture text for DPI-before-layout measurement and intrinsic glyph bounds. No demo asset or backend-specific logic was changed.
+
+### Verification and status
+
+- MSVC Release build of `xui_tests` succeeded with warnings as errors. Direct suite run: **163 tests, 0 failures**; CTest: **1/1 registered test passed**.
+- MSVC Release build of `xui_glfw_demo` succeeded, compiling the GLFW and OpenGL adapters. The final hidden profile measured **3,333 frames / 5.00068 seconds / 666.509 FPS**. This confirms hidden-loop throughput only; it does not establish visible FPS or visual interaction.
+- The current CMake project has no `xui_hello` target and the repository has no separate native Win32 backend. Thus the fix was not verified in a second native backend or a `hello.exe`; the GLFW/OpenGL path is the only runnable graphics backend here. The requested visible window check also remains outstanding.
+- `git diff --check` passes. Existing user edits in `examples/CMakeLists.txt` and new `examples/button`, `examples/layout`, `examples/text` directories were preserved.
+
+### Remaining work
+
+- Run the demo visibly at normal and fractional DPI, verify the text tail and wrapped case, then resize and interact while observing layout and clipping.
+- Add equivalent verification if/when a distinct native Win32 renderer/platform backend is restored. Hidden profile numbers do not demonstrate the >60 FPS visible-interaction target.
+
+## Two adjacent Row text labels — 2026-10-18
+
+- Added a runtime regression using the exact two-child structure `Row { Text("World! Extension") Text("World! Extension") }`. It checks both parsed values, intrinsic widths against the full unwrapped text, non-overlapping child bounds, one-line layout at each child width, and all 15 non-space glyphs in each draw command.
+- The focused scenario passes in the Release `xui_tests` executable; the complete suite reports **164 tests, 0 failures**.
+- Rebuilt `xui_layout_demo` from the current source. This also refreshed the executable-directory copies of `layout.xui` and `layout.xss`, which were older than the source files before the build. The current layout demo target is `build/final-release/examples/layout/Release/xui_layout_demo.exe`.
+- This verifies parser, layout, and draw-list output, but not a visible desktop session. Do not claim the screenshot symptom is visually resolved until that rebuilt executable is opened and inspected. If the same screenshot persists from that exact executable, capture the resulting child rectangles and renderer clip at runtime; the headless regression currently passes.
+
+## Declarative animation and paint-style expansion — 2026-10-18
+
+### Audit and decisions
+
+- The XSS parser and `StyleSheet` already retained transitions, easing curves, and keyframe definitions, but the standard runtime did not animate them. `opacity`, alpha colors, `font-size`, numeric `font-weight`, nearest registered font selection, `size: auto`, and two-stop linear gradients already existed in partial form. They were extended instead of introducing duplicate concepts.
+- Animations are authored in `.xss` only, as confirmed by the user. State transitions and named keyframes animate paint; there is no imperative animation API. The runtime uses a 16 ms animation deadline while a visible animation is active and returns to event-driven waiting after completion or when the animated node is hidden.
+- Gradient support now includes linear, radial, and conic fills, with 2–4 evenly spaced stops. Explicit stop positions, gradient borders, and gradient text are not included. `glow` is an independent zero-offset halo; the existing `shadow` keeps its offset drop-shadow behavior. No glow texture cache was added because the renderer uses an SDF draw primitive.
+- Missing font weights resolve to the nearest registered face, with no synthetic bold. The demo attempts to load a 700 face when available. Alpha changes paint only; hit testing remains active as requested.
+- Content-sized `Button` nodes now lay out authored child content, rather than only their label, and use existing intrinsic sizing plus XSS padding/gap and min/max constraints. The standard `size: auto` model remains unchanged.
+
+### Changes
+
+- Added gradient/glow property IDs, compiler validation for gradient functions/stops, and draw-list payload values for up to four gradient colors. CPU SDF and GLSL implementations now evaluate linear/radial/conic gradients with rounded clipping and alpha.
+- Added a distinct glow style path and animated paint interpolation for color/number values, state transitions, and keyframe playback. A hidden node does not tick; removing and later reapplying a keyframe animation starts it from the beginning.
+- Nested child nodes on `Button` now use a column layout and clear the separate label to avoid double painting. Added tests for intrinsic nested content and min/max constraints.
+- Nested showcase tabs exposed an ancestor-visibility bug: `isNodeVisible()` returned the selected status from the nearest `Tabs` instead of checking outer tab ancestors. It now rejects a non-selected page but continues the ancestor walk. This restored pointer targeting in all showcase sections and is covered by the existing showcase interaction test.
+- Added the eighth showcase section and styling examples for paint, fonts, auto sizing, transitions, and keyframes. Updated `doc/styling-reference.md`, `doc/xss-guide.md`, `doc/widgets.md`, and `doc/architecture.md`.
+
+### Trade-offs and limitations
+
+- The OpenGL vertex payload grew to carry two more colors per vertex. This keeps gradient evaluation in the renderer and avoids per-widget CPU tessellation, at the cost of a larger static vertex stream.
+- Glow adds an SDF shadow-style primitive per widget and is not cached. Large radii or many simultaneously glowing widgets can be expensive; no valid glow-heavy FPS number is available from this environment.
+- Interpolation is restricted to compatible numeric values and colors. Layout geometry, font size/weight, and font face are not animated. Gradients require matching value shapes to interpolate.
+- Gradient stops are evenly spaced; custom positions are deferred. `font-size` and `font-weight` were already supported style properties, so this work documents and demonstrates them rather than replacing their selection model.
+
+### Verification and current status
+
+- Windows Release build of `xui_tests` and `xui_glfw_demo` succeeded with the configured warnings-as-errors settings. CTest passed **1/1** registered test; the test binary reports **171 tests, 0 failures**. A separate nested-tab test verifies that a selected inner page cannot become visible or intercept input while one of its outer tab pages is hidden.
+- Parser tests cover gradient and glow syntax; the CPU SDF test covers multistop linear/radial/conic color evaluation; runtime tests cover animated state/keyframe values, transparent-background hit testing, nested content sizing, and showcase interactions.
+- The built demo's `--profile-glow` and `--profile-animation` modes were attempted both sandboxed and with elevated execution. Both runs stopped at “Could not initialize the renderer backend,” before frames were rendered. Desktop UI inspection also failed because the Computer Use native pipe was unavailable. Therefore there are **no measured FPS/ms figures** for these cases and no visible verification of gradient/glow appearance, animation cadence, or input feel. No >60 FPS claim is made for this change.
+- `git diff --check` reports no whitespace errors after cleaning the newly added shader-line trailing spaces (the remaining output is Git's LF-to-CRLF normalization notice for the existing Windows checkout).
+
+### Next steps
+
+- Open the built GLFW demo in a desktop session with a working OpenGL context. Inspect each new style, hover/press transition, finite fade, and pulse animation; measure visible FPS in steady, glow-heavy, and animation-heavy states.
+- If visible profiling shows glow below 60 FPS, reduce its primitive cost or add a renderer-level cache without moving style semantics into the backend.
+- Verify font-weight face selection on a system where a 700 face is available, then repeat on a system where it is not.
+
+## Animation controls, transforms, cursors, and docked window chrome — 2026-10-18
+
+### Changes
+
+- Added explicit facade playback controls for authored keyframes: `playAnimation(id, Once|Loop)` restarts a named visible animation, while `cancelAnimation(id)` freezes its current sample. Paused keyframes do not keep the event loop awake; active visible animations continue while the window is unfocused. `ProgressBar` keyframes can animate the numeric `value` property.
+- Added paint transforms for nodes and descendants with inverse-transform hit testing for ordinary widget nodes. Transformed clips are converted to axis-aligned scissor bounds. `.xss cursor` now selects runtime cursor shapes and GLFW maps them to its standard cursor set, including hidden, with documented fallbacks for unsupported shapes.
+- Refined ColorPicker format editing so HEX mode presents the HEX field and RGB/HSL/HSV modes present the fields for the selected representation. Added empty focused TextBox caret rendering and tests for the caret path.
+- Raised floating dock panels to the front when activated, ordered their paint by z-order, and added a default shadow for floating panel chrome. Added a `DockTree` overlap test proving `panelAt()` follows raise order.
+- `MenuBar` materializes as a styled horizontal client-area container, so menus can be authored with ordinary controls. Per the user's selected fallback, the native title bar remains. Dedicated Menu/MenuItem behavior, native decoration controls, drag-to-move window support, and menu-specific keyboard navigation are not included.
+- Added a client-area File/Edit/View menu row to the showcase using ordinary Dropdowns and a Help Button. Added `--profile-menubar` alongside the animation, transform, glow, and docking profiles. Added paused ProgressBar keyframes with Play Once, Loop, and Stop controls wired from demo events.
+- Updated the feature profiles in `examples/glfw_demo.cpp` and corrected stale animation claims in `doc/styling-reference.md` and `doc/troubleshooting.md`. Added menu and profile documentation to `doc/widgets.md` and `doc/performance.md`, animation event usage to `doc/animations-fonts-transforms.md`, and transform/animation data flow to `doc/architecture.md`; refreshed `plan/plan.md` with verification boundaries and remaining gaps.
+
+### Decisions and trade-offs
+
+- Animation authorship remains declarative in `.xss`; the C++ facade only starts/cancels an authored animation by widget ID. This preserves stylesheet-owned timing/property definitions while allowing application-controlled playback.
+- Transforms apply to paint subtrees and ordinary node hit testing, as requested. Scissor APIs are rectangular, so rotated clip corners are approximate. Overlay passes and virtual hit targets need additional coordinate mapping before the transform contract is complete for every composite widget.
+- GLFW uses its standard cursor shapes. Where GLFW has no matching diagonal resize, move, grab, or not-allowed shape, the adapter uses a documented fallback instead of platform-specific cursor artwork.
+- MenuBar is kept inside the client area and the OS title bar stays enabled. The platform contract does not provide decoration removal or custom native-window movement, so a borderless/custom draggable menu bar would require a platform API design first.
+- `paused` animations schedule no timer until explicitly started; visible active animations continue while unfocused. The platform interface does not report minimized/occluded status consistently, so hidden/minimized animation suspension is not promised.
+
+### Verification
+
+- Windows MSVC Release/Ninja rebuilt `xui_tests` and `xui_glfw_demo` with the repository's configured warnings-as-errors settings.
+- Direct test run: **178 tests, 0 failures**, including transformed paint/hit testing, paused/active animation scheduling and playback, empty TextBox caret, cursor style override, MenuBar construction, and floating-panel raise/hit order.
+- Sequential hidden GLFW/OpenGL section profiles from the rebuilt demo executable:
+  - Animation: **3,554 frames / 7.54225 s / 471.212 FPS**.
+  - Transform: **3,615 frames / 7.51053 s / 481.324 FPS**.
+  - Glow/shadow: **3,248 frames / 5.00044 s / 649.543 FPS**.
+  - Docking: **3,457 frames / 7.13242 s / 484.688 FPS**.
+  - Client MenuBar: **3,489 frames / 7.12765 s / 489.502 FPS**.
+- Animation, transform, glow, and docking profiles each selected the corresponding showcase state. The MenuBar profile exercises the always-visible client menu row with dropdown controls closed. All modes are hidden and uncapped; they are not measurements of on-screen refresh, animation cadence under vsync, resize performance, or input latency. The numerical target is exceeded for these loop-throughput runs only.
+- CTest: **1/1 registered test passed** (3.72 seconds); the binary reports **178 tests, 0 failures**. The first attempt to invoke `ctest` by bare command failed because PowerShell did not have it on `PATH`; rerunning the Visual Studio-bundled CTest executable passed.
+- These profiles validate hidden loop throughput and backend initialization only. No visible window, resize, pointer/cursor, keyboard, menu, caret blink, or normal-close session was available, so visible 60+ FPS and the end-user feel remain unverified.
+- `git diff --check` was run; only the checkout's standard LF-to-CRLF normalization notices remain.
+
+### Current status and next steps
+
+- Core animation playback, ordinary-widget transforms/hit testing, style-selected cursor mapping, floating panel z-order, and client-area MenuBar layout have headless regression coverage.
+- Remaining gaps: visible smoke testing; exact transformed clip shapes; transforms for popups, scrollbars, and tab-header virtual targets; cursor shape parity outside GLFW; a dedicated menu model and accessible keyboard navigation; and minimized-window animation suspension.
+- Keep the native title bar. Before adding native borderless menu behavior, specify a cross-platform window-decoration and drag contract in `Platform`.
+
+## OpenGL renderer initialization failure — 2026-10-18
+
+- The demo's generic `Could not initialize the renderer backend` came from `GlDrawListRenderer::init()` returning false while compiling the updated GLSL 1.20 fragment shader. The multistop-gradient branch declared its two temporary stop colors as `a` and `b`, shadowing the function's scalar alpha accumulator `a`; the later scalar alpha assignment then targeted a `vec4`, making the shader invalid. The backend had returned no compiler log, so `Xui::attach()` could only expose its generic message.
+- Renamed the temporary colors to `stopA`/`stopB`. Added optional `Renderer::lastError()` without making it a new implementation requirement, and made the OpenGL backend retain shader compile/link logs and buffer/function-loading errors. `Xui::attach()` now includes that diagnostic after the generic context if a renderer still fails.
+- Rebuilt `xui_glfw_demo` and `xui_tests` in Windows Release. The demo now initializes and its hidden profiles complete: glow page **2,020 frames / 5.00018 s / 403.986 FPS**; animation page **3,190 frames / 5.00016 s / 637.98 FPS**. Direct test run: **171 tests, 0 failures**. These rates establish hidden-loop backend throughput only, not visible FPS or interaction smoothness.
+- Current remaining verification gap: desktop visual inspection and normal visible-window interaction are still unavailable in this session. The initial startup regression is fixed and covered indirectly by the same backend initialization path exercised in both profiles.
+
+### Follow-up report — 2026-10-18
+
+- Rechecked the reported startup message against the current Release demo executable. `xui_glfw_demo.exe --profile-glow` initialized and completed at **366.075 FPS**; `--profile-animation` initialized and completed at **554.182 FPS**. Both use the GLFW/OpenGL backend, so the current executable no longer reproduces renderer initialization failure.
+- The exact generic message is emitted by the older `Xui::attach()` path when its renderer does not expose a detailed error (or when the platform reports a zero-sized framebuffer). The current OpenGL renderer returns shader/context/buffer diagnostics through `lastError()`. The most likely cause is launching a stale executable or a different build tree; `build/final-release/examples/Release/xui_glfw_demo.exe` is the verified path in this checkout. There is no `xui_hello` target in the current CMake sources; older build directories may still contain that obsolete executable.
+- Corrected `doc/getting-started.md`, which incorrectly claimed Windows builds an `xui_hello` target. The current build target is `xui_glfw_demo`.
+- An incremental MSBuild refresh was attempted, but the process stopped producing output and was interrupted. Thus the profile results verify the existing Release binary, not a fresh rebuild in this follow-up. No source code changed in this follow-up.
+- Next step if the error remains: launch the current `xui_glfw_demo` target from a fresh build directory and copy the complete error text, including anything after the colon. A current OpenGL shader failure should now include its driver log.

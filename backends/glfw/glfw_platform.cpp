@@ -1,4 +1,19 @@
+#ifdef _WIN32
+// windows.h must precede glfw3.h: glfw3.h defines APIENTRY/WINGDIAPI/CALLBACK for its own use
+// and never un-defines them, so the reverse order collides with the SDK definitions.
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 #include <glfw/glfw_platform.hpp>
+#ifdef _WIN32
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>
+#endif
 #include <algorithm>
 #include <cmath>
 
@@ -6,7 +21,7 @@ using namespace xui;
 
 bool GlfwPlatform::init(const PlatformDesc&) { return glfwInit() == GLFW_TRUE; }
 void GlfwPlatform::shutdown() {
-	for (Window& w : m_windows) if (w.native) glfwDestroyWindow(w.native);
+	for (Window& w : m_windows) if (w.native) { removeChrome(w); glfwDestroyWindow(w.native); }
 	m_windows.clear();
 	if (m_cursor) glfwDestroyCursor(m_cursor);
 	m_cursor = nullptr;
@@ -17,6 +32,14 @@ void GlfwPlatform::shutdown() {
 
 WindowHandle GlfwPlatform::createWindow(const WindowDesc& d) {
 	glfwWindowHint(GLFW_RESIZABLE, d.resizable ? GLFW_TRUE : GLFW_FALSE);
+	// Framework policy: only platforms that can also provide native window move/resize keep
+	// native decorations removed. On Windows the chrome subclass below restores drag, snap and
+	// resize borders; elsewhere GLFW has no move API, so the native title bar is retained.
+#ifdef _WIN32
+	glfwWindowHint(GLFW_DECORATED, d.decorations ? GLFW_TRUE : GLFW_FALSE);
+#else
+	glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
+#endif
 	if (d.glContext) {
 		glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
 		glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
@@ -33,12 +56,16 @@ WindowHandle GlfwPlatform::createWindow(const WindowDesc& d) {
 	glfwSetKeyCallback(native, onKey);
 	glfwSetCharCallback(native, onChar);
 	glfwSetWindowCloseCallback(native, onClose);
+#ifdef _WIN32
+	if (!d.decorations) installChrome(m_windows.back());
+#endif
 	if (!d.visible) glfwHideWindow(native);
 	return handle;
 }
 
 void GlfwPlatform::destroyWindow(WindowHandle h) {
 	Window* w = find(h); if (!w) return;
+	removeChrome(*w);
 	glfwDestroyWindow(w->native); w->native = nullptr;
 }
 void GlfwPlatform::setWindowTitle(WindowHandle h, std::string_view s) { if (auto* w = find(h)) glfwSetWindowTitle(w->native, std::string(s).c_str()); }
@@ -95,13 +122,110 @@ void GlfwPlatform::setCursor(CursorShape shape) {
 	else if (shape == CursorShape::Hand) id = GLFW_HAND_CURSOR;
 	else if (shape == CursorShape::ResizeEW) id = GLFW_HRESIZE_CURSOR;
 	else if (shape == CursorShape::ResizeNS) id = GLFW_VRESIZE_CURSOR;
+	else if (shape == CursorShape::ResizeNWSE || shape == CursorShape::ResizeNESW || shape == CursorShape::ResizeAll || shape == CursorShape::Grab || shape == CursorShape::Grabbing) id = GLFW_HAND_CURSOR;
 	if (m_cursor) { glfwDestroyCursor(m_cursor); m_cursor = nullptr; }
 	if (shape != CursorShape::Arrow) m_cursor = glfwCreateStandardCursor(id);
-	if (m_activeWindow) glfwSetCursor(m_activeWindow, m_cursor);
+	if (m_activeWindow) {
+		glfwSetInputMode(m_activeWindow, GLFW_CURSOR, shape == CursorShape::Hidden ? GLFW_CURSOR_HIDDEN : GLFW_CURSOR_NORMAL);
+		glfwSetCursor(m_activeWindow, shape == CursorShape::Hidden ? nullptr : m_cursor);
+	}
 }
 void GlfwPlatform::setClipboardText(std::string_view s) { glfwSetClipboardString(nullptr, std::string(s).c_str()); }
 std::string GlfwPlatform::clipboardText() const { const char* s = glfwGetClipboardString(nullptr); return s ? s : ""; }
 void GlfwPlatform::requestRedraw(WindowHandle h) { if (auto* w = find(h)) glfwPostEmptyEvent(); }
+
+bool GlfwPlatform::setDecorated(WindowHandle h, bool decorated) {
+	Window* w = find(h);
+	if (!w || !w->native) return false;
+#ifdef _WIN32
+	if (decorated) {
+		// Drop the frame-stripping subclass first, then let GLFW restore its full styles.
+		removeChrome(*w);
+		glfwSetWindowAttrib(w->native, GLFW_DECORATED, GLFW_TRUE);
+		return true;
+	}
+	glfwSetWindowAttrib(w->native, GLFW_DECORATED, GLFW_FALSE);
+	w->customChrome = true;
+	if (!w->chromeState) installChrome(*w);
+	return true;
+#else
+	// Removing decorations without a native window-move API leaves an unmovable window,
+	// so the framework keeps native chrome on this platform (documented fallback).
+	if (decorated) { glfwSetWindowAttrib(w->native, GLFW_DECORATED, GLFW_TRUE); return true; }
+	return false;
+#endif
+}
+
+bool GlfwPlatform::beginSystemMove(WindowHandle h) {
+	Window* w = find(h);
+	if (!w || !w->native || !w->customChrome) return false;
+#ifdef _WIN32
+	HWND hwnd = glfwGetWin32Window(w->native);
+	if (!hwnd) return false;
+	ReleaseCapture();
+	// Native modal move loop: the OS drags the window (including Aero Snap); the size
+	// callback keeps rendering live if the drag ends in a snap-resize.
+	POINT pt{};
+	GetCursorPos(&pt);
+	PostMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, MAKELPARAM(pt.x, pt.y));
+	return true;
+#else
+	return false;
+#endif
+}
+
+bool GlfwPlatform::beginSystemResize(WindowHandle h, WindowEdge edge) {
+	Window* w = find(h);
+	if (!w || !w->native || !w->customChrome) return false;
+#ifdef _WIN32
+	HWND hwnd = glfwGetWin32Window(w->native);
+	if (!hwnd) return false;
+	LONG hit = HTCLIENT;
+	switch (edge) {
+	case WindowEdge::Left: hit = HTLEFT; break;
+	case WindowEdge::Right: hit = HTRIGHT; break;
+	case WindowEdge::Top: hit = HTTOP; break;
+	case WindowEdge::Bottom: hit = HTBOTTOM; break;
+	case WindowEdge::TopLeft: hit = HTTOPLEFT; break;
+	case WindowEdge::TopRight: hit = HTTOPRIGHT; break;
+	case WindowEdge::BottomLeft: hit = HTBOTTOMLEFT; break;
+	case WindowEdge::BottomRight: hit = HTBOTTOMRIGHT; break;
+	default: return false;
+	}
+	ReleaseCapture();
+	POINT pt{};
+	GetCursorPos(&pt);
+	PostMessageW(hwnd, WM_NCLBUTTONDOWN, hit, MAKELPARAM(pt.x, pt.y));
+	return true;
+#else
+	return false;
+#endif
+}
+
+void GlfwPlatform::minimizeWindow(WindowHandle h) {
+	if (Window* w = find(h); w && w->native) glfwIconifyWindow(w->native);
+}
+
+bool GlfwPlatform::toggleMaximize(WindowHandle h) {
+	Window* w = find(h);
+	if (!w || !w->native) return false;
+	if (glfwGetWindowAttrib(w->native, GLFW_MAXIMIZED) == GLFW_TRUE) glfwRestoreWindow(w->native);
+	else glfwMaximizeWindow(w->native);
+	return glfwGetWindowAttrib(w->native, GLFW_MAXIMIZED) == GLFW_TRUE;
+}
+
+bool GlfwPlatform::windowMaximized(WindowHandle h) const {
+	const Window* w = find(h);
+	return w && w->native && glfwGetWindowAttrib(w->native, GLFW_MAXIMIZED) == GLFW_TRUE;
+}
+
+void GlfwPlatform::closeWindow(WindowHandle h) {
+	Window* w = find(h);
+	if (!w || !w->native) return;
+	// Mirror the native close button exactly: GLFW's close callback path queues the Quit event.
+	onClose(w->native);
+	glfwPostEmptyEvent();
+}
 
 GlfwPlatform::Window* GlfwPlatform::find(WindowHandle h) { return h.index < m_windows.size() && m_windows[h.index].handle.gen == h.gen ? &m_windows[h.index] : nullptr; }
 const GlfwPlatform::Window* GlfwPlatform::find(WindowHandle h) const { return const_cast<GlfwPlatform*>(this)->find(h); }
@@ -158,3 +282,96 @@ void GlfwPlatform::onChar(GLFWwindow* w, unsigned int codepoint) {
 	Event e{}; e.type = EventType::TextInput; e.codepoint = codepoint; push(w, e);
 }
 void GlfwPlatform::onClose(GLFWwindow* w) { glfwSetWindowShouldClose(w, GLFW_TRUE); Event e{}; e.type = EventType::Quit; push(w, e); }
+
+#ifdef _WIN32
+// Client-drawn chrome. The subclass only intercepts WM_NCCALCSIZE (remove the native frame) and
+// WM_NCHITTEST (resize borders); everything else — dragging, snapping, maximize — stays native.
+// All Win32 state lives here in the .cpp so the backend header stays free of windows.h types.
+namespace {
+	struct ChromeState {
+		GlfwPlatform::Window* window = nullptr;
+		WNDPROC prevProc = nullptr;
+	};
+	constexpr wchar_t kChromeProp[] = L"XuiChromeProp";
+
+	void applySnapStyles(HWND hwnd) {
+		// GLFW's undecorated style omits WS_MAXIMIZEBOX/WS_MINIMIZEBOX, which also disables
+		// Aero Snap. Re-add both so drag-to-edge snap and Win+arrow tiling keep working.
+		const LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+		SetWindowLongPtrW(hwnd, GWL_STYLE, style | WS_MAXIMIZEBOX | WS_MINIMIZEBOX);
+		SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+	}
+
+	LRESULT CALLBACK chromeWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+		auto* state = static_cast<ChromeState*>(GetPropW(hwnd, kChromeProp));
+		GlfwPlatform::Window* window = state ? state->window : nullptr;
+		switch (msg) {
+		case WM_NCCALCSIZE:
+			// Returning 0 with wParam TRUE makes the whole window client area (no native frame).
+			// When maximized, inset by the hidden frame so content stays inside the work area.
+			if (window && window->customChrome && wp) {
+				if (IsZoomed(hwnd)) {
+					auto* rect = reinterpret_cast<RECT*>(lp);
+					const LONG frameX = GetSystemMetrics(SM_CXSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+					const LONG frameY = GetSystemMetrics(SM_CYSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+					rect->left += frameX; rect->top += frameY;
+					rect->right -= frameX; rect->bottom -= frameY;
+				}
+				return 0;
+			}
+			break;
+		case WM_NCHITTEST:
+			if (window && window->customChrome) {
+				// Resize borders behave like a native frame; the rest stays client area so the
+				// runtime keeps receiving mouse input for the custom TitleBar.
+				if (!IsZoomed(hwnd) && window->native && glfwGetWindowAttrib(window->native, GLFW_RESIZABLE) == GLFW_TRUE) {
+					const POINT pt{ static_cast<LONG>(static_cast<short>(LOWORD(lp))), static_cast<LONG>(static_cast<short>(HIWORD(lp))) };
+					RECT rc{};
+					GetWindowRect(hwnd, &rc);
+					const LONG x = pt.x - rc.left, y = pt.y - rc.top;
+					const LONG width = rc.right - rc.left, height = rc.bottom - rc.top;
+					const LONG frameX = GetSystemMetrics(SM_CXSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+					const LONG frameY = GetSystemMetrics(SM_CYSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+					const bool left = x < frameX, right = x >= width - frameX, top = y < frameY, bottom = y >= height - frameY;
+					if (top && left) return HTTOPLEFT;
+					if (top && right) return HTTOPRIGHT;
+					if (bottom && left) return HTBOTTOMLEFT;
+					if (bottom && right) return HTBOTTOMRIGHT;
+					if (left) return HTLEFT;
+					if (right) return HTRIGHT;
+					if (top) return HTTOP;
+					if (bottom) return HTBOTTOM;
+				}
+				return HTCLIENT;
+			}
+			break;
+		default: break;
+		}
+		return CallWindowProc(state && state->prevProc ? state->prevProc : DefWindowProcW, hwnd, msg, wp, lp);
+	}
+}
+
+void GlfwPlatform::installChrome(Window& window) {
+	HWND hwnd = glfwGetWin32Window(window.native);
+	if (!hwnd || window.chromeState) return;
+	auto* state = new ChromeState{ &window, nullptr };
+	state->prevProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&chromeWndProc)));
+	SetPropW(hwnd, kChromeProp, state);
+	window.chromeState = state;
+	window.customChrome = true;
+	applySnapStyles(hwnd);
+}
+
+void GlfwPlatform::removeChrome(Window& window) {
+	if (!window.chromeState) return;
+	if (HWND hwnd = window.native ? glfwGetWin32Window(window.native) : nullptr) {
+		if (auto* state = static_cast<ChromeState*>(GetPropW(hwnd, kChromeProp))) {
+			SetWindowLongPtrW(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(state->prevProc));
+			RemovePropW(hwnd, kChromeProp);
+			delete state;
+		}
+	}
+	window.chromeState = nullptr;
+	window.customChrome = false;
+}
+#endif

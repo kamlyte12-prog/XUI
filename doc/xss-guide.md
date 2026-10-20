@@ -88,18 +88,40 @@ The compiler accepts `transition` declarations and named `keyframes`:
 
 ```xss
 Button.primary {
-  resting: { bg: #2563eb }
-  hover: { bg: #3b82f6 }
-  transition: resting -> hover 120ms ease-out bg
+  resting: { bg: #2563eb, glow: 0px 0px #3b82f600 }
+  hover: { bg: #3b82f6, glow: 8px 0px #3b82f688 }
+  transition: resting -> hover 120ms ease-out bg glow
+  transition: hover -> resting 120ms ease-out bg glow
 }
 
+Panel.pulse { resting: { animation: pulse 900ms infinite ease-in-out } }
 keyframes pulse {
-  from { opacity: 0.7 }
-  to { opacity: 1 }
+  from { opacity: 0.45 }
+  50% { opacity: 1 }
+  to { opacity: 0.45 }
 }
 ```
 
-Transition/keyframe data is retained in `StyleSheet` for low-level consumers. `UiRuntime` currently does not advance transitions or apply animation keyframes. Do not expect animation from the standard `Xui` entry point yet.
+The standard runtime advances these animations. Transitions start when a state changes into the declared destination state. List the properties to interpolate, or use `all` for all supported paint properties. Keyframe animations accept a duration, an optional finite iteration count or `infinite`, an optional `paused` flag, and optional easing. Supported easing includes linear/ease-in/ease-out/ease-in-out and compiled cubic-bezier or spring curves.
+
+Animations include paint values and widget transforms; layout geometry and font selection do not animate. Automatic keyframes run on visible widgets without requiring pointer or keyboard input, and continue while the window is visible but unfocused. A `paused` keyframe can be controlled by the public facade:
+
+```cpp
+ui.playAnimation("meter", xui::AnimationMode::Once); // or Loop
+ui.cancelAnimation("meter");                        // keep the current sample
+```
+
+`Once` runs one cycle and holds its final frame. `Loop` repeats until cancelled. Calling `playAnimation` again restarts and replaces current playback. Applications can call `cancelAnimation` when their own condition is met. The loop schedules frames only during active animation and then returns to its normal event wait. See the [complete property reference](styling-reference.md#transitions-and-keyframes) for syntax and limits.
+
+## Paint effects
+
+`bg` colors may include alpha, and `opacity` multiplies the authored widget's own paint, including its text and composite marks. Child nodes resolve opacity independently. Alpha affects rendering only; it does not make a widget pointer-transparent. Use a separate widget/layout choice when an overlay should pass pointer input through.
+
+Background gradients are available as `linear-gradient(angle, stops...)`, `radial-gradient(stops...)`, or `conic-gradient(angle, stops...)`. Two to four stops are evenly spaced. Gradients fill rounded backgrounds and preserve color alpha; custom stop positions and gradient borders/text are not supported.
+
+`glow: blur spread color` draws an outer halo and remains separate from the offset `shadow` property. It uses an additional SDF shadow primitive rather than a cached texture, so keep large glow radii and counts modest. See the [paint-property reference](styling-reference.md#alpha-gradients-and-glow).
+
+Font size and numeric font weight are `.xss` properties. Weight selects the nearest registered face; the runtime does not synthesize bold. Load additional weights with `loadFont(path, family, weight)` when a design needs them. Font format and glyph coverage limits are listed in the [getting-started guide](getting-started.md#fonts). `size: auto` uses intrinsic content sizing; min/max still clamp the result, and nested Button content participates in the measurement.
 
 ## Best practices
 

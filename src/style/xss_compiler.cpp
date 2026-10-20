@@ -216,6 +216,54 @@ namespace xui {
 		}
 
 		bool compileDecl(const xss::DeclAst& d, std::vector<Declaration>& out) {
+			if (d.prop == PropId::Gradient) {
+				if (d.values.size() != 1 || ex(d.values[0]).kind != xss::ExprKind::Call) {
+					err(d.off, d.len, "gradient expects linear-gradient(), radial-gradient(), or conic-gradient()");
+					return false;
+				}
+				const xss::Expr& call = ex(d.values[0]);
+				const std::string_view fn = m_in.view(call.name);
+				const bool linear = fn == "linear-gradient", radial = fn == "radial-gradient", conic = fn == "conic-gradient";
+				if (!linear && !radial && !conic) {
+					err(call.off, call.len, "unknown gradient function '" + std::string(fn) + "'");
+					return false;
+				}
+				const bool hasAngle = linear || conic;
+				const u32 firstColor = call.argFirst + (hasAngle ? 1u : 0u);
+				const u32 stopCount = call.argCount >= (hasAngle ? 3u : 2u) ? call.argCount - (hasAngle ? 1u : 0u) : 0u;
+				if (stopCount < 2 || stopCount > 4) {
+					err(call.off, call.len, "gradients need 2 to 4 color stops (and an angle for linear/conic gradients)");
+					return false;
+				}
+				Declaration decl; decl.prop = d.prop;
+				Atom kind = Atom::ident(call.name); decl.value.atoms[decl.value.count++] = kind;
+				f32 angle = 0.f;
+				if (hasAngle) {
+					const xss::Expr& angleExpr = ex(m_a.args[call.argFirst]);
+					if (angleExpr.kind != xss::ExprKind::Number || (angleExpr.unit != Unit::Deg && angleExpr.unit != Unit::None)) {
+						err(angleExpr.off, angleExpr.len, "gradient angle must be a number in degrees");
+						return false;
+					}
+					angle = angleExpr.num * 0.01745329251994329577f;
+				}
+				decl.value.atoms[decl.value.count++] = Atom::number(angle);
+				for (u32 i = 0; i < stopCount; ++i) {
+					const u32 exprIndex = m_a.args[firstColor + i];
+					auto value = evalExpr(exprIndex, m_env[0]);
+					if (!value || value->kind != AtomKind::Color) {
+						err(ex(exprIndex).off, ex(exprIndex).len, "gradient stops must be colors or color tokens");
+						return false;
+					}
+					if (themed(exprIndex)) {
+						m_slots.push_back(exprIndex);
+						Atom slot; slot.kind = AtomKind::Slot; slot.bits = static_cast<u32>(m_slots.size() - 1);
+						decl.value.atoms[decl.value.count++] = slot;
+					}
+					else decl.value.atoms[decl.value.count++] = *value;
+				}
+				out.push_back(decl);
+				return true;
+			}
 			const PropInfo& pi = propInfo(d.prop);
 			Env& env = m_env[0];
 			std::vector<Atom> shown; std::vector<AtomKind> kinds;

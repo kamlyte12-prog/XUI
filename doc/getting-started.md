@@ -25,7 +25,7 @@ target_link_libraries(my_app PRIVATE xui_widgets)
 
 `xui_widgets` publicly links the core, asset parser, layout, rendering, and text libraries used by the facade.
 
-The cross-platform demo target is `xui_glfw_demo`. It uses the bundled GLFW source and requires system OpenGL development files. On Windows the same source is also built as `xui_hello`. The GLFW platform adapter and OpenGL renderer are separate optional targets in `backends/glfw/` and `backends/opengl/`; the demo links both without adding either implementation to the core libraries. The default launch loads `showcase.xui` and `showcase.xss`. Press F3 to toggle the FPS counter.
+The cross-platform demo target is `xui_glfw_demo`. It uses the bundled GLFW source and requires system OpenGL development files. The GLFW platform adapter and OpenGL renderer are separate optional targets in `backends/glfw/` and `backends/opengl/`; the demo links both without adding either implementation to the core libraries. The default launch loads `showcase.xui` and `showcase.xss`. Press F3 to toggle the FPS counter.
 
 To build the GLFW demo explicitly:
 
@@ -68,6 +68,10 @@ int main() {
 ```
 
 The file paths are interpreted by the process working directory. Bundle or locate the font and UI assets as part of your app's packaging. Call all three load methods before `attach()`. The first loaded font is the default; `.xss` can select a registered family and weight using `font` and `font-weight`.
+
+## Fonts
+
+The built-in loader supports TTF and OTF containers that use TrueType `glyf` outlines. Load each family/weight before `attach()`; multiple loaded files are registered, and a requested missing weight uses the nearest registered face. The framework does not synthesize bold or select system fallback fonts. CFF/CFF2-only OTF outlines, variable font deltas, emoji color tables, complex script shaping, ligatures, and bidi layout are not supported. See [font, transform, cursor, and animation details](animations-fonts-transforms.md).
 
 To customize the window, construct `Xui` with `XuiOptions`:
 

@@ -98,6 +98,10 @@ namespace xui {
 		windowDesc.minWidth = m_options.minWidth; windowDesc.minHeight = m_options.minHeight;
 		windowDesc.resizable = m_options.resizable; windowDesc.visible = m_options.visible;
 		windowDesc.glContext = m_options.glContext;
+		// Window[platformTopMenu: false] requests client-drawn chrome; the backend either hosts
+		// it (borderless + native drag/snap on Windows) or keeps native decorations and reports
+		// the fallback through Platform::setDecorated.
+		windowDesc.decorations = !documentUsesClientChrome(m_assets.document, m_strings);
 		m_window = m_platform->createWindow(windowDesc);
 		if (!m_window.valid()) { setError("Could not create the application window."); shutdown(); return false; }
 		m_platform->makeGlCurrent(m_window);
@@ -106,11 +110,15 @@ namespace xui {
 		const f32 dpi = m_platform->dpiScale(m_window);
 		if (pixels.x <= 0 || pixels.y <= 0 || !m_renderer->init({ u32(pixels.x), u32(pixels.y), dpi,
 				m_platform->nativeWindowHandle(m_window), m_options.vsync })) {
-			setError("Could not initialize the renderer backend."); shutdown(); return false;
+			const std::string_view detail = m_renderer->lastError();
+			setError(detail.empty() ? "Could not initialize the renderer backend."
+				: "Could not initialize the renderer backend: " + std::string(detail));
+			shutdown(); return false;
 		}
 		m_rendererReady = true;
-		m_runtime.setRenderer(&renderer);
-		m_platform->setLiveResizeHook(m_window, renderFrameThunk, this);
+	m_runtime.setRenderer(&renderer);
+	m_platform->setLiveResizeHook(m_window, renderFrameThunk, this);
+	m_runtime.setPlatformWindow(m_platform, m_window);
 		m_widthPixels = u32(pixels.x); m_heightPixels = u32(pixels.y);
 		if (!m_text.initAtlas(m_renderer, m_options.atlasSize)) {
 			setError("Could not initialize the glyph atlas."); shutdown(); return false;
@@ -231,7 +239,7 @@ namespace xui {
 			m_renderer->resize(u32(pixels.x), u32(pixels.y), dpi);
 			m_widthPixels = u32(pixels.x); m_heightPixels = u32(pixels.y);
 		}
-		m_runtime.layout(logical.x, logical.y);
+		m_runtime.layout(logical.x, logical.y, dpi);
 		m_text.beginFrame();
 		m_painter.begin(u32(pixels.x), u32(pixels.y), dpi);
 		m_runtime.paint(m_painter, dpi);
@@ -253,6 +261,7 @@ namespace xui {
 
 	void Xui::shutdown() {
 		m_runtime.setRenderer(nullptr);
+		m_runtime.setPlatformWindow(nullptr, WindowHandle{});
 		if (m_platform && m_window.valid()) m_platform->setLiveResizeHook(m_window, nullptr, nullptr);
 		if (m_rendererReady && m_text.atlas()->ready()) m_text.atlas()->shutdown();
 		if (m_rendererReady && m_renderer) m_renderer->shutdown();

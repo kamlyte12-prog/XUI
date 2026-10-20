@@ -26,7 +26,8 @@ namespace xui {
 	XuiSchema XuiSchema::withCoreWidgets() {
 		XuiSchema s;
 		auto W = [&](const char* t, std::vector<std::string> ctor, std::vector<std::string> props) { s.addWidget(t, std::move(ctor), std::move(props)); };
-		W("Window", { "title", "size" }, { "resizable" });
+		W("Window", { "title", "size" }, { "resizable", "platformTopMenu" });
+		W("TitleBar", {}, { "platformButtons" });
 		W("Row", { "gap" }, { "wrap" });          W("Column", { "gap" }, { "wrap" });
 		W("Grid", { "columns" }, { "rows", "gap" });  W("Stack", {}, {});
 		W("Split", { "direction" }, { "ratio", "gutter", "collapsible" });

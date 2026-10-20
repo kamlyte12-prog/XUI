@@ -3,6 +3,7 @@
 #include <xui/render/renderer.hpp>
 #include <GLFW/glfw3.h>
 #include <cstddef>
+#include <string>
 #include <vector>
 
 using XuiGLsizeiptr = std::ptrdiff_t;
@@ -17,6 +18,7 @@ using XuiGLintptr = std::ptrdiff_t;
 #define GL_ARRAY_BUFFER 0x8892
 #define GL_ELEMENT_ARRAY_BUFFER 0x8893
 #define GL_STREAM_DRAW 0x88E0
+#define GL_INFO_LOG_LENGTH 0x8B84
 #endif
 
 /// OpenGL 2.1 renderer for the backend-neutral Xui DrawList contract.
@@ -34,6 +36,7 @@ public:
 	void endFrame() override {}
 	void present() override {}
 	xui::RendererCaps caps() const override { return { "OpenGL 2.1 DrawList renderer", 4096, false, false, false }; }
+	std::string_view lastError() const override { return m_error; }
 	xui::u32 width() const { return m_width; }
 	xui::u32 height() const { return m_height; }
 
@@ -48,12 +51,14 @@ private:
 	using ShaderSourceFn = void (APIENTRY*)(GLuint, GLsizei, const char* const*, const GLint*);
 	using CompileShaderFn = void (APIENTRY*)(GLuint);
 	using GetShaderivFn = void (APIENTRY*)(GLuint, GLenum, GLint*);
+	using GetShaderInfoLogFn = void (APIENTRY*)(GLuint, GLsizei, GLsizei*, char*);
 	using DeleteShaderFn = void (APIENTRY*)(GLuint);
 	using CreateProgramFn = GLuint(APIENTRY*)();
 	using AttachShaderFn = void (APIENTRY*)(GLuint, GLuint);
 	using BindAttribLocationFn = void (APIENTRY*)(GLuint, GLuint, const char*);
 	using LinkProgramFn = void (APIENTRY*)(GLuint);
 	using GetProgramivFn = void (APIENTRY*)(GLuint, GLenum, GLint*);
+	using GetProgramInfoLogFn = void (APIENTRY*)(GLuint, GLsizei, GLsizei*, char*);
 	using DeleteProgramFn = void (APIENTRY*)(GLuint);
 	using UseProgramFn = void (APIENTRY*)(GLuint);
 	using GetUniformLocationFn = GLint(APIENTRY*)(GLuint, const char*);
@@ -71,8 +76,10 @@ private:
 
 	CreateShaderFn m_createShader = nullptr; ShaderSourceFn m_shaderSource = nullptr;
 	CompileShaderFn m_compileShader = nullptr; GetShaderivFn m_getShaderiv = nullptr; DeleteShaderFn m_deleteShader = nullptr;
+	GetShaderInfoLogFn m_getShaderInfoLog = nullptr;
 	CreateProgramFn m_createProgram = nullptr; AttachShaderFn m_attachShader = nullptr; BindAttribLocationFn m_bindAttribLocation = nullptr;
 	LinkProgramFn m_linkProgram = nullptr; GetProgramivFn m_getProgramiv = nullptr; DeleteProgramFn m_deleteProgram = nullptr;
+	GetProgramInfoLogFn m_getProgramInfoLog = nullptr;
 	UseProgramFn m_useProgram = nullptr; GetUniformLocationFn m_getUniformLocation = nullptr;
 	Uniform2fFn m_uniform2f = nullptr; Uniform1iFn m_uniform1i = nullptr;
 	GenBuffersFn m_genBuffers = nullptr; BindBufferFn m_bindBuffer = nullptr; BufferDataFn m_bufferData = nullptr;
@@ -83,5 +90,6 @@ private:
 	GLuint m_program = 0, m_vertexBuffer = 0, m_indexBuffer = 0;
 	GLint m_viewportLoc = -1, m_textureLoc = -1, m_hasTextureLoc = -1;
 	xui::u32 m_width = 0, m_height = 0;
+	std::string m_error;
 	std::vector<Texture> m_textures;
 };

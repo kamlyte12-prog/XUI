@@ -29,6 +29,9 @@ namespace xui {
 		CornerRadii radius;
 		bool dashed = false; f32 dashLength = 6;         ///< dp period (50% duty)
 		bool gradient = false; Color gradientEnd{ 0, 0, 0, 0 }; f32 gradientAngle = 0;   ///< 0 = left->right, pi/2 = top->bottom
+		u8 gradientKind = 0; ///< 0 linear, 1 radial, 2 conic
+		u8 gradientStopCount = 0; ///< 2-4 evenly spaced color stops
+		Color gradientStops[4]{};
 	};
 	struct ShadowStyle {
 		Color color{ 0, 0, 0, 0.5f };
@@ -56,6 +59,8 @@ namespace xui {
 		void setLayer(u32 layer);
 		void pushClip(Rect logical);           ///< intersects with the current clip; rounded OUT to whole physical pixels
 		void popClip();
+		void pushTransform(Mat3 logical);
+		void popTransform();
 		void pushOpacity(f32 alpha);           ///< multiplies the alpha of everything drawn until popOpacity (per primitive)
 		void popOpacity();
 
@@ -103,7 +108,7 @@ namespace xui {
 		Options m_opt;
 		f32 m_dpi = 1.f; u32 m_w = 0, m_h = 0, m_cellsX = 0, m_cellsY = 0;
 		u32 m_layer = 0, m_nextCustom = 1;
-		std::vector<ClipI> m_clips; std::vector<f32> m_opacity;
+		std::vector<ClipI> m_clips; std::vector<f32> m_opacity; std::vector<Mat3> m_transforms;
 		std::vector<Vertex> m_verts; std::vector<Prim> m_prims; std::vector<u32> m_indices; std::vector<DrawCmd> m_cmds;
 		Layer m_layers[kMaxLayers];
 		Stats m_stats;

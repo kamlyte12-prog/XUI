@@ -28,6 +28,8 @@ namespace xui {
 	/// Function called when an authored widget event is activated.
 	using UiEventFn = void (*)(void* context, std::string_view handlerName);
 
+	enum class AnimationMode : u8 { Once, Loop };
+
 	/// Values exposed by stateful controls through their authored `.xui` id.
 	struct DockPanelValue {
 		DockZone region = DockZone::Center;
@@ -41,6 +43,19 @@ namespace xui {
 	};
 
 	using UiValue = std::variant<bool, f64, std::string, Color, u32, Vec2, DockPanelValue>;
+
+	/// Layout snapshot of one TitleBar widget. The bar paints through the normal widget path;
+	/// `minimize`/`maximize`/`close` are the framework-drawn caption zones (valid when `buttons`).
+	struct TitleBarRegion {
+		u32 node = 0xFFFFFFFFu;
+		Rect bar{};
+		Rect minimize{}, maximize{}, close{};
+		bool buttons = false;
+	};
+
+	/// True when the document's Window root opts into client-drawn chrome
+	/// (`Window[platformTopMenu: false]`). The facade reads this before creating the window.
+	bool documentUsesClientChrome(const Document& document, StringInterner& strings);
 
 	/// Runtime bridge for a deliberately small, usable widget subset.
 	///
@@ -67,8 +82,10 @@ namespace xui {
 		bool setTheme(std::string_view name);
 		u32 theme() const { return m_theme; }
 
-		/// Lay out the retained tree in logical pixels.
+		/// Lay out the retained tree in logical pixels, retaining the last DPI scale.
 		void layout(f32 width, f32 height);
+		/// Pass the current DPI so intrinsic text measurements match paint()'s glyph raster size.
+		void layout(f32 width, f32 height, f32 dpiScale);
 		/// Paint styled shapes and glyph-atlas-backed text in logical coordinates. Glyphs are rasterized
 		/// at physical resolution so high-DPI displays stay crisp.
 		void paint(Painter& painter, f32 dpiScale = 1.f);
@@ -90,6 +107,13 @@ namespace xui {
 		bool takeDamage(Rect& out) { if (!m_hasDamage) return false; out = m_damage; m_hasDamage = false; return true; }
 
 		void setEventHandler(UiEventFn fn, void* context) { m_eventFn = fn; m_eventContext = context; }
+		/// Wire the platform so TitleBar caption buttons and window dragging act on the window.
+		/// Without it a TitleBar still renders, but window controls degrade gracefully.
+		void setPlatformWindow(Platform* platform, WindowHandle window) { m_platform = platform; m_windowHandle = window; }
+		/// True when the document authors at least one TitleBar widget (client-drawn chrome).
+		bool hasTitleBars() const { return !m_titleBars.empty(); }
+		/// Current TitleBar geometry for hit-testing/debug tools/tests.
+		std::vector<TitleBarRegion> titleBarRegions() const;
 		/// Debug aid: render spaces as a middle dot and tabs as a right arrow in editable fields.
 		/// Caret and selection geometry follow the substituted glyphs so positions stay aligned.
 		void setWhitespaceVisible(bool visible) { m_showWhitespace = visible; }
@@ -105,6 +129,11 @@ namespace xui {
 		std::string_view controlText(std::string_view id) const;
 		std::optional<UiValue> value(std::string_view id) const;
 		bool setValue(std::string_view id, const UiValue& value, bool notify = false);
+		/// Restart the XSS animation declared for an authored node. Once completes at its final frame;
+		/// Loop repeats until cancelAnimation(). A new play request overrides and restarts current playback.
+		bool playAnimation(std::string_view id, AnimationMode mode = AnimationMode::Once);
+		/// Stop an authored animation at its current sampled values. The next playAnimation() starts over.
+		bool cancelAnimation(std::string_view id);
 		Vec2 scrollOffset(std::string_view id) const;
 		bool scrollTo(std::string_view id, Vec2 offset, bool smooth = false);
 		bool scrollIntoView(std::string_view id, bool smooth = false);
@@ -115,6 +144,13 @@ namespace xui {
 		u32 nodeCount() const { return m_authoredNodeCount; }
 
 	private:
+		struct StyleTween {
+			PropId property = PropId::Bg;
+			StyleValue from, to;
+			std::chrono::steady_clock::time_point start{};
+			f32 durationMs = 0, delayMs = 0;
+			Easing easing;
+		};
 		struct Node {
 			NodeId layout;
 			StrId type, id, pressHandler;
@@ -124,7 +160,17 @@ namespace xui {
 			std::string dockHandler, undockHandler, resizeHandler, tabChangeHandler, closeHandler;
 			StyleSetId styleSet;
 			StyleSetId dockHeaderStyleSet, dockTabStyleSet, dockCloseStyleSet, dockSplitterStyleSet, dockPreviewStyleSet;
+			Mat3 paintTransform;
 			PropTable style;
+			std::vector<StyleTween> styleTweens;
+			StrId keyframeName;
+			std::chrono::steady_clock::time_point keyframeStart{};
+			f32 keyframeDurationMs = 0;
+			u32 keyframeIterations = 1;
+			bool keyframeInfinite = false, keyframeActive = false;
+			bool animationTriggered = false, animationCancelled = false;
+			AnimationMode animationMode = AnimationMode::Once;
+			Easing keyframeEase;
 			FontHandle font;
 			StateMask resolvedStates = 0;
 			bool styleResolved = false;
@@ -143,6 +189,8 @@ namespace xui {
 			bool indeterminate = false;
 			bool dockHost = false, dockPanel = false, dockClosable = true, dockClosed = false;
 			bool dockFloatingInitial = false;
+			bool titleBar = false, titleBarButtons = true;
+			StyleSetId titleButtonStyleSet;
 			Vec2 dockPreferredSize{ 360.f, 260.f };
 			f32 dockHeaderHeight = 30.f, dockGutter = 5.f;
 			bool scrollSmooth = false, scrollAnimating = false, scrollDragX = false, scrollDragY = false;
@@ -219,6 +267,14 @@ namespace xui {
 		bool selectSegment(Node& node, u32 index, bool notify);
 		void updateDockLayouts();
 		void updateDockHostLayout(DockHostState& host, bool force = false);
+		// TitleBar: caption buttons, drag-to-move, double-click maximize. Window actions run
+		// through the Platform interface set by setPlatformWindow().
+		u32 frontTitleBar(Vec2 point) const;
+		bool isInteractiveNode(u32 index) const;
+		void titleCaptionRects(const Rect& barRect, Rect& minimize, Rect& maximize, Rect& close) const;
+		bool titlePointerDown(Vec2 point);
+		bool titlePointerMove(Vec2 point);
+		bool titlePointerUp(Vec2 point);
 		DockHostState* dockHostForPanel(u32 panelNode);
 		const DockHostState* dockHostForPanel(u32 panelNode) const;
 		DockHostState* dockHostAt(Vec2 point);
@@ -245,6 +301,18 @@ namespace xui {
 		std::vector<Node> m_nodes;
 		std::vector<u32> m_interactiveNodes;
 		std::vector<u32> m_splitNodes;
+		std::vector<u32> m_titleBars;
+		Platform* m_platform = nullptr;
+		WindowHandle m_windowHandle{};
+		bool m_clientChrome = false;
+		// TitleBar interaction state (one gesture at a time; multiple bars share it).
+		u32 m_titleDragBar = 0xFFFFFFFFu;
+		u32 m_titleLastDownBar = 0xFFFFFFFFu;
+		u8 m_titlePress = 0;      // 0 none, 1 minimize, 2 maximize, 3 close
+		u8 m_titleHover = 0;
+		Vec2 m_titleLastDownPos{};
+		std::chrono::steady_clock::time_point m_titleLastDown{};
+		std::vector<u32> m_dockOrderScratch;
 		std::vector<DockHostState> m_dockHosts;
 		StyleSetId m_tooltipStyleSet;
 		std::vector<GlyphQuad> m_glyphScratch;
@@ -262,6 +330,7 @@ namespace xui {
 		void* m_eventContext = nullptr;
 		Renderer* m_renderer = nullptr;
 		std::chrono::steady_clock::time_point m_spinnerDeadline{};
+		std::chrono::steady_clock::time_point m_animationDeadline{};
 		std::chrono::steady_clock::time_point m_caretBlinkDeadline{};
 		bool m_caretVisible = true;
 		bool m_showWhitespace = false;

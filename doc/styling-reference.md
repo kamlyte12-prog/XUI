@@ -28,8 +28,10 @@ Side shorthands use one to four values: one applies to all sides; two means vert
 | `min-height`, `max-height` | One length | Height constraints; use px or `%`; applied after height resolution. |
 | `opacity` | One number | Multiplies paint alpha, clamped to 0–1; default 1. |
 | `shadow` | 1–6 numeric/color/identifier values | Runtime reads x, y, blur, spread, and color; default no shadow. The optional sixth value is currently unused. |
+| `glow` | `blur spread color` | Draws a separate outer halo using the SDF shadow primitive; e.g. `glow: 10px 1px #5b8cff80`. It does not replace or modify `shadow`. |
+| `gradient` | `linear-gradient(angle, stops...)`, `radial-gradient(stops...)`, or `conic-gradient(angle, stops...)` | Fills a widget background with 2–4 evenly spaced colors. Angles use degrees; custom stop positions and gradient borders/text are not supported. |
 | `blur` | One number | Accepted and compiled; standard runtime does not apply a blur effect. |
-| `transform` | 1–6 number/identifier/function values | `translate`, `scale`, and `rotate`-like syntax can compile; standard runtime does not transform widgets. |
+| `transform` | Up to 6 values using `translate(x, y)`, `scale(x[, y])`, and `rotate(angle)` | Applies a paint transform to the widget and its descendants; hit testing uses the inverse transform. Translation values use logical pixels or percentages of the widget size; rotation uses degrees. |
 | `font` (`font-family`) | One string or identifier | Selects a loaded family; default is the first `loadFont()` face, or no glyph rendering if none was loaded. |
 | `font-size` | One number | Logical font size, default 16; actual rasterization scales with DPI. |
 | `font-weight` | One number or identifier | Numeric 100–900 selects nearest registered face weight; default 400. Identifier keywords compile but do not map to weights in the runtime. |
@@ -38,11 +40,12 @@ Side shorthands use one to four values: one applies to all sides; two means vert
 | `justify` | One identifier | `Start`, `Center`, `End`, `SpaceBetween`, `SpaceAround`, `SpaceEvenly`; main-axis distribution for flex containers. Default `Start`. |
 | `grow` | One number | Flex grow factor; default 0. |
 | `shrink` | One number | Flex shrink factor; default 1. |
-| `cursor` | One identifier | Accepted and compiled; runtime does not set a cursor from `.xss`. |
+| `cursor` | `default`, `pointer`, `text`, `crosshair`, `resize-ew`, `resize-ns`, `resize-nwse`, `resize-nesw`, `move`, `not-allowed`, `grab`, `grabbing`, `hidden` | Explicit `.xss` value overrides widget cursor defaults. Backends may map unsupported shapes to a nearby cursor. |
 | `z-index` | One number | Accepted and compiled but not applied. Runtime stacking follows tree order; tab headers and popups use fixed overlay layers. |
 | `clip` | One identifier or number | Accepted and compiled; runtime clips text to widget bounds and popups to their boxes, but does not apply this property. |
 | `overflow` | 1–2 identifiers | Accepted and compiled; not interpreted by the standard runtime. |
-| `animation` | 1–6 identifiers/numbers/easing curves | Keyframe name is validated and retained; runtime does not animate it. |
+| `animation` | `name duration [iterations|infinite|paused] [easing]` | Named keyframes start automatically unless `paused` is present. `Xui::playAnimation(id, Once|Loop)` starts/restarts them; `cancelAnimation(id)` freezes the current sample. Duration accepts `ms` or `s`; default is one iteration. |
+| `value` | One number, inside keyframes | Animates the normalized value of `ProgressBar` and other runtime controls that expose a numeric value; the ordinary visual style rule does not set control state. |
 | `scroll-track` | One color or color token | Scrollbar track tint for `ScrollView`; default translucent dark track. |
 | `scroll-thumb` | One color or color token | Scrollbar thumb tint; participates in `hover` and `pressed` state resolution. |
 | `scrollbar-size` | One number | Scrollbar thickness in logical pixels, clamped to 4–24; default 10. |
@@ -83,13 +86,52 @@ Every runtime-created authored node receives a matched `StyleSetId` and resolves
 | `CheckBox`, `CheckItem`, `Switch` | Check tick and switch knob use fixed contrast colors | These marks remain legible over the accent fill; their indicator fill/border/track and labels use owner style values. |
 | `Spinner` | Eight-tick geometry and 80 ms step cadence | Animation geometry is a control behavior; tick color and opacity inherit the resolved foreground/disabled state. |
 | `SearchField` | Clear affordance geometry is fixed | It is a built-in hit target; field surface, text, border, radius, opacity and states remain style-driven. |
+| `TitleBar` caption zones | Minimize/maximize glyph shapes are fixed painter marks; zones are equal-width (46 px) at the bar's right end | Zone geometry is owned by the window-chrome layer so children can never underlap it. The `TitleButton` selector styles zone `fg`, `bg`, `radius`, `opacity`, and `hover`/`pressed` states; the bar itself is a normal `TitleBar` style target. |
 | Theme-driven layout metrics | Changing palette re-resolves paint/text but does not reconstruct the merged `.xui`/`.xss` `LayoutStyle` | Explicit `.xui` geometry precedence must be preserved during a theme swap; keep `pad`, `gap`, `size`, min/max, and margins theme-invariant for now. |
 
-No widget type is wholly unstyleable in the standard runtime. Unsupported property behavior is recorded in the property table above (`blur`, `transform`, `z-index`, generic `overflow`, cursor, and animation playback are accepted by the compiler but not applied by the runtime).
+No widget type is wholly unstyleable in the standard runtime. `blur`, `z-index`, and generic `overflow` are accepted by the compiler but are not applied by the runtime. Transformed clips use axis-aligned scissor bounds, and overlay popups remain in window coordinates.
+
+## Alpha, gradients, and glow
+
+`bg` colors can include alpha (`#rrggbbaa`); `opacity` multiplies the authored widget's own paint, including its own text and composite marks. Child nodes resolve opacity independently. Both affect paint only. A transparent widget remains eligible for hit testing according to its widget type and layout bounds.
+
+Gradients are authored as a single `gradient` value. Linear/conic forms take an angle first; radial does not. The runtime evenly spaces two to four stops. They fill the rounded widget background and preserve stop alpha. Stop locations, gradient borders, and gradient text are not implemented.
+
+`glow` is a separate outer halo; `shadow` keeps its offset drop-shadow behavior. Glow uses the existing SDF shadow draw primitive with zero offset, so each glowing widget adds render work and overlapping halos can be costly. The runtime does not cache pre-blurred glow textures. Keep blur radii modest and avoid animating many large glows at once.
+
+## Transitions and keyframes
+
+Transitions animate changed paint values when a control enters the declared destination state. `all` selects all supported paint properties; otherwise list property names:
+
+```xss
+Button.action {
+  resting: { bg: #2459a6, glow: 0px 0px #559cff00 }
+  hover: { bg: #397dd1, glow: 8px 0px #559cff99 }
+  transition: resting -> hover 160ms ease-out bg glow
+  transition: hover -> resting 160ms ease-out bg glow
+}
+```
+
+Named keyframes use `animation: name duration [count|infinite] [easing]`:
+
+```xss
+Panel.pulse { resting: { animation: pulse 900ms infinite ease-in-out } }
+keyframes pulse {
+  from { opacity: 0.5 }
+  50% { opacity: 1 }
+  to { opacity: 0.5 }
+}
+```
+
+Numbers with matching units, colors, and compatible transform function sequences animate. Layout and font face/weight are not interpolated. `animation: name duration paused ...` holds the first keyframe until `Xui::playAnimation(id, mode)` is called. `Once` plays one cycle and leaves the last sample applied; `Loop` repeats until `cancelAnimation(id)`, which holds its current sample. A later play request overrides and restarts playback. The runtime schedules frames only while visible animations are active; static and paused screens return to the event wait. See [the motion showcase](../examples/showcase.xui) and [stylesheet](../examples/showcase.xss).
+
+## Cursor values
+
+Use `cursor` on a widget selector or state block. If unset, the runtime chooses a widget default (for example, `Button` uses a hand and editable fields use an I-beam). GLFW maps `resize-nwse`, `resize-nesw`, `move`, `grab`, and `grabbing` to a hand cursor where no matching standard shape is available; `not-allowed` falls back to the arrow. Hidden cursor mode is supported by GLFW. Alpha and cursor styling do not change hit testing.
 
 ## Token expressions
 
-`tokens { name = value }` declares reusable values. Dotted names such as `color.primary.hover` are ordinary token names. The compiler supports arithmetic on numbers with compatible units and color methods `.mix()`, `.darken()`, `.lighten()`, `.alpha()`, `.saturate()`, and `.desaturate()`. Select a palette at runtime with `Xui::setTheme("dark")` after `loadXss()` or before `attach()`. Palette colors and text properties resolve from the selected theme across authored widgets and popup/editor overlays. The current runtime does not reapply theme-dependent layout declarations (`pad`, `gap`, `size`, etc.) after the initial `.xui`/`.xss` merge; keep geometry tokens theme-invariant for now. Keyframes/transitions compile but are not animated.
+`tokens { name = value }` declares reusable values. Dotted names such as `color.primary.hover` are ordinary token names. The compiler supports arithmetic on numbers with compatible units and color methods `.mix()`, `.darken()`, `.lighten()`, `.alpha()`, `.saturate()`, and `.desaturate()`. Select a palette at runtime with `Xui::setTheme("dark")` after `loadXss()` or before `attach()`. Palette colors and text properties resolve from the selected theme across authored widgets and popup/editor overlays. The current runtime does not reapply theme-dependent layout declarations (`pad`, `gap`, `size`, etc.) after the initial `.xui`/`.xss` merge; keep geometry tokens theme-invariant for now. Transitions and visible keyframes animate supported paint values and transforms; see [Transitions and keyframes](#transitions-and-keyframes).
 
 ## Text inheritance
 

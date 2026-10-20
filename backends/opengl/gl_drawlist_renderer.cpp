@@ -8,13 +8,14 @@ namespace {
 	const char* vs = R"GLSL(#version 120
 attribute vec2 p,uv; 
 attribute vec4 c0,c1; 
+attribute vec4 c2,c3;
 attribute vec2 halfSize; 
 attribute vec4 radii; 
 attribute vec2 aux;
 attribute float border,prim,flags; 
 uniform vec2 viewport;
 varying vec2 P,U,H,A; 
-varying vec4 C0,C1,R; 
+varying vec4 C0,C1,C2,C3,R;
 varying float B,T,F;
 void main(){
 	gl_Position=vec4(p.x*2.0/viewport.x-1.0,1.0-p.y*2.0/viewport.y,0.0,1.0);
@@ -22,6 +23,8 @@ void main(){
 	U=uv;
 	C0=c0.wzyx;
 	C1=c1.wzyx;
+	C2=c2.wzyx;
+	C3=c3.wzyx;
 	H=halfSize;
 	R=radii*.25;
 	A=aux;
@@ -33,7 +36,7 @@ void main(){
 uniform sampler2D tex; 
 uniform int hasTex;
 varying vec2 P,U,H,A; 
-varying vec4 C0,C1,R; 
+varying vec4 C0,C1,C2,C3,R;
 varying float B,T,F;
 float cov(float d){
 	return clamp(.5-d,0.0,1.0);
@@ -55,8 +58,14 @@ void main(){
 	if(T<.5){
 		float d=rr(U,H,R),o=cov(d);
 		if(mod(F,2.0)>0.5){
-			float den=abs(H.x*A.x)+abs(H.y*A.y);
-			c=mix(C0,C1,den>0.0?clamp(.5+.5*dot(U,A)/den,0.0,1.0):0.0);
+			float g=0.0;
+			if(mod(floor(F/16.0),2.0)>0.5)g=fract(atan(U.y,U.x)/6.28318530718+.5-A.x/6.28318530718);
+			else if(mod(floor(F/8.0),2.0)>0.5)g=clamp(length(U)/max(length(H),.0001),0.0,1.0);
+			else{float den=abs(H.x*A.x)+abs(H.y*A.y);g=den>0.0?clamp(.5+.5*dot(U,A)/den,0.0,1.0):0.0;}
+			float n=mod(floor(F/64.0),2.0)>.5?4.0:(mod(floor(F/32.0),2.0)>.5?3.0:2.0);
+			float gt=g*(n-1.0),seg=min(n-2.0,floor(gt)),local=gt-seg;
+			vec4 stopA=seg<.5?C0:(seg<1.5?C1:C2),stopB=seg<.5?C1:(seg<1.5?C2:C3);
+			c=mix(stopA,stopB,local);
 			a=c.a*o;
 		}
 		else if(B<=0.0)a=C0.a*o;
@@ -103,12 +112,14 @@ bool GlDrawListRenderer::loadFunctions() {
 		load(m_shaderSource, "glShaderSource") &&
 		load(m_compileShader, "glCompileShader") &&
 		load(m_getShaderiv, "glGetShaderiv") &&
+		load(m_getShaderInfoLog, "glGetShaderInfoLog") &&
 		load(m_deleteShader, "glDeleteShader") &&
 		load(m_createProgram, "glCreateProgram") &&
 		load(m_attachShader, "glAttachShader") &&
 		load(m_bindAttribLocation, "glBindAttribLocation") &&
 		load(m_linkProgram, "glLinkProgram") &&
 		load(m_getProgramiv, "glGetProgramiv") &&
+		load(m_getProgramInfoLog, "glGetProgramInfoLog") &&
 		load(m_deleteProgram, "glDeleteProgram") &&
 		load(m_useProgram, "glUseProgram") &&
 		load(m_getUniformLocation, "glGetUniformLocation") &&
@@ -132,6 +143,16 @@ bool GlDrawListRenderer::createProgram() {
 		m_compileShader(x);GLint ok = 0;
 		m_getShaderiv(x, GL_COMPILE_STATUS, &ok);
 		if (!ok) {
+			GLint logLength = 0;
+			m_getShaderiv(x, GL_INFO_LOG_LENGTH, &logLength);
+			if (logLength > 1) {
+				std::string log(static_cast<std::size_t>(logLength), '\0');
+				GLsizei written = 0;
+				m_getShaderInfoLog(x, logLength, &written, log.data());
+				log.resize(static_cast<std::size_t>(std::max<GLsizei>(0, written)));
+				m_error = std::string(t == GL_VERTEX_SHADER ? "OpenGL vertex shader compilation failed: " : "OpenGL fragment shader compilation failed: ") + log;
+			}
+			else m_error = t == GL_VERTEX_SHADER ? "OpenGL vertex shader compilation failed." : "OpenGL fragment shader compilation failed.";
 			m_deleteShader(x);
 			return GLuint(0);
 		}
@@ -143,13 +164,23 @@ bool GlDrawListRenderer::createProgram() {
 		if (b)m_deleteShader(b);return false;
 	}
 	m_program = m_createProgram();m_attachShader(m_program, a);m_attachShader(m_program, b);
-	const char* names[] = { "p","uv","c0","c1","halfSize","radii","aux","border","prim","flags" };
-	for (GLuint i = 0;i < 10;++i)m_bindAttribLocation(m_program, i, names[i]);
+	const char* names[] = { "p","uv","c0","c1","halfSize","radii","aux","border","prim","flags","c2","c3" };
+	for (GLuint i = 0;i < 12;++i)m_bindAttribLocation(m_program, i, names[i]);
 	m_linkProgram(m_program);
 	m_deleteShader(a);
 	m_deleteShader(b);GLint ok = 0;
 	m_getProgramiv(m_program, GL_LINK_STATUS, &ok);
 	if (!ok) {
+		GLint logLength = 0;
+		m_getProgramiv(m_program, GL_INFO_LOG_LENGTH, &logLength);
+		if (logLength > 1) {
+			std::string log(static_cast<std::size_t>(logLength), '\0');
+			GLsizei written = 0;
+			m_getProgramInfoLog(m_program, logLength, &written, log.data());
+			log.resize(static_cast<std::size_t>(std::max<GLsizei>(0, written)));
+			m_error = "OpenGL shader program link failed: " + log;
+		}
+		else m_error = "OpenGL shader program link failed.";
 		releaseProgram();
 		return false;
 	}
@@ -158,7 +189,9 @@ bool GlDrawListRenderer::createProgram() {
 	m_hasTextureLoc = m_getUniformLocation(m_program, "hasTex");return true;
 }
 bool GlDrawListRenderer::init(const RendererDesc& d) {
-	if (!loadFunctions() || !createProgram())return false;
+	m_error.clear();
+	if (!loadFunctions()) { m_error = "Required OpenGL 2.1 entry points are unavailable in the active context."; return false; }
+	if (!createProgram())return false;
 	resize(d.width, d.height, d.dpiScale);
 	m_genBuffers(1, &m_vertexBuffer);
 	m_genBuffers(1, &m_indexBuffer);
@@ -167,7 +200,12 @@ bool GlDrawListRenderer::init(const RendererDesc& d) {
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-	return m_vertexBuffer && m_indexBuffer;
+	if (!m_vertexBuffer || !m_indexBuffer) {
+		m_error = "Could not allocate the OpenGL draw-list buffers.";
+		shutdown();
+		return false;
+	}
+	return true;
 }
 void GlDrawListRenderer::shutdown() {
 	for (auto& t : m_textures)if (t.alive) {
@@ -248,6 +286,8 @@ void GlDrawListRenderer::submit(const DrawList& dl) {
 	at(7, 1, GL_UNSIGNED_SHORT, false, offsetof(Vertex, border));
 	at(8, 1, GL_UNSIGNED_BYTE, false, offsetof(Vertex, prim));
 	at(9, 1, GL_UNSIGNED_BYTE, false, offsetof(Vertex, flags));
+	at(10, 4, GL_UNSIGNED_BYTE, true, offsetof(Vertex, c2));
+	at(11, 4, GL_UNSIGNED_BYTE, true, offsetof(Vertex, c3));
 	for (u32 i = 0;i < dl.nCmds;++i) {
 		const auto& c = dl.cmds[i];
 		if (c.kind != DrawCmd::Triangles || !c.idxCount)continue;
@@ -264,7 +304,7 @@ void GlDrawListRenderer::submit(const DrawList& dl) {
 		glDrawElements(GL_TRIANGLES, GLsizei(c.idxCount),
 			GL_UNSIGNED_INT, reinterpret_cast<const void*>(size_t(c.idxOffset) * sizeof(u32)));
 	}
-	for (GLuint i = 0;i < 10;++i)m_disableVertexAttribArray(i);
+	for (GLuint i = 0;i < 12;++i)m_disableVertexAttribArray(i);
 	m_bindBuffer(GL_ARRAY_BUFFER, 0);
 	m_bindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 	m_useProgram(0);

@@ -42,6 +42,9 @@ namespace {
 			setText(app, "action-readout", "Action count: " + std::to_string(++action.actions));
 			app.setWindowTitle("Xui showcase - action " + std::to_string(action.actions));
 		}
+		else if (name == "onMeterOnce") app.playAnimation("event-meter", xui::AnimationMode::Once);
+		else if (name == "onMeterLoop") app.playAnimation("event-meter", xui::AnimationMode::Loop);
+		else if (name == "onMeterStop") app.cancelAnimation("event-meter");
 		else if (name == "onNameChange") {
 			if (const auto value = valueAs<std::string>(app, "display-name")) setText(app, "name-readout", value->empty() ? "(empty)" : *value);
 		}
@@ -194,13 +197,38 @@ namespace {
 			if (app.loadFont(path.string())) return true;
 		return false;
 	}
+
+	bool loadBoldFont(xui::Xui& app) {
+		std::vector<std::filesystem::path> paths;
+		if (const char* env = std::getenv("XUI_DEMO_BOLD_FONT")) paths.emplace_back(env);
+#ifdef _WIN32
+		paths.emplace_back("C:/Windows/Fonts/segoeuib.ttf");
+		paths.emplace_back("C:/Windows/Fonts/arialbd.ttf");
+#elif defined(__APPLE__)
+		paths.emplace_back("/System/Library/Fonts/Supplemental/Arial Bold.ttf");
+		paths.emplace_back("/System/Library/Fonts/SFNS.ttf");
+#else
+		paths.emplace_back("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf");
+		paths.emplace_back("/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf");
+#endif
+		for (const auto& path : paths)
+			if (app.loadFont(path.string(), "default", 700)) return true;
+		return false; // unavailable weights resolve to the nearest registered face.
+	}
 }
 
 int main(int argc, char** argv) {
-	bool profile = false;
+	std::string profileCase;
 	for (int i = 1; i < argc; ++i) {
-		profile |= std::string_view(argv[i]) == "--profile";
+		const std::string_view arg = argv[i];
+		if (arg == "--profile") profileCase = "idle";
+		else if (arg == "--profile-glow") profileCase = "glow";
+		else if (arg == "--profile-animation") profileCase = "animation";
+		else if (arg == "--profile-transform") profileCase = "transform";
+		else if (arg == "--profile-docking") profileCase = "docking";
+		else if (arg == "--profile-menubar") profileCase = "menubar";
 	}
+	const bool profile = !profileCase.empty();
 	xui::XuiOptions options;
 	options.appName = "xui-glfw-demo";
 	options.windowTitle = "Xui GLFW/OpenGL widget showcase";
@@ -231,8 +259,12 @@ int main(int argc, char** argv) {
 			}
 		xui::writePng("xui-demo-image.png", image);
 	}
-	if (!loadFirstFont(app) ||
-		!app.loadXui((directory / "showcase.xui").string()) ||
+	if (!loadFirstFont(app)) {
+		std::cerr << "No usable demo font was found. Set XUI_DEMO_FONT to a TTF file.\n";
+		return 1;
+	}
+	(void)loadBoldFont(app);
+	if (!app.loadXui((directory / "showcase.xui").string()) ||
 		!app.loadXss((directory / "showcase.xss").string())) {
 		std::cerr << app.lastError() << '\n';
 		return 1;
@@ -246,6 +278,29 @@ int main(int argc, char** argv) {
 		std::cerr << app.lastError() << '\n';
 		return 1;
 	}
+	if (profileCase == "glow" || profileCase == "animation" || profileCase == "transform") {
+		app.runtime().setValue("demo-sections", xui::u32{ 7 });
+		app.runtime().setValue("motion-tabs", xui::u32{ profileCase == "glow" ? 0u : 1u });
+		app.runtime().layout(1080.f, 760.f);
+	}
+	else if (profileCase == "docking") {
+		app.runtime().setValue("demo-sections", xui::u32{ 6 });
+		for (const auto [id, bounds] : { std::pair{ "dock-hierarchy", xui::Rect{ 70.f, 110.f, 300.f, 240.f } },
+			std::pair{ "dock-inspector", xui::Rect{ 200.f, 170.f, 300.f, 240.f } } }) {
+			if (auto value = app.runtime().value(id)) {
+				if (auto panel = std::get_if<xui::DockPanelValue>(&*value)) {
+					xui::DockPanelValue floating = *panel;
+					floating.floating = true; floating.bounds = bounds;
+					app.runtime().setValue(id, floating);
+				}
+			}
+		}
+		app.runtime().layout(1080.f, 760.f);
+	}
+	else if (profileCase == "menubar") {
+		// Keep the normal top-level page selected; the client-area menu is always visible.
+		app.runtime().layout(1080.f, 760.f);
+	}
 
 	// The showcase keeps the FPS counter visible from its first frame; F3 still toggles it.
 	app.runtime().keyDown(xui::Key::F3);
@@ -253,7 +308,7 @@ int main(int argc, char** argv) {
 	const int result = profile ? app.run({ 5.0, true }) : app.run();
 	if (profile) {
 		const auto& stats = app.lastRunStats();
-		std::cout << "Xui profile: " << stats.frames << " frames in " << stats.elapsedSeconds
+		std::cout << "Xui " << profileCase << " profile: " << stats.frames << " frames in " << stats.elapsedSeconds
 			<< " s (" << stats.framesPerSecond << " FPS)\n";
 	}
 	if (result != 0) std::cerr << app.lastError() << '\n';

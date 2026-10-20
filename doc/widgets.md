@@ -18,6 +18,8 @@ Window(title: "Tasks", size: 900x600) {
 
 `title` and `size` are retained by the runtime document, but `XuiOptions` configures the native window created by the facade. The schema accepts `resizable`; native resize behavior also comes from `XuiOptions`. Style `Window` for background and text defaults.
 
+The Window property `platformTopMenu: false` hides the platform's native title bar and opts into client-drawn chrome: the document must then contain a [`TitleBar`](#titlebar) widget, which becomes the draggable top menu with optional framework-drawn caption buttons. On backends that cannot host custom chrome (GLFW on macOS/Linux today), the native title bar is kept and the `TitleBar` renders as an ordinary bar without window dragging; see [platform caveats](#titlebar).
+
 ### `Column` and `Row`
 
 Vertical and horizontal flex-like flow containers. The schema accepts `gap` and `wrap` arguments/properties, but current arrangement uses `.xss gap` and does not wrap the flow. Use `.xss pad`, `align`, and `justify` to control arrangement; put `grow` on children that should take remaining main-axis space.
@@ -35,7 +37,7 @@ Row[class: "toolbar"] {
 
 Widgets with no authored width or height use their measured content plus `.xui`/`.xss` padding and border. Empty controls also have a useful content-box preferred size so they do not collapse while showing a placeholder or an empty value: buttons start at 96×36, checkboxes at 20×20, checklist items at 160×28, single-line fields at 160×28, text areas at 240×96, sliders at 160×24, progress bars at 160×16, dropdowns/color pickers at 156×34, switches at 44×24, and the FPS counter at 168×26 logical pixels. Search and number fields start at 180 px wide to leave room for their auxiliary glyphs. Labeled checkboxes/checklist items reserve 26 px for the mark, and labeled switches reserve 46 px for their track and gap.
 
-These are minimum preferred sizes, not fixed sizes: text fields grow with measured content and text areas grow with wrapped content when the parent allows it. Authored `width`, `height`, `minSize`, `minWidth`, and maximum constraints still govern the result. A minimum can be authored in `.xui` (`minSize: 220x90`, `minWidth: 50%`) or `.xss` (`min-size: 220px 90px`, `min-width: 50%`); it is an explicit floor and applies to nested containers as well as leaves. If a child floor exceeds available parent space, it can overflow the parent; use a `ScrollView` when the full child size must remain reachable. `Split` pane floors also limit gutter dragging, so size the Split to fit the sum of minima and gutters.
+These are minimum preferred sizes, not fixed sizes: text fields grow with measured content and text areas grow with wrapped content when the parent allows it. Text measurement includes the rasterized glyph bounds at the current DPI, not only font advances, so content-sized children in a `Row` leave room for the final glyph. Authored `width`, `height`, `minSize`, `minWidth`, and maximum constraints still govern the result. A minimum can be authored in `.xui` (`minSize: 220x90`, `minWidth: 50%`) or `.xss` (`min-size: 220px 90px`, `min-width: 50%`); it is an explicit floor and applies to nested containers as well as leaves. If a child floor exceeds available parent space, it can overflow the parent; use a `ScrollView` when the full child size must remain reachable. `Split` pane floors also limit gutter dragging, so size the Split to fit the sum of minima and gutters.
 
 Containers measure their in-flow children and include their own padding/border, so a content-sized `Column`, `Row`, or `Panel` grows to fit its children. A fixed size or a parent with insufficient space can still constrain that content; use `ScrollView` for intentionally bounded content.
 
@@ -91,6 +93,36 @@ DockHost[id: "workspace", width: 100%, height: 100%, minSize: 520x360] {
 
 `value(panelId)` returns a `DockPanelValue` with region, floating state, logical bounds, tab order, active state, host ID, and active tab ID. `setValue()` can dock/float/move/reorder/activate an open panel. Panel events are `dock`, `undock`, `resize`, `tabChange`, and `close`; query the value API from the event callback. Closed panels currently cannot be reopened through this API.
 
+### `TitleBar`
+
+A custom top menu that replaces the native title bar when the document's Window root sets `platformTopMenu: false`. It is a horizontal container: author ordinary widgets (`Dropdown`, `Button`, `Text`, …) inside it, style the bar itself through `.xss`, and the framework provides the window behaviors the native chrome used to give.
+
+```xui
+Window(title: "Editor", size: 1080x760)[platformTopMenu: false] {
+  TitleBar[id: "top-menu", class: "top-menu", platformButtons: true, width: 100%, height: 40px] {
+    Dropdown[options: "File|New|Open|Save", value: "File"]
+    Text("Editor")[class: "menu-title", grow: 1]
+  }
+  Column[class: "app", width: 100%, grow: 1] { /* pages */ }
+}
+```
+
+Behavior, owned by the framework through `platform_interface` (never per-app code):
+
+- **Drag to move:** pressing the bar outside interactive children starts a native window move. Interactive children (buttons, dropdowns, tabs, fields) keep their clicks and never start a drag; non-interactive children and empty gaps do.
+- **Double-click** the bar's non-interactive area toggles maximize/restore (platform convention; detected press-to-press because native move loops swallow the first release).
+- **Caption buttons:** with `platformButtons: true` (the default) the framework draws minimize, maximize/restore, and close zones at the bar's right end. They fire on release inside their zone and route through the platform (minimize, maximize/restore, close). Set `platformButtons: false` to author your own controls instead. The bar's right padding is reserved automatically so children never underlap the zones.
+- **Edge resize:** with native decorations hidden, a resize border operates at the window edges/corners with native resize cursors (Windows backend). Edge resize is unavailable while maximized, matching native behavior.
+
+Styling: the bar is styled like any widget (`TitleBar`, classes, id). The caption zones are styled through the `TitleButton` selector with `resting`/`hover`/`pressed` states (`fg`, `bg`, `radius`). Minimize/maximize glyphs are painter primitives; the close glyph is an `×` label.
+
+Platform caveats:
+
+- **Windows (GLFW):** full support — borderless frame with native drag, Aero Snap (drag-to-edge and Win+arrow), snap-aware double-click maximize, drag-to-restore when maximized, and edge resize.
+- **macOS / Linux (GLFW):** hiding decorations would leave no supported way to move or resize the window (Wayland especially), so `setDecorated(false)` is refused, the native title bar is kept, and the `TitleBar` renders as a normal non-dragging bar above your content. Do not rely on window dragging from the bar there.
+
+`platformTopMenu: false` without a `TitleBar` (or a `TitleBar` without it) is a document build error, so a window can never end up with neither native nor custom chrome.
+
 ## Text and action controls
 
 ### `Text`
@@ -110,6 +142,17 @@ Button(label: "Save", press: onSave)[class: "primary", align: Center]
 ```
 
 The runtime does not implement icon, loading, or variant rendering even though those names pass schema validation.
+
+`Button` can also contain authored child nodes. In that form its label is taken from its children, and `size: auto` measures nested text/content plus `.xss` padding and gap; min/max constraints still clamp the measured size:
+
+```xui
+Button[id: "help", class: "content-button"] {
+  Text("Read the guide")
+  Text("Opens the project documentation")
+}
+```
+
+Use a normal `Button(label: ...)` when the button needs only one label. Child content is laid out in a column.
 
 ### `CheckItem`
 
@@ -390,7 +433,7 @@ ColorPicker[id: "accent", value: #5b8cff, format: "hex", formats: "hex|rgb|hsl|h
   change: onAccent][class: "color-picker"]
 ```
 
-`format` selects the initially displayed format (`hex`, `rgb`, `hsl`, or `hsv`); `formats` is a pipe-separated list used by the switcher and its order. The default popup is 300×352 logical pixels, with a larger saturation/value field, hue/alpha bars, a preview/format row, aligned channel labels, and editable channel/hex fields. `popupSize` can enlarge it; the built-in editors require at least 260×340. `precision` rounds decimal components to 0–4 places. `alpha` defaults to true and forces alpha to 1 when false; `showAlpha` controls whether the alpha strip is visible. `showHue` and `showSaturationValue` hide their respective HSV surfaces; `showInputs` and `showFormatSwitcher` control the typed value row and format label. Hex input accepts `#rgb`, `#rgba`, `#rrggbb`, and `#rrggbbaa`; functional input accepts comma-separated `rgb(a)`, `hsl(a)`, and `hsv(a)` values, including percentage components for saturation/lightness/value. Named colors, CSS space-separated syntax, an inline layout, and individually themed hue/alpha sub-controls are not implemented yet. `.xss` controls the widget/popup surface and text through normal `size`, `bg`, `fg`, `border`, `radius`, `pad`, and state declarations; the hue spectrum and picker interaction geometry use consistent framework defaults.
+`format` selects the initially displayed format (`hex`, `rgb`, `hsl`, or `hsv`); `formats` is a pipe-separated list used by the switcher and its order. The default popup is 300×352 logical pixels, with a larger saturation/value field, hue/alpha bars, a preview/format row, aligned channel labels, and editable fields. HEX displays one hex editor; RGB/HSL/HSV display matching labeled component editors, with alpha when enabled. Switching format preserves the canonical color and refreshes those fields. `popupSize` can enlarge it; the built-in editors require at least 260×340. `precision` rounds decimal components to 0–4 places. `alpha` defaults to true and forces alpha to 1 when false; `showAlpha` controls whether the alpha strip is visible. `showHue` and `showSaturationValue` hide their respective HSV surfaces; `showInputs` and `showFormatSwitcher` control the typed value row and format label. Hex input accepts `#rgb`, `#rgba`, `#rrggbb`, and `#rrggbbaa`; functional input accepts comma-separated `rgb(a)`, `hsl(a)`, and `hsv(a)` values, including percentage components for saturation/lightness/value. Named colors, CSS space-separated syntax, an inline layout, and individually themed hue/alpha sub-controls are not implemented yet. `.xss` controls the widget/popup surface and text through normal `size`, `bg`, `fg`, `border`, `radius`, `pad`, and state declarations; the hue spectrum and picker interaction geometry use consistent framework defaults.
 
 Read the canonical backend-neutral `Color` (RGBA float components) with `ui.runtime().value("accent")` or `controlColor("accent")`. `controlText("accent")` returns the active formatted string. `setValue("accent", Color{...})` and `setValue("accent", std::string("hsl(210, 60%, 50%)"))` are supported; invalid strings return `false` and leave the color unchanged. The optional `change` callback is fired for live pointer changes and live valid typed changes. Clipboard copy/paste uses the platform interface.
 
@@ -498,6 +541,13 @@ Limitations: inertial/momentum scrolling, touch/gesture input, scrollbar corner 
 
 ## Schema-recognized, runtime-unsupported objects
 
-The current core schema also recognizes names that are not materialized by `UiRuntime::build()`: `Grid`, `Stack`, `MenuBar`, `Menu`, `MenuItem`, `Popover`, `Modal`, `ContextMenu`, `IconButton`, `RangeSlider`, `ComboBox`, `Icon`, `TreeView`, `ListView`, `Table`, `Canvas`, `HUD`, `Crosshair`, `RadialMenu`, `HealthBar`, and `DamageNumber`. (`DockSpace` aliases the runtime `DockHost`; `Toolbar` and `StatusBar` are implemented as plain horizontal containers.)
+The current core schema also recognizes names that are not materialized by `UiRuntime::build()`: `Grid`, `Stack`, `Menu`, `MenuItem`, `Popover`, `Modal`, `ContextMenu`, `IconButton`, `RangeSlider`, `ComboBox`, `Icon`, `TreeView`, `ListView`, `Table`, `Canvas`, `HUD`, `Crosshair`, `RadialMenu`, `HealthBar`, and `DamageNumber`. (`DockSpace` aliases the runtime `DockHost`; `Toolbar`, `StatusBar`, and `MenuBar` are horizontal containers.) `MenuBar` remains a plain client-area row of ordinary controls; the custom draggable top menu is the [`TitleBar`](#titlebar) widget together with `Window[platformTopMenu: false]`. A dedicated command-menu model and menu keyboard navigation are not implemented.
+
+```xui
+MenuBar[class: "client-menu"] {
+  Dropdown[options: "File|New|Open|Save", value: "File"]
+  Dropdown[options: "Edit|Undo|Redo", value: "Edit"]
+}
+```
 
 Use only the supported object list above in a document passed to `Xui::attach()`. Parser/schema entries are retained for future implementation and language validation; they are not native controls or hidden fallbacks.

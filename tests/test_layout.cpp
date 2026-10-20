@@ -274,6 +274,21 @@ TEST(docking_tree_nested_regions_tabs_floats_and_minimums) {
 	CHECK(tree.close(4));
 	CHECK(!tree.contains(4));
 }
+TEST(docking_floating_panel_z_order_tracks_raise_and_hit_testing) {
+	DockTree tree;
+	tree.reserve(3, 3);
+	CHECK(tree.addPanel(1, { 80, 60 }, { 180, 120 }));
+	CHECK(tree.addPanel(2, { 80, 60 }, { 180, 120 }, { 40, 30, 180, 120 }));
+	CHECK(tree.addPanel(3, { 80, 60 }, { 180, 120 }, { 70, 50, 180, 120 }));
+	tree.layout({ 0, 0, 500, 360 }, 6);
+	const Vec2 overlap{ 100, 80 };
+	CHECK(tree.panelAt(overlap) == 3u);
+	CHECK(tree.raiseFloating(2));
+	CHECK(tree.panelAt(overlap) == 2u);
+	CHECK(!tree.raiseFloating(2));
+	CHECK(tree.raiseFloating(3));
+	CHECK(tree.panelAt(overlap) == 3u);
+}
 TEST(layout_blender_like_nested_workspace) {
 	LayoutTree t; t.setLeafMeasure(leafZero, nullptr);
 	NodeId root = t.create(LayoutKind::Column, box(1920, 1080));

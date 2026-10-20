@@ -110,6 +110,24 @@ TEST(render_vertical_gradient_angle) {
 	CHECK(im.px(5, 0)[0] > 250 && im.px(5, 99)[0] < 5);
 	CHECK(std::abs(int(im.px(0, 50)[0]) - int(im.px(9, 50)[0])) <= 1);               // constant across x
 }
+
+TEST(sdf_linear_radial_conic_multi_stop_gradients) {
+	auto rgba = [](u32 color) {
+		return sdf::unpack(color);
+	};
+	auto sample = [](const sdf::Frag& f) { return sdf::shade(f, [](f32, f32) { return sdf::SampleResult{}; }); };
+	sdf::Frag f; f.prim = static_cast<u8>(Prim::RoundRect); f.flags = FlagGradient | FlagGradientThreeStops;
+	f.hx = 10.f; f.hy = 10.f; f.aux0 = 1.f; f.c0 = 0xFF0000FFu; f.c1 = 0x00FF00FFu; f.c2 = 0x0000FFFFu; f.c3 = f.c2;
+	f.u = 0.f; f.v = 0.f;
+	auto center = sample(f); CHECK_NEAR(center.g, 1.f, 0.01f); CHECK_NEAR(center.r, 0.f, 0.01f);
+	f.flags |= FlagGradientRadial; f.u = 0.f; f.v = 0.f;
+	center = sample(f); CHECK_NEAR(center.r, 1.f, 0.01f);
+	f.u = 9.f; f.v = 9.f;
+	auto corner = sample(f); CHECK(corner.b > 0.7f);
+	f.flags = FlagGradient | FlagGradientThreeStops | FlagGradientConic; f.aux0 = 0.f; f.u = 1.f; f.v = 0.f;
+	auto conic = sample(f); CHECK_NEAR(conic.g, 1.f, 0.01f);
+	(void)rgba;
+}
 TEST(render_dashed_border_alternates_with_the_requested_period) {
 	Env e(120, 40); Painter p; p.begin(120, 40, 1);
 	RectStyle s; s.border = { 1, 1, 1, 1 }; s.borderWidth = 2; s.dashed = true; s.dashLength = 8; s.radius = CornerRadii::all(0);
@@ -181,6 +199,22 @@ TEST(painter_scales_by_dpi_and_snaps) {
 	DrawList d2 = q.finish();
 	CHECK(near(d2.verts[0].x, 20.4f - 1, 1e-3));                                      // unsnapped edges can be partially covered: 1px margin
 	CHECK(near(d2.verts[0].hx, 20, 1e-3));
+}
+
+TEST(painter_transform_moves_geometry_and_clip_bounds) {
+	Painter painter; painter.begin(120, 80, 1.f);
+	painter.pushTransform(Mat3::translate(10.f, 5.f));
+	painter.pushClip({ 0.f, 0.f, 20.f, 20.f });
+	painter.fillRect({ 1.f, 2.f, 8.f, 6.f }, Color::fromRGBA8(0xFFFFFFFFu));
+	painter.popClip(); painter.popTransform();
+	const DrawList draw = painter.finish();
+	CHECK_EQ(draw.nVerts, 4u);
+	if (draw.nVerts == 4) {
+		CHECK(std::fabs(draw.verts[0].x - 11.f) < 0.01f);
+		CHECK(std::fabs(draw.verts[0].y - 7.f) < 0.01f);
+		CHECK(std::fabs(draw.verts[2].x - 19.f) < 0.01f);
+		CHECK(std::fabs(draw.verts[2].y - 13.f) < 0.01f);
+	}
 }
 TEST(painter_clip_rounds_out_nests_and_culls) {
 	Painter p; p.begin(100, 100, 1);

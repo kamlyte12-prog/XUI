@@ -166,16 +166,43 @@ TEST(text_shaping_matches_pen_advance_sum) {
 	CHECK(l.glyphs.size() == 5);
 	CHECK_EQ(l.lineStarts.size(), 1u);
 	CHECK(l.width > 10 && l.width < 200);
-	// advances accumulate (with kerning) to the total width
+	// advances accumulate (with kerning) to the total pen width; visual width also includes ink.
 	f32 sum = 0;
 	for (const ShapedGlyph& sg : l.glyphs) sum += sg.advance;
-	CHECK(std::abs(sum - l.width) < 2.f);
+	CHECK(std::abs(sum - l.advanceWidth) < 2.f);
+	CHECK(l.width >= l.advanceWidth);
 	// cache hit: same call returns the same object
 	const TextLayout& l2 = ts.layout(fh, "Hello", 16);
 	CHECK(&l == &l2);
 	CHECK_EQ(ts.cacheCount(), 1u);
 	CHECK_EQ(ts.rasterCount(), 0u);      // shaping is independent from glyph rasterisation
 	nr.shutdown();
+}
+
+TEST(text_layout_width_contains_rasterized_glyph_bounds) {
+	FontFixture fx;
+	if (!fx.have()) return;
+	NullRenderer renderer;
+	CHECK(renderer.init({ 64, 64, 1.f, {}, false }));
+	TextSystem text;
+	CHECK(text.initAtlas(&renderer, 256));
+	const FontHandle fontHandle = text.loadFont(fx.bytes);
+	CHECK(fontHandle.valid());
+	const Font* font = text.font(fontHandle);
+	for (std::string_view sample : { "!", "World!", "World! Extension" }) {
+		const TextLayout& run = text.layout(fontHandle, sample, 16.6f);
+		CHECK_EQ(run.sizePx, 17u); // same rounded pixel size as the glyph atlas
+		f32 left = 0.f, right = run.advanceWidth;
+		for (const ShapedGlyph& shaped : run.glyphs) {
+			const AtlasGlyph& glyph = text.atlas()->glyph(*font, shaped.glyph, static_cast<u16>(run.sizePx));
+			left = std::min(left, shaped.x + glyph.offset.x);
+			right = std::max(right, shaped.x + glyph.offset.x + glyph.width);
+		}
+		CHECK(run.inkLeft <= 0.f);
+		CHECK(run.width + 0.01f >= right - left);
+	}
+	text.atlas()->shutdown();
+	renderer.shutdown();
 }
 
 TEST(text_wrap_produces_expected_lines) {

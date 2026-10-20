@@ -8,7 +8,7 @@ Recorded benchmark values and their build conditions are kept in the canonical [
 
 No benchmark guarantees a particular FPS on other GPUs, drivers, display sizes, operating systems, or under vsync. Uncapped hidden frame-loop FPS is a throughput ceiling, not a displayed monitor refresh rate or an interaction-latency guarantee. Visible scrolling, clipping, resize smoothness, and ordinary close still need an interactive smoke test.
 
-Run the examples with `--profile` to measure their actual shared assets and loop. Use `bench_docking` for headless DockTree/UiRuntime drag-preview and splitter-update timings. It measures runtime calls only, not event pumping, painting, GPU submission, or display presentation. Use dedicated benchmarks for stage-level profiling; the simple sample profile reports frame count, elapsed seconds, and effective FPS.
+Run the examples with `--profile` to measure their actual shared assets and loop. Feature profiles `--profile-animation`, `--profile-glow`, `--profile-transform`, `--profile-docking`, and `--profile-menubar` select representative showcase states. These run hidden and uncapped, so they report loop throughput, not visible frame pacing. Use `bench_docking` for headless DockTree/UiRuntime drag-preview and splitter-update timings. It measures runtime calls only, not event pumping, painting, GPU submission, or display presentation. Use dedicated benchmarks for stage-level profiling; the simple sample profile reports frame count, elapsed seconds, and effective FPS.
 
 ## Keep layout inexpensive
 

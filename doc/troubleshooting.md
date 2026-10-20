@@ -75,7 +75,7 @@ Start with the actual error string from `Xui::lastError()`, then confirm the run
 
 - Check that each property uses the value kinds/arities in [the style reference](styling-reference.md).
 - Arithmetic requires compatible units; for example `8px + 4px` is valid while `8px + 4%` is not.
-- `Xui::setTheme("name")` selects a named `@theme` palette after `.xss` loading. Palette-backed visual properties update at runtime; layout-affecting tokens are not fully re-applied yet. Transitions and keyframes compile but are not animated.
+- `Xui::setTheme("name")` selects a named `@theme` palette after `.xss` loading. Palette-backed visual properties update at runtime; layout-affecting tokens are not fully re-applied yet. Transitions and visible keyframes animate supported paint values and transforms. See the [animation guide](animations-fonts-transforms.md).
 
 ## Still stuck?
 

@@ -19,6 +19,12 @@ tokens {
 Window { resting: { bg: color.canvas, fg: color.text, font-size: 14px } }
 Column.app { resting: { gap: 12px, pad: 18px } }
 Row.masthead { resting: { gap: 16px, align: Center, justify: SpaceBetween } }
+// Window chrome: the custom top menu replaces the native title bar (Window[platformTopMenu: false]).
+TitleBar.top-menu { resting: { bg: color.surface, pad: 4px, gap: 4px, border: 1px solid color.outline } }
+TitleButton { resting: { fg: color.muted } hover: { bg: color.surface-hover, fg: color.text } pressed: { bg: color.surface-pressed, fg: color.text } }
+Text.menu-title { resting: { fg: color.muted, font-size: 12px, align: Right, pad: 0px 8px } }
+Dropdown.menu-dropdown { resting: { bg: color.surface-raised, fg: color.text, pad: 6px 9px, border: 1px solid color.outline-soft, radius: 5px, font-size: 12px } hover: { bg: color.surface-hover, border: 1px solid color.accent } focus: { border: 1px solid color.accent } open: { border: 1px solid color.accent } }
+Button.menu-help { resting: { bg: color.surface-raised, fg: color.text, pad: 6px, border: 1px solid color.outline-soft, radius: 5px, font-size: 12px } hover: { bg: color.surface-hover, border: 1px solid color.accent } focus: { border: 1px solid color.accent } }
 Text.title { resting: { fg: color.text, font-size: 25px, font-weight: 700 } }
 Text.subtitle { resting: { fg: color.muted, font-size: 13px } }
 Text.section-title { resting: { fg: color.text, font-size: 17px, font-weight: 650, margin: 4px 0px 2px } }
@@ -110,6 +116,58 @@ Toolbar.chrome, StatusBar.chrome { resting: { bg: color.surface-raised, fg: colo
 Separator.separator, Divider.divider { resting: { fg: color.outline-soft, margin: 3px 0px } }
 ScrollView.scroll-demo, ScrollView.horizontal-demo { resting: { bg: color.canvas, border: 1px solid color.outline, radius: 6px, pad: 8px, scrollbar-size: 10px, scrollbar-visibility: always, scroll-track: color.surface, scroll-thumb: #405773 } hover: { scroll-thumb: #587493 } pressed: { scroll-thumb: color.accent } focus: { border: 1px solid color.accent } }
 Text.scroll-item { resting: { bg: color.surface-raised, fg: color.text, pad: 7px, radius: 5px } }
+
+// Motion & Style page: paint properties stay in XSS; the page itself is authored in XUI.
+Panel.gradient-card { resting: { border: 1px solid color.outline-soft, radius: 8px, pad: 12px, align: Center, justify: Center } }
+Panel.gradient-linear { resting: { gradient: linear-gradient(15deg, #154e9a, #397dd1, #7a58c5, #e978a4) } }
+Panel.gradient-radial { resting: { gradient: radial-gradient(#e8f2ff, #5397e2, #193657) } }
+Panel.gradient-conic { resting: { gradient: conic-gradient(30deg, #ed6a5a, #f4bf50, #52b788, #5b8dee) } }
+Panel.alpha-backdrop { resting: { gradient: linear-gradient(0deg, #213d64, #397dd1, #a45aa5), radius: 8px, pad: 12px } }
+Panel.alpha-overlay { resting: { bg: #18263dbb, fg: color.text, pad: 12px, border: 1px solid #c7ddff80, radius: 6px } }
+Panel.paint-card { resting: { bg: color.surface-raised, fg: color.text, pad: 14px, border: 1px solid color.outline-soft, radius: 8px, gap: 6px } }
+Panel.glow-card { resting: { glow: 12px 1px #69a7ffb0 } }
+Panel.shadow-card { resting: { shadow: 0px 5px 14px 2px #000000a8 } }
+Panel.glow-swatch { resting: { bg: color.surface-raised, border: 1px solid color.outline-soft, radius: 7px, glow: 8px 0px #69a7ff70, align: Center, justify: Center } }
+Tabs.motion-tabs { resting: { size: 100% 100% } }
+Text.glow-title { resting: { fg: color.text, font-size: 15px, font-weight: 700 } }
+Text.weight-regular { resting: { fg: color.text, font-size: 15px, font-weight: 400 } }
+Text.weight-bold { resting: { fg: color.text, font-size: 15px, font-weight: 700 } }
+Text.weight-large { resting: { fg: color.accent-hover, font-size: 20px, font-weight: 600 } }
+Panel.fade-card { resting: { bg: color.surface-raised, border: 1px solid color.accent, radius: 8px, pad: 12px, align: Center, justify: Center, animation: fade-in 800ms 1 ease-out } }
+Text.fade-label { resting: { fg: color.text, font-size: 14px, font-weight: 600, align: Center } }
+Button.hug-button { resting: { size: auto, min-width: 180px, max-width: 260px, bg: color.surface-raised, fg: color.text, pad: 12px 16px, gap: 4px, border: 1px solid color.outline-soft, radius: 8px, font-weight: 600 }
+  hover: { bg: color.surface-hover, border: 1px solid color.accent, glow: 8px 0px #69a7ff80 }
+  pressed: { bg: color.surface-pressed }
+  transition: resting -> hover 160ms ease-out
+  transition: hover -> resting 160ms ease-out
+  transition: hover -> pressed 70ms ease-out
+  transition: pressed -> resting 140ms ease-out
+}
+Text.gradient-label { resting: { fg: #ffffff, font-size: 14px, font-weight: 600, align: Center } }
+Text.hug-title { resting: { fg: color.text, font-size: 14px, font-weight: 700 } }
+Text.hug-caption { resting: { fg: color.muted, font-size: 12px } }
+Button.motion-button { resting: { bg: color.surface-raised, fg: color.text, border: 1px solid color.outline-soft, radius: 8px, pad: 10px 14px, font-size: 14px, font-weight: 650, transform: translate(0px, 0px) scale(1) }
+  hover: { bg: color.surface-hover, border: 1px solid color.accent, glow: 8px 0px #69a7ff80, transform: translate(0px, -2px) scale(1.02) }
+  pressed: { bg: color.surface-pressed, fg: color.accent-hover }
+  transition: resting -> hover 160ms ease-out
+  transition: hover -> resting 160ms ease-out
+  transition: hover -> pressed 70ms ease-out
+  transition: pressed -> resting 140ms ease-out
+}
+Panel.motion-swatch { resting: { bg: color.surface-raised, border: 1px solid color.outline-soft, radius: 7px, align: Center, justify: Center, animation: pulse 1.4s infinite ease-in-out } }
+ProgressBar.motion-progress { resting: { bg: color.outline, fg: color.accent, radius: 6px } }
+ProgressBar.event-meter { resting: { bg: color.outline, fg: color.accent-hover, radius: 6px, animation: fill-to-value 1200ms paused ease-out } }
+
+keyframes fade-in {
+  from { opacity: 0, bg: #17223500 }
+  to { opacity: 1, bg: #172235ff }
+}
+keyframes pulse {
+  from { opacity: 0.42, bg: #202f4666, transform: rotate(0deg) }
+  50% { opacity: 1, bg: #386194ff, transform: rotate(1.5deg) }
+  to { opacity: 0.42, bg: #202f4666, transform: rotate(0deg) }
+}
+keyframes fill-to-value { from { value: 0 } to { value: 1 } }
 
 DockHost.docking-host { resting: { bg: color.surface, pad: 4px, border: 1px solid color.outline, radius: 7px, min-size: 520px 300px } }
 DockPanel.dock-panel { resting: { bg: color.surface, fg: color.text, pad: 10px, font-size: 13px } }

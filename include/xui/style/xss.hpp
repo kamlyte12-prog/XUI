@@ -43,6 +43,7 @@ namespace xui {
 		/// Evaluated token value for a theme (dotted name, interned). Tokens are compile-time constants.
 		std::optional<Atom> token(StrId name, u32 theme = 0) const;
 		const Easing& curve(u32 index) const { return m_curves[index]; }
+		u32 curveCount() const { return static_cast<u32>(m_curves.size()); }
 		const KeyframesDef* findKeyframes(StrId name) const;
 		std::span<const Keyframe> frames(const KeyframesDef& k) const { return { m_frames.data() + k.frameFirst, k.frameCount }; }
 		std::span<const Declaration> frameDecls(const Keyframe& f) const { return { m_decls.data() + f.declFirst, f.declCount }; }

@@ -58,6 +58,8 @@ namespace xui {
 
 		void setEventHandler(UiEventFn handler, void* context);
 		void setWindowTitle(std::string_view title);
+		bool playAnimation(std::string_view id, AnimationMode mode = AnimationMode::Once) { return m_runtime.playAnimation(id, mode); }
+		bool cancelAnimation(std::string_view id) { return m_runtime.cancelAnimation(id); }
 		UiRuntime& runtime() { return m_runtime; }
 		const UiRuntime& runtime() const { return m_runtime; }
 		TextSystem& textSystem() { return m_text; }

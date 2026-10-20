@@ -13,6 +13,7 @@ Use the focused guide for the topic you need. `.xui` defines structure and layou
 | [`widgets.md`](widgets.md) | Runtime widget behavior, authored properties, values/events, and unsupported objects. |
 | [`docking.md`](docking.md) | DockHost/DockPanel authoring, recursive splits, tabs, floating overlays, events, values, and styles. |
 | [`styling-reference.md`](styling-reference.md) | Accepted `.xss` properties, value shapes, units, states, defaults, and limits. |
+| [`animations-fonts-transforms.md`](animations-fonts-transforms.md) | Animation control, transform behavior, font-format support, and cursor fallback matrix. |
 | [`architecture.md`](architecture.md) | Framework data flow, interface contracts, lifecycle, and how to add a backend. |
 | [`performance.md`](performance.md) | Performance measurements, optimization guidance, and resize/redraw behavior. |
 | [`troubleshooting.md`](troubleshooting.md) | Diagnosing setup, text, styling, layout, popup, and responsiveness problems. |

@@ -22,6 +22,8 @@ namespace xui {
 			{"max-height", Expand::None, 1, 1, NUM},
 			{"opacity", Expand::None, 1, 1, NUM},
 			{"shadow", Expand::None, 1, 6, NUM | COL | ID},
+			{"glow", Expand::None, 3, 3, NUM | COL},
+			{"gradient", Expand::None, 1, 1, FN},
 			{"blur", Expand::None, 1, 1, NUM},
 			{"transform", Expand::None, 1, 6, NUM | ID | FN},
 			{"font", Expand::None, 1, 1, STR | ID},
@@ -43,12 +45,13 @@ namespace xui {
 			{"scrollbar-visibility", Expand::None, 1, 1, ID},
 			{"scroll-behavior", Expand::None, 1, 1, ID},
 			{"scroll-speed", Expand::None, 1, 1, NUM},
+			{"value", Expand::None, 1, 1, NUM},
 		};
 		constexpr std::string_view kPropNames[kPropCount] = {
-			"bg", "fg", "border", "radius", "pad", "margin", "gap", "size", "min-size", "max-size", "min-width", "max-width", "min-height", "max-height", "opacity", "shadow", "blur",
+			"bg", "fg", "border", "radius", "pad", "margin", "gap", "size", "min-size", "max-size", "min-width", "max-width", "min-height", "max-height", "opacity", "shadow", "glow", "gradient", "blur",
 			"transform", "font", "font-size", "font-weight", "letter-spacing", "align", "justify", "grow", "shrink", "cursor",
 			"z-index", "clip", "overflow", "animation", "scroll-track", "scroll-thumb", "scrollbar-size",
-			"scrollbar-visibility", "scroll-behavior", "scroll-speed" };
+			"scrollbar-visibility", "scroll-behavior", "scroll-speed", "value" };
 		constexpr std::string_view kStateNames[kStateCount] = {
 			"resting", "enabled", "readonly", "hover", "focus", "focus-visible", "selected", "checked", "open", "closed", "pressed", "dragging", "loading", "error", "placeholder", "disabled" };
 	}

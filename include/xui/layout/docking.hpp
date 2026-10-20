@@ -15,6 +15,7 @@ namespace xui {
 		u32 order = 0;
 		bool active = false;
 		bool floating = false;
+		u32 zOrder = 0;
 	};
 
 	struct DockPreview {
@@ -48,6 +49,7 @@ namespace xui {
 		bool dock(u32 panel, u32 targetPanel, DockZone zone);
 		bool undock(u32 panel, Rect floatingBounds);
 		bool moveFloating(u32 panel, Rect floatingBounds);
+		bool raiseFloating(u32 panel);
 		bool close(u32 panel);
 		bool activate(u32 panel);
 		bool reorder(u32 panel, u32 order);
@@ -94,6 +96,7 @@ namespace xui {
 			Rect bounds{};
 			bool floating = true;
 			bool closed = false;
+			u32 zOrder = 0;
 		};
 
 		u32 findPanel(u32 key) const;
@@ -109,6 +112,7 @@ namespace xui {
 		Rect m_host{};
 		f32 m_gutter = 5.f;
 		u32 m_root = kNone;
+		u32 m_nextFloatZ = 1;
 		std::vector<TreeNode> m_nodes;
 		std::vector<Panel> m_panelData;
 		std::vector<DockPanelLayout> m_panels;

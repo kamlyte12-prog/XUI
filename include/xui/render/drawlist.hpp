@@ -24,21 +24,25 @@ namespace xui {
 	enum : u8 {
 		FlagGradient = 1,   ///< RoundRect/Capsule: blend c0 -> c1 (RoundRect: along direction (aux0,aux1); Capsule: along the segment)
 		FlagDashed = 2,   ///< RoundRect border: dash period = aux0 px (50% duty)
-		FlagInner = 4    ///< Shadow: inner shadow; hole is the shape shifted by (aux0,aux1)
+		FlagInner = 4,    ///< Shadow: inner shadow; hole is the shape shifted by (aux0,aux1)
+		FlagGradientRadial = 8,
+		FlagGradientConic = 16,
+		FlagGradientThreeStops = 32,
+		FlagGradientFourStops = 64
 	};
 
-	/// 52 bytes. Per-primitive attributes are repeated on the 4 vertices (flat); only x,y,u,v differ per corner.
+	/// 60 bytes. Per-primitive attributes are repeated on the 4 vertices (flat); only x,y,u,v differ per corner.
 	struct Vertex {
 		f32 x = 0, y = 0;          ///< position, physical px
 		f32 u = 0, v = 0;          ///< local coords (SDF prims) or texcoords (Glyph/Image)
-		u32 c0 = 0, c1 = 0;        ///< fill/tint/shadow colour; border colour or gradient end
+		u32 c0 = 0, c1 = 0, c2 = 0, c3 = 0; ///< fill/tint/shadow; up to four gradient stops
 		f32 hx = 0, hy = 0;        ///< half size of the shape (Capsule: half of the p1-p0 vector)
 		u16 rad[4] = { 0, 0, 0, 0 }; ///< corner radii TL,TR,BR,BL in 1/4 px (Capsule: rad[0] = half thickness)
 		f32 aux0 = 0, aux1 = 0;    ///< gradient direction / dash period / inner-shadow offset / image centre
 		u16 border = 0;            ///< border width (RoundRect) or blur transition width (Shadow), in 1/4 px
 		u8 prim = 0, flags = 0;
 	};
-	static_assert(sizeof(Vertex) == 52, "Vertex layout is part of the backend contract");
+	static_assert(sizeof(Vertex) == 60, "Vertex layout is part of the backend contract");
 
 	struct DrawCmd {
 		enum Kind : u8 { Triangles = 0, Custom = 1 } kind = Triangles;

@@ -60,7 +60,8 @@ The current `UiRuntime` implements these containers:
 
 | Object | Layout behavior |
 | --- | --- |
-| `Window` | Required root. Behaves as a vertical column filling the logical client area. |
+| `Window` | Required root. Behaves as a vertical column filling the logical client area. The `platformTopMenu: false` property opts into client-drawn chrome with a `TitleBar` widget. |
+| `TitleBar` | Horizontal top-menu container that replaces the native title bar (requires `Window[platformTopMenu: false]`). Drag, double-click maximize, and caption buttons are framework-owned. |
 | `Column` | Flex-like vertical flow. Use `.xss gap`, `pad`, and child `grow` to arrange content. |
 | `Row` | Flex-like horizontal flow. |
 | `Panel` | Styled vertical container. It is not independently dockable or draggable. |
@@ -82,7 +83,7 @@ The backend reports the available window client area in logical pixels. The runt
 
 `px`, `%`, and `dp` are supported for `.xui` width/height/min/max values; unitless values and `px`/`dp` are logical pixels. Percentages resolve against the parent's usable content box after its border and padding. Min/max constraints clamp the computed border-box size after percentage resolution, so combinations such as `width: 80%`, `minWidth: 50%`, and an `.xss max-width: 60%` work together. Use camelCase names in `.xui`; `.xss` supports `size`, `min-size`, `max-size`, and the longhands `min-width`, `max-width`, `min-height`, and `max-height`. For padding and margin, use a scalar logical-pixel value or a unitless horizontal-by-vertical pair. The stylesheet parser accepts more units, but runtime layout does not convert `em`, `rem`, `vw`, `vh`, or `sp`. DPI conversion occurs in text rasterization and painter output, not in authored logical layout sizes.
 
-Auto-sized widgets use measured content and widget-specific preferred sizes for empty controls; `.xui` and `.xss` padding/borders are added by the layout engine. See [preferred sizes for auto-sized widgets](widgets.md#preferred-sizes-for-auto-sized-widgets) for default content-box dimensions and how explicit constraints interact with them.
+Auto-sized widgets use measured content and widget-specific preferred sizes for empty controls; text measurements include glyph raster bounds and are computed using the active DPI before layout. `.xui` and `.xss` padding/borders are added by the layout engine. This keeps tight `Row` children from clipping the final glyph. See [preferred sizes for auto-sized widgets](widgets.md#preferred-sizes-for-auto-sized-widgets) for default content-box dimensions and how explicit constraints interact with them.
 
 ```xui
 Column[class: "content", pad: 20px] {
@@ -111,6 +112,8 @@ Panel[class: "card", width: 360px, height: 96px, pad: 10px] {
 The showcase's Layout tab also demonstrates fixed and percentage sizes, clamped constraints, both XUI and XSS minimum floors, row/column flow, alignment, justification, padding, margins, nesting, and horizontal/vertical `Split` behavior where applicable.
 
 The native window's title and starting size are configured with `XuiOptions`. `Window(title: ..., size: ...)` is parsed and retained as document metadata, but the `Xui` facade currently creates the native window from `XuiOptions`; set both explicitly if you want matching metadata and window configuration.
+
+The Window property `platformTopMenu` is the exception: `Window(...) [platformTopMenu: false]` is read from the document itself, before the native window exists. With `false` the facade creates a borderless window and a [`TitleBar`](widgets.md#titlebar) widget must provide the draggable top menu (see the [widget reference](widgets.md#titlebar) for the behavior matrix and per-platform fallbacks).
 
 ## Nesting patterns
 

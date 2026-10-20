@@ -52,9 +52,10 @@ namespace xui {
         panel.maximum = { std::max(panel.minimum.x, max.x), std::max(panel.minimum.y, max.y) };
         panel.preferred = { std::max(panel.minimum.x, preferred.x), std::max(panel.minimum.y, preferred.y) };
         panel.bounds = floatingBounds.empty() ? Rect{ 24.f, 24.f, panel.preferred.x, panel.preferred.y } : floatingBounds;
+        panel.zOrder = m_nextFloatZ++;
         const u32 index = static_cast<u32>(m_panelData.size());
         m_panelData.push_back(panel);
-        m_panels.push_back({ key, panel.bounds, kNone, 0, false, true });
+        m_panels.push_back({ key, panel.bounds, kNone, 0, false, true, panel.zOrder });
         if (m_root == kNone) makeGroup(index);
         return true;
     }
@@ -172,6 +173,7 @@ namespace xui {
         detachPanel(panel);
         Panel& entry = m_panelData[panel];
         entry.bounds = floatingBounds.empty() ? Rect{ m_host.x + 24.f, m_host.y + 24.f, entry.preferred.x, entry.preferred.y } : floatingBounds;
+        entry.zOrder = m_nextFloatZ++;
         m_panels[panel].bounds = entry.bounds;
         m_panels[panel].floating = true;
         return true;
@@ -182,6 +184,14 @@ namespace xui {
         if (panel == kNone || !m_panelData[panel].floating || floatingBounds.empty()) return false;
         m_panelData[panel].bounds = floatingBounds;
         m_panels[panel].bounds = floatingBounds;
+        return true;
+    }
+
+    bool DockTree::raiseFloating(u32 key) {
+        const u32 panel = findPanel(key);
+        if (panel == kNone || !m_panelData[panel].floating) return false;
+        if (m_panelData[panel].zOrder == m_nextFloatZ - 1) return false;
+        m_panelData[panel].zOrder = m_nextFloatZ++;
         return true;
     }
 
@@ -310,6 +320,7 @@ namespace xui {
             result.order = 0;
             result.active = false;
             result.floating = panel.floating && !panel.closed;
+            result.zOrder = panel.zOrder;
             if (panel.closed) { result.bounds = {}; continue; }
             if (panel.floating) { result.bounds = panel.bounds; result.group = kNone; continue; }
             if (panel.group >= m_nodes.size() || m_nodes[panel.group].kind != Kind::Group) { result.bounds = {}; continue; }
@@ -356,16 +367,16 @@ namespace xui {
     u32 DockTree::activePanel(u32 key) const { const u32 group = groupForPanel(key); return group == kNone ? kNone : activePanelInGroup(group); }
 
     u32 DockTree::panelAt(Vec2 point) const {
+        const Panel* front = nullptr;
+        for (const Panel& panel : m_panelData)
+            if (!panel.closed && panel.floating && panel.bounds.contains(point) && (!front || panel.zOrder > front->zOrder)) front = &panel;
+        if (front) return front->key;
         for (std::size_t i = m_panelData.size(); i > 0; --i) {
             const u32 index = static_cast<u32>(i - 1);
             const Panel& panel = m_panelData[index];
             if (panel.closed || panel.floating || panel.group >= m_nodes.size()) continue;
             const TreeNode& group = m_nodes[panel.group];
             if (group.active < group.panels.size() && group.panels[group.active] == index && group.bounds.contains(point)) return panel.key;
-        }
-        for (std::size_t i = m_panelData.size(); i > 0; --i) {
-            const Panel& panel = m_panelData[i - 1];
-            if (!panel.closed && panel.floating && panel.bounds.contains(point)) return panel.key;
         }
         return kNone;
     }

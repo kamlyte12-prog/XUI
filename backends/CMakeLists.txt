@@ -10,6 +10,10 @@ endif()
 add_library(xui_backend_glfw STATIC glfw/glfw_platform.cpp)
 target_include_directories(xui_backend_glfw PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(xui_backend_glfw PUBLIC xui_platform "${XUI_GLFW_TARGET}" PRIVATE xui_warnings)
+if(WIN32)
+  # Client-drawn window chrome (borderless NCCALCSIZE/NCHITTEST subclass, native drag/snap).
+  target_link_libraries(xui_backend_glfw PRIVATE user32)
+endif()
 
 add_library(xui_backend_opengl STATIC opengl/gl_drawlist_renderer.cpp)
 target_include_directories(xui_backend_opengl PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")

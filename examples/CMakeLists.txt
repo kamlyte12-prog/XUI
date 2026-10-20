@@ -27,4 +27,8 @@ if(XUI_BUILD_GLFW_EXAMPLE)
   add_custom_command(TARGET xui_glfw_demo POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/showcase.xui" "$<TARGET_FILE_DIR:xui_glfw_demo>/showcase.xui"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/showcase.xss" "$<TARGET_FILE_DIR:xui_glfw_demo>/showcase.xss")
+
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/button)
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/layout)
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/text)
 endif()

@@ -1,6 +1,17 @@
 // Full interactive reference. Layout/content belong here; visual rules live in showcase.xss.
-Window(title: "Xui widget and layout showcase", size: 1080x760) {
-  Column[class: "app", width: 100%, height: 100%, pad: 18px, gap: 12px] {
+Window(title: "Xui widget and layout showcase", size: 1080x760)[platformTopMenu: false] {
+  // The native title bar is hidden (platformTopMenu: false). This TitleBar is the window's
+  // custom top menu: dragging its empty area moves the window, double-click toggles maximize,
+  // and the framework-drawn minimize/maximize/close buttons sit at its right end. Dropdowns
+  // and buttons inside are ordinary interactive widgets and never start a window drag.
+  TitleBar[id: "top-menu", class: "top-menu", platformButtons: true, width: 100%, height: 40px] {
+    Dropdown[id: "menu-file", class: "menu-dropdown", options: "File|New|Open|Save", value: "File", width: 120px, height: 30px]
+    Dropdown[id: "menu-edit", class: "menu-dropdown", options: "Edit|Undo|Redo|Select all", value: "Edit", width: 120px, height: 30px]
+    Dropdown[id: "menu-view", class: "menu-dropdown", options: "View|Show panels|Reset layout", value: "View", width: 120px, height: 30px]
+    Button(label: "Help")[class: "menu-help", width: 64px, height: 30px]
+    Text("Xui showcase")[class: "menu-title", grow: 1, height: 30px]
+  }
+  Column[class: "app", width: 100%, grow: 1, minSize: 0x0, pad: 18px, gap: 12px] {
     Row(gap: 16)[class: "masthead", width: 100%, align: Center, justify: SpaceBetween] {
       Column(gap: 3px)[grow: 1] {
         Text("Xui interactive showcase")[class: "title"]
@@ -374,6 +385,107 @@ Window(title: "Xui widget and layout showcase", size: 1080x760) {
                 Text("Tabbed center panel")[class: "panel-title"]
                 ProgressBar[id: "dock-preview-progress", value: 0.72, class: "progress", width: 100%, height: 18px]
                 Text("Use the tab strip to switch between Editor and Preview.")[class: "body-copy"]
+              }
+            }
+          }
+        }
+      }
+      // 8. Paint, typography, intrinsic sizing, and declarative animation examples.
+      Tab(title: "Motion & Style") {
+        Tabs[id: "motion-tabs", selected: 0, class: "motion-tabs", width: 100%, height: 100%] {
+          Tab(title: "Paint & Type") {
+            ScrollView[class: "page-scroll", width: 100%, height: 100%, vertical: true, horizontal: false] {
+              Column[class: "page", gap: 14px, pad: 18px] {
+                Text("Paint and typography styles")[class: "section-title"]
+                Text("Gradient stops, alpha, glow, font weights, and auto-sized nested content are authored in showcase.xss. Alpha changes paint only; the control remains hit-testable.")[class: "help"]
+                Text("Gradient fills: linear, radial, and conic")[class: "field-label"]
+                Row(gap: 12px)[width: 100%, height: 112px, align: Stretch] {
+                  Panel[class: "gradient-card gradient-linear", grow: 1] { Text("Linear · four stops")[class: "gradient-label"] }
+                  Panel[class: "gradient-card gradient-radial", grow: 1] { Text("Radial · three stops")[class: "gradient-label"] }
+                  Panel[class: "gradient-card gradient-conic", grow: 1] { Text("Conic · three stops")[class: "gradient-label"] }
+                }
+                Row(gap: 12px)[width: 100%, height: 112px, align: Stretch] {
+                  Panel[class: "paint-card alpha-backdrop", grow: 1] {
+                    Panel[class: "alpha-overlay", width: 100%, height: 100%] { Text("Translucent surface over a gradient")[class: "body-copy"] }
+                  }
+                  Panel[class: "paint-card shadow-card", grow: 1] {
+                    Text("Drop shadow")[class: "glow-title"]
+                    Text("The separate glow property is shown below.")[class: "help"]
+                  }
+                  Panel[class: "paint-card glow-card", grow: 1] {
+                    Text("Outer glow")[class: "glow-title"]
+                    Text("A halo with no offset.")[class: "help"]
+                  }
+                }
+                Text("Glow stress row: twelve independently styled surfaces")[class: "field-label"]
+                Column(gap: 10px)[width: 100%] {
+                  Row(gap: 10px)[width: 100%, height: 56px] {
+                    Panel[class: "glow-swatch", grow: 1] { Text("1")[class: "gradient-label"] }
+                    Panel[class: "glow-swatch", grow: 1] { Text("2")[class: "gradient-label"] }
+                    Panel[class: "glow-swatch", grow: 1] { Text("3")[class: "gradient-label"] }
+                    Panel[class: "glow-swatch", grow: 1] { Text("4")[class: "gradient-label"] }
+                    Panel[class: "glow-swatch", grow: 1] { Text("5")[class: "gradient-label"] }
+                    Panel[class: "glow-swatch", grow: 1] { Text("6")[class: "gradient-label"] }
+                  }
+                  Row(gap: 10px)[width: 100%, height: 56px] {
+                    Panel[class: "glow-swatch", grow: 1] { Text("7")[class: "gradient-label"] }
+                    Panel[class: "glow-swatch", grow: 1] { Text("8")[class: "gradient-label"] }
+                    Panel[class: "glow-swatch", grow: 1] { Text("9")[class: "gradient-label"] }
+                    Panel[class: "glow-swatch", grow: 1] { Text("10")[class: "gradient-label"] }
+                    Panel[class: "glow-swatch", grow: 1] { Text("11")[class: "gradient-label"] }
+                    Panel[class: "glow-swatch", grow: 1] { Text("12")[class: "gradient-label"] }
+                  }
+                }
+                Row(gap: 12px)[width: 100%, align: Center] {
+                  Column(gap: 5px)[class: "type-samples", grow: 1] {
+                    Text("Font weight 400")[class: "weight-regular"]
+                    Text("Font weight 700")[class: "weight-bold"]
+                    Text("Font size 20px · inherited family")[class: "weight-large"]
+                  }
+                  Button[id: "hug-button", class: "hug-button"] {
+                    Text("Auto-sized button")[class: "hug-title"]
+                    Text("Nested content + XSS padding")[class: "hug-caption"]
+                  }
+                }
+              }
+            }
+          }
+          Tab(title: "Animation") {
+            ScrollView[class: "page-scroll", width: 100%, height: 100%, vertical: true, horizontal: false] {
+              Column[class: "page", gap: 14px, pad: 18px] {
+                Text("Declarative animation")[class: "section-title"]
+                Text("Hover and press the button to transition its fill and glow. Twelve panels sample the same XSS keyframes; animation ticks stop when this tab is hidden or the finite animation ends.")[class: "help"]
+                Text("Start a paused keyframe from an application event. Once holds at 100%; Loop repeats until cancelled.")[class: "help"]
+                Row(gap: 8px)[width: 100%, align: Center] {
+                  Button(label: "Play once")[id: "play-meter-once", press: onMeterOnce, class: "small-button", width: 96px, height: 34px]
+                  Button(label: "Loop")[id: "play-meter-loop", press: onMeterLoop, class: "small-button", width: 78px, height: 34px]
+                  Button(label: "Stop")[id: "stop-meter", press: onMeterStop, class: "small-button", width: 78px, height: 34px]
+                  ProgressBar[id: "event-meter", class: "event-meter", value: 0, grow: 1, height: 18px]
+                }
+                Row(gap: 12px)[width: 100%, height: 72px, align: Center] {
+                  Button(label: "Hover, then press")[id: "motion-button", class: "motion-button", width: 220px, height: 46px]
+                  Panel[class: "fade-card", width: 240px, height: 60px] { Text("One-shot fade on entry")[class: "fade-label"] }
+                  ProgressBar[class: "motion-progress", width: 240px, height: 20px, indeterminate: true]
+                }
+                Text("Keyframe stress row: twelve animated panels")[class: "field-label"]
+                Column(gap: 10px)[width: 100%] {
+                  Row(gap: 10px)[width: 100%, height: 56px] {
+                    Panel[class: "motion-swatch", grow: 1] { Text("1")[class: "gradient-label"] }
+                    Panel[class: "motion-swatch", grow: 1] { Text("2")[class: "gradient-label"] }
+                    Panel[class: "motion-swatch", grow: 1] { Text("3")[class: "gradient-label"] }
+                    Panel[class: "motion-swatch", grow: 1] { Text("4")[class: "gradient-label"] }
+                    Panel[class: "motion-swatch", grow: 1] { Text("5")[class: "gradient-label"] }
+                    Panel[class: "motion-swatch", grow: 1] { Text("6")[class: "gradient-label"] }
+                  }
+                  Row(gap: 10px)[width: 100%, height: 56px] {
+                    Panel[class: "motion-swatch", grow: 1] { Text("7")[class: "gradient-label"] }
+                    Panel[class: "motion-swatch", grow: 1] { Text("8")[class: "gradient-label"] }
+                    Panel[class: "motion-swatch", grow: 1] { Text("9")[class: "gradient-label"] }
+                    Panel[class: "motion-swatch", grow: 1] { Text("10")[class: "gradient-label"] }
+                    Panel[class: "motion-swatch", grow: 1] { Text("11")[class: "gradient-label"] }
+                    Panel[class: "motion-swatch", grow: 1] { Text("12")[class: "gradient-label"] }
+                  }
+                }
               }
             }
           }

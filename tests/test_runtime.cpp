@@ -363,6 +363,156 @@ Button { resting: { bg: #000000ff } hover: { bg: #ffffffff } transition: resting
 	CHECK(complete == 0xFFFFFFFFu);
 }
 
+TEST(ui_runtime_animation_timer_continues_without_pointer_input_and_after_leave) {
+	constexpr std::string_view xuiSource = R"(Window(size: 240x120) { Button[id: "animated", width: 160px, height: 48px] })";
+	constexpr std::string_view xssSource = R"(
+Button { resting: { bg: #000000ff } hover: { bg: #ffffffff }
+  transition: resting -> hover 120ms linear
+  transition: hover -> resting 120ms linear }
+)";
+	StringInterner strings; auto document = parseXui(xuiSource, "animation-leave.xui", strings);
+	CHECK(document.has_value()); if (!document) return;
+	auto styles = compileXss(xssSource, "animation-leave.xss", strings);
+	CHECK(styles.has_value()); if (!styles) return;
+	TextSystem text; UiRuntime ui; std::string error;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error)); if (!error.empty()) return;
+	ui.layout(240.f, 120.f); Painter painter;
+	auto paintColor = [&]() {
+		painter.begin(240, 120, 1.f); ui.paint(painter, 1.f);
+		const DrawList list = painter.finish(); return list.nVerts ? list.verts[0].c0 : 0u;
+	};
+	(void)paintColor(); // establish the resting style before triggering a state transition
+	const Rect rect = ui.bounds({ 1, 1 });
+	CHECK(ui.pointerMove({ rect.x + 8.f, rect.y + 8.f }));
+	(void)paintColor();
+	const f64 frameDelay = ui.nextTimerDelay();
+	CHECK(frameDelay > 0.0 && frameDelay <= 1.0 / 60.0);
+	const auto scheduledAt = std::chrono::steady_clock::now();
+	CHECK(ui.updateTimers(scheduledAt));
+	const f64 remainingFrameDelay = ui.nextTimerDelay(scheduledAt + std::chrono::milliseconds(5));
+	CHECK(remainingFrameDelay > 0.0 && remainingFrameDelay < frameDelay);
+	std::this_thread::sleep_for(std::chrono::milliseconds(65));
+	CHECK(ui.updateTimers()); // no pointer events are needed to schedule the next animation frame
+	const u32 hoverSample = paintColor();
+	CHECK(ui.pointerLeave());
+	(void)paintColor(); // resolves hover -> resting into a new active transition
+	CHECK(ui.nextTimerDelay() > 0.0);
+	std::this_thread::sleep_for(std::chrono::milliseconds(65));
+	CHECK(ui.updateTimers()); // the mouse-leave event does not disable the timer path
+	const u32 leaveSample = paintColor();
+	CHECK(leaveSample != hoverSample);
+	std::this_thread::sleep_for(std::chrono::milliseconds(75));
+	CHECK(ui.updateTimers());
+	CHECK_EQ(paintColor(), Color::fromRGBA8(0x000000FFu).toRGBA8());
+	CHECK(ui.nextTimerDelay() < 0.0);
+}
+
+TEST(ui_runtime_animation_cancel_finish_completes_transition_before_new_state) {
+	constexpr std::string_view xuiSource = R"(Window(size: 240x120) { Button[id: "animated", width: 160px, height: 48px] })";
+	constexpr std::string_view xssSource = R"(
+Button { resting: { bg: #000000ff, animation-cancel: finish } hover: { bg: #ffffffff }
+  transition: resting -> hover 120ms linear
+  transition: hover -> resting 120ms linear }
+)";
+	StringInterner strings; auto document = parseXui(xuiSource, "animation-finish.xui", strings);
+	CHECK(document.has_value()); if (!document) return;
+	auto styles = compileXss(xssSource, "animation-finish.xss", strings);
+	CHECK(styles.has_value()); if (!styles) return;
+	TextSystem text; UiRuntime ui; std::string error;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error)); if (!error.empty()) return;
+	ui.layout(240.f, 120.f); Painter painter;
+	auto paintColor = [&]() {
+		painter.begin(240, 120, 1.f); ui.paint(painter, 1.f);
+		const DrawList list = painter.finish(); return list.nVerts ? list.verts[0].c0 : 0u;
+	};
+	(void)paintColor();
+	const Rect rect = ui.bounds({ 1, 1 });
+	CHECK(ui.pointerMove({ rect.x + 8.f, rect.y + 8.f }));
+	(void)paintColor();
+	std::this_thread::sleep_for(std::chrono::milliseconds(65));
+	(void)paintColor();
+	CHECK(ui.pointerLeave());
+	(void)paintColor(); // finish the hover transition before applying the resting target
+	std::this_thread::sleep_for(std::chrono::milliseconds(75));
+	CHECK(ui.updateTimers());
+	CHECK_EQ(paintColor(), Color::fromRGBA8(0xFFFFFFFFu).toRGBA8());
+	(void)paintColor();
+	CHECK(ui.nextTimerDelay() > 0.0); // the resting transition starts after the hover target completes
+	std::this_thread::sleep_for(std::chrono::milliseconds(140));
+	CHECK(ui.updateTimers());
+	CHECK_EQ(paintColor(), Color::fromRGBA8(0x000000FFu).toRGBA8());
+	CHECK(ui.nextTimerDelay() < 0.0);
+}
+
+TEST(ui_runtime_animation_clock_pauses_and_resumes_for_hidden_window) {
+	constexpr std::string_view xuiSource = R"(Window(size: 240x120) { Button[id: "animated", width: 160px, height: 48px] })";
+	constexpr std::string_view xssSource = R"(
+Button { resting: { bg: #000000ff } hover: { bg: #ffffffff } transition: resting -> hover 180ms linear }
+)";
+	StringInterner strings; auto document = parseXui(xuiSource, "animation-hidden.xui", strings);
+	CHECK(document.has_value()); if (!document) return;
+	auto styles = compileXss(xssSource, "animation-hidden.xss", strings);
+	CHECK(styles.has_value()); if (!styles) return;
+	TextSystem text; UiRuntime ui; std::string error;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error)); if (!error.empty()) return;
+	ui.layout(240.f, 120.f); Painter painter;
+	auto paint = [&]() { painter.begin(240, 120, 1.f); ui.paint(painter, 1.f); (void)painter.finish(); };
+	paint(); const Rect rect = ui.bounds({ 1, 1 });
+	ui.pointerMove({ rect.x + 8.f, rect.y + 8.f }); paint();
+	const auto pausedAt = std::chrono::steady_clock::now();
+	ui.setAnimationsPaused(true, pausedAt);
+	std::this_thread::sleep_for(std::chrono::milliseconds(220));
+	CHECK(!ui.updateTimers()); CHECK(ui.nextTimerDelay() < 0.0);
+	ui.setAnimationsPaused(false);
+	CHECK(ui.nextTimerDelay() > 0.0 && ui.nextTimerDelay() <= 1.0 / 60.0);
+	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	CHECK(ui.updateTimers()); paint(); // animation retains its pre-hide elapsed time
+	CHECK(ui.nextTimerDelay() > 0.0);
+}
+
+TEST(ui_runtime_animation_cancel_finish_completes_current_keyframe_iteration) {
+	constexpr std::string_view xuiSource = R"(Window(size: 240x120) { Panel[id: "animated", width: 160px, height: 48px] })";
+	constexpr std::string_view xssSource = R"(
+Panel { resting: { bg: #000000ff } hover: { animation: pulse 180ms infinite linear cancel(finish) }
+  transition: resting -> hover 0ms linear }
+keyframes pulse { from { bg: #000000ff } to { bg: #ffffffff } }
+)";
+	StringInterner strings; auto document = parseXui(xuiSource, "animation-keyframe-finish.xui", strings);
+	CHECK(document.has_value()); if (!document) return;
+	auto styles = compileXss(xssSource, "animation-keyframe-finish.xss", strings);
+	CHECK(styles.has_value()); if (!styles) return;
+	TextSystem text; UiRuntime ui; std::string error;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error)); if (!error.empty()) return;
+	ui.layout(240.f, 120.f); Painter painter;
+	auto paintColor = [&]() {
+		painter.begin(240, 120, 1.f); ui.paint(painter, 1.f);
+		const DrawList list = painter.finish(); return list.nVerts ? list.verts[0].c0 : 0u;
+	};
+	(void)paintColor();
+	const Rect rect = ui.bounds({ 1, 1 });
+	ui.pointerMove({ rect.x + 8.f, rect.y + 8.f });
+	(void)paintColor(); // enter the hover keyframe animation
+	std::this_thread::sleep_for(std::chrono::milliseconds(45));
+	(void)paintColor();
+	ui.pointerLeave();
+	(void)paintColor(); // finish the current infinite iteration, then leave the hover state
+	std::this_thread::sleep_for(std::chrono::milliseconds(160));
+	CHECK(ui.updateTimers());
+	CHECK_EQ(paintColor(), Color::fromRGBA8(0xFFFFFFFFu).toRGBA8());
+	CHECK_EQ(paintColor(), Color::fromRGBA8(0x000000FFu).toRGBA8());
+	CHECK(ui.nextTimerDelay() < 0.0);
+}
+
+TEST(ui_runtime_f4_draw_batch_counter_is_independent_of_fps_sampling) {
+	UiRuntime ui;
+	CHECK(!ui.drawBatchCounterEnabled());
+	CHECK(ui.keyDown(Key::F4));
+	CHECK(ui.drawBatchCounterEnabled());
+	CHECK(!ui.fpsCounterEnabled()); // the draw counter must not enable continuous FPS rendering
+	CHECK(ui.keyDown(Key::F4));
+	CHECK(!ui.drawBatchCounterEnabled());
+}
+
 TEST(ui_runtime_xss_keyframes_tick_only_while_visible_animation_runs) {
 	constexpr std::string_view xuiSource = R"(Window(size: 240x120) { Panel[id: "animated", class: "animated", width: 160px, height: 48px] })";
 	constexpr std::string_view xssSource = R"(
@@ -1485,7 +1635,7 @@ TitleButton { resting: { fg: #edf3fb } hover: { bg: #293d59 } pressed: { bg: #14
 	CHECK_NEAR(region.minimize.right(), region.maximize.x, 0.5f);
 	CHECK(region.minimize.x < region.maximize.x && region.maximize.x < region.close.x);
 
-	const Vec2 zoneCenter = [](const Rect& r) { return Vec2{ r.x + r.w * 0.5f, r.y + r.h * 0.5f }; };
+	const auto zoneCenter = [](const Rect& r) { return Vec2{ r.x + r.w * 0.5f, r.y + r.h * 0.5f }; };
 	// Close triggers once, on release inside the zone.
 	ui.pointerDown(zoneCenter(region.close));
 	CHECK_EQ(platform.closeCount(), 0u);
@@ -1577,4 +1727,167 @@ TEST(ui_runtime_titlebar_requires_matching_platform_top_menu) {
 		if (withAttr) CHECK(documentUsesClientChrome(*withAttr, strings));
 		if (withoutAttr) CHECK(!documentUsesClientChrome(*withoutAttr, strings));
 	}
+}
+
+TEST(ui_runtime_tween_reaches_final_value_without_input) {
+	// Regression for the animation freeze: a transition must paint its exact final value and
+	// then go idle. The old code erased completed tweens without applying `to`, leaving the
+	// widget at the last sub-frame sample until the next input-driven repaint.
+	constexpr std::string_view xuiSource = R"(
+Window(size: 200x120) {
+  Button(label: "Press")[id: "tween-button", width: 120px, height: 40px]
+}
+)";
+	constexpr std::string_view xssSource = R"(
+Button { resting: { bg: #222222FF } pressed: { bg: #EE4422FF } transition: resting -> pressed 80ms }
+)";
+	StringInterner strings;
+	auto document = parseXui(xuiSource, "tween.xui", strings);
+	auto styles = compileXss(xssSource, "tween.xss", strings);
+	CHECK(document.has_value()); CHECK(styles.has_value());
+	if (!document || !styles) return;
+	TextSystem text; UiRuntime ui; std::string error;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error));
+	if (!error.empty()) { std::printf("  build error: %s\n", error.c_str()); return; }
+	ui.layout(200.f, 120.f);
+	const Rect button = ui.bounds(NodeId{ 1, 1 });
+	const Vec2 center{ button.x + button.w * 0.5f, button.y + button.h * 0.5f };
+	CHECK(ui.pointerDown(center));   // pressed state starts the transition; hold it
+	Color final{};
+	for (int frame = 0; frame < 40; ++frame) {
+		ui.updateTimers(std::chrono::steady_clock::now());
+		Painter painter; painter.begin(200, 120, 1.f);
+		ui.paint(painter);
+		const DrawList draw = painter.finish();
+		if (draw.nVerts > 0) final = Color::fromRGBA8(draw.verts[0].c0);
+		std::this_thread::sleep_for(std::chrono::milliseconds(8));
+		if (!ui.updateTimers(std::chrono::steady_clock::now())) break;   // idle again = tween done
+	}
+	CHECK_EQ(final.toRGBA8(), Color::fromRGBA8(0xEE4422FFu).toRGBA8());
+	// After completion the loop must be idle: no timer keeps ticking for a finished tween.
+	const auto quiet = std::chrono::steady_clock::now();
+	CHECK(!ui.updateTimers(quiet + std::chrono::milliseconds(200)));
+	CHECK(ui.nextTimerDelay(quiet + std::chrono::milliseconds(200)) < 0.0);
+	ui.pointerUp(center);
+}
+
+TEST(ui_runtime_menu_anchors_items_keyboard_and_outside_close) {
+	constexpr std::string_view xuiSource = R"(
+Window(size: 320x220) {
+  Column[class: "page"] {
+    Button(label: "Open")[id: "menu-anchor", width: 80px, height: 28px]
+    Menu[id: "ctx", anchor: "menu-anchor", width: 150px] {
+      MenuItem(label: "Alpha")[press: onPick]
+      MenuItem(label: "Beta")[disabled: true]
+      MenuItem("-")
+      MenuItem(label: "Gamma")[checked: true]
+      MenuItem(label: "More") {
+        MenuItem(label: "Inner")[press: onPick]
+      }
+    }
+  }
+}
+)";
+	StringInterner strings;
+	auto document = parseXui(xuiSource, "menu.xui", strings);
+	auto styles = compileXss("Menu { resting: { bg: #151E32FF } } MenuItem { resting: { fg: #EEEEEEFF } }", "menu.xss", strings);
+	CHECK(document.has_value()); CHECK(styles.has_value());
+	if (!document || !styles) return;
+	TextSystem text; UiRuntime ui; std::string error;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error));
+	if (!error.empty()) { std::printf("  build error: %s\n", error.c_str()); return; }
+	ui.layout(320.f, 220.f);
+	u32 picks = 0;
+	ui.setEventHandler([](void* ctx, std::string_view) { ++*static_cast<u32*>(ctx); }, &picks);
+
+	const Rect anchor = ui.bounds(NodeId{ 2, 1 });
+	const Vec2 anchorCenter{ anchor.x + anchor.w * 0.5f, anchor.y + anchor.h * 0.5f };
+	// Popup rows: 4px panel inset + 28px per item row, 9px separators; popup opens 4px below.
+	const f32 popupY = anchor.bottom() + 4.f + 4.f;
+	const Vec2 alphaRow{ anchor.x + 40.f, popupY + 14.f };
+	const Vec2 betaRow{ anchor.x + 40.f, popupY + 28.f + 14.f };
+	const Vec2 moreRow{ anchor.x + 40.f, popupY + 28.f * 2 + 9.f + 28.f + 14.f };
+
+	CHECK(ui.pointerDown(anchorCenter));
+	CHECK_EQ(picks, 0u);
+	// Disabled row: press is swallowed, the menu stays open.
+	ui.pointerDown(betaRow); ui.pointerUp(betaRow);
+	CHECK_EQ(picks, 0u);
+	// Enabled row activates its handler, records the selection, closes the menu.
+	ui.pointerDown(alphaRow); ui.pointerUp(alphaRow);
+	CHECK_EQ(picks, 1u);
+	bool stringOk = false;
+	if (const auto value = ui.value("ctx"))
+		if (const auto* label = std::get_if<std::string>(&*value)) stringOk = *label == "Alpha";
+	CHECK(stringOk);
+	// Escape closes an open menu.
+	ui.pointerDown(anchorCenter); ui.pointerUp(anchorCenter);
+	ui.keyDown(Key::Escape);
+	// Outside press closes the menu without activating anything.
+	ui.pointerDown(anchorCenter); ui.pointerUp(anchorCenter);
+	ui.pointerDown({ 300.f, 200.f }); ui.pointerUp({ 300.f, 200.f });
+	CHECK_EQ(picks, 1u);
+	// Keyboard: open, Down to Alpha (first enabled row), Enter activates.
+	ui.pointerDown(anchorCenter); ui.pointerUp(anchorCenter);
+	ui.keyDown(Key::Down);
+	ui.keyDown(Key::Enter);
+	CHECK_EQ(picks, 2u);
+	// Submenu: hovering the parent row opens it; its item activates from the submenu surface.
+	ui.pointerDown(anchorCenter); ui.pointerUp(anchorCenter);
+	ui.pointerMove(moreRow);
+	// Opening a submenu must not leave the retained popup paint pass looping forever.
+	Painter menuPainter; menuPainter.begin(320, 220, 1.f);
+	ui.paint(menuPainter);
+	const DrawList menuFrame = menuPainter.finish();
+	CHECK(menuFrame.nVerts > 0);
+	const Vec2 innerRow{ anchor.x + 150.f, moreRow.y };   // submenu opens right of the parent row
+	ui.pointerDown(innerRow); ui.pointerUp(innerRow);
+	CHECK_EQ(picks, 3u);
+	if (const auto value = ui.value("ctx"))
+		if (const auto* label = std::get_if<std::string>(&*value)) CHECK_EQ(*label, std::string("Inner"));
+}
+
+TEST(ui_runtime_number_field_live_values_invalid_state_and_blur_revert) {
+	constexpr std::string_view xuiSource = R"(
+Window(size: 260x140) {
+  Column[class: "page"] {
+    NumberField[id: "nf", value: 5, min: 0, max: 100, step: 2, unit: "ms", width: 160px, height: 30px, change: onNumber]
+    Button(label: "Other")[id: "elsewhere", width: 60px, height: 24px]
+  }
+}
+)";
+	StringInterner strings;
+	auto document = parseXui(xuiSource, "number.xui", strings);
+	auto styles = compileXss("NumberField { resting: { bg: #101827FF } } error { border: 1px solid #C0392BFF }", "number.xss", strings);
+	CHECK(document.has_value()); CHECK(styles.has_value());
+	if (!document || !styles) return;
+	TextSystem text; UiRuntime ui; std::string error;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error));
+	if (!error.empty()) { std::printf("  build error: %s\n", error.c_str()); return; }
+	ui.layout(260.f, 140.f);
+	u32 changes = 0;
+	ui.setEventHandler([](void* ctx, std::string_view) { ++*static_cast<u32*>(ctx); }, &changes);
+
+	const Rect field = ui.bounds(NodeId{ 2, 1 });
+	const Vec2 fieldCenter{ field.x + 40.f, field.y + field.h * 0.5f };
+	ui.pointerDown(fieldCenter);
+	CHECK(ui.keyDown(Key::A, static_cast<u8>(Mod::Ctrl), nullptr));   // select all
+	// Live typing commits per keystroke: "4" then "2" -> 42 without pressing Enter.
+	ui.textInput(static_cast<u32>('4'));
+	if (const auto value = ui.value("nf")) { const auto* number = std::get_if<f64>(&*value); CHECK(number && *number == 4.0); }
+	(void)changes;
+	ui.textInput(static_cast<u32>('2'));
+	if (const auto value = ui.value("nf")) { const auto* number = std::get_if<f64>(&*value); CHECK(number && *number == 42.0); }
+	// Invalid text flags the field; blur reverts to the last valid canonical text.
+	ui.keyDown(Key::Backspace);
+	ui.keyDown(Key::Backspace);
+	ui.textInput(static_cast<u32>('-'));
+	ui.pointerDown({ field.x + field.w + 40.f, field.y + field.h + 20.f });   // blur
+	if (const auto value = ui.value("nf")) { const auto* number = std::get_if<f64>(&*value); CHECK(number && *number == 4.0); }
+	const std::string_view displayedValue = ui.controlText("nf");
+	CHECK(displayedValue.find("4") != std::string_view::npos);
+	// Arrow keys step from the committed value with live events.
+	ui.pointerDown(fieldCenter);
+	ui.keyDown(Key::Up);
+	if (const auto value = ui.value("nf")) { const auto* number = std::get_if<f64>(&*value); CHECK(number && *number == 6.0); }
 }

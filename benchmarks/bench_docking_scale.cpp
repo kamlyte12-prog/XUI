@@ -38,16 +38,14 @@ namespace {
 		return source;
 	}
 
-	UiRuntime buildFor(const std::string& source, StringInterner& strings, TextSystem& text) {
+	void buildFor(UiRuntime& ui, const std::string& source, StringInterner& strings, TextSystem& text) {
 		auto document = parseXui(source, "bench-docking-scale.xui", strings);
 		auto styles = compileXss("", "bench-docking-scale.xss", strings);
-		UiRuntime ui;
 		std::string error;
 		if (!document || !styles || !ui.build(*document, *styles, strings, text, {}, error)) {
 			std::fprintf(stderr, "fixture build failed: %s\n", error.c_str());
 			std::exit(1);
 		}
-		return ui;
 	}
 
 	template <typename Fn>
@@ -61,7 +59,8 @@ namespace {
 	void runScenario(const char* name, const std::string& source, u32 panels, u32 iterations) {
 		StringInterner strings;
 		TextSystem text;
-		UiRuntime ui = buildFor(source, strings, text);
+		UiRuntime ui;
+		buildFor(ui, source, strings, text);
 		ui.layout(1600.f, 900.f);
 
 		const f64 idle = micros([&](u32) { ui.layout(1600.f, 900.f); }, iterations);

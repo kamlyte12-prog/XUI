@@ -2,6 +2,117 @@
 
 This file records project changes, design decisions, trade-offs, current status, and next steps. It is updated as implementation work lands.
 
+## Animation timer cadence, cursor exit, cancellation policy, and F4 draw batches — 2026-10-21
+
+### Audit and root causes
+
+- The shared `Xui::run()` loop already checked `UiRuntime::updateTimers()` and waited through `Platform::waitEvents()`. Active tweens/keyframes scheduled timer wake-ups, so a mouse-stationary transition did have a timer path. However, `nextTimerDelay()` returned a fresh 16 ms interval every time, even when rendering had already consumed part of the interval. The loop therefore slept *after* render time instead of targeting a deadline. A visible timer-driven animation profile initially measured **31.30 FPS**; the equivalent uncapped visible render profile had previously measured **382.77 FPS**. That difference exposed the extra wait cost.
+- GLFW never registered `glfwSetCursorEnterCallback`, and only queued `MouseMove`. When the pointer left the client area without a final in-bounds move, runtime hover stayed set. The existing timer fix could not animate hover-out because the state change was never delivered. Earlier tests exercised timers directly but did not cover GLFW's cursor-leave event path.
+- The platform contract did not report hidden/minimized visibility. The run loop could not deliberately suspend those animation clocks. The chosen behavior is now explicit: continue while visible even when unfocused; pause while hidden/minimized; preserve animation elapsed time across the pause.
+
+### Changes and decisions
+
+- `UiRuntime::nextTimerDelay()` now uses the remaining time to its active animation deadline, not a fresh 1/60-second wait after every render. The timer test checks that a simulated 5 ms of frame work reduces the remaining delay. This keeps the event wait blocking and idle-friendly while avoiding an additive frame delay.
+- GLFW now reports cursor enter/leave. `UiRuntime::pointerLeave()` clears hover-dependent state and tooltip targets without cancelling active drag operations. `Xui::run()` routes these events and restores the arrow cursor after exit.
+- Added non-pure `Platform::windowVisible()` (default `true`) so existing custom platform implementations remain source-compatible. GLFW reports false for hidden or iconified windows. `Xui::run()` pauses animation clocks while invisible and skips hidden-window rendering; on restore, animation start/deadline timestamps shift by the pause duration. Visible-unfocused animations continue.
+- Added `.xss` `animation-cancel: stop | finish` as a widget policy; omitted means `stop`. `finish` completes a current transition target before applying the new state, or finishes the current keyframe iteration before leaving its state. An animation can override the widget default with `cancel(stop)` or `cancel(finish)` in its `animation` declaration. Existing `animation-keep: until-done` remains available with its earlier retarget-to-new-state behavior. Imperative `cancelAnimation(id)` remains immediate.
+- The Motion & Style demo now shows a `Finish hover-out` button and keyframe swatches using per-animation `cancel(finish)`. Normal demo startup no longer enables F3 automatically, so it returns to event-driven idle. F3 still opts into continuous FPS sampling.
+- F4 now toggles the latest `Painter::Stats.drawCalls` count alongside the FPS text. This is the backend-neutral draw-list batch count, not GPU submissions. It updates on rendered frames and does not request continuous rendering. GLFW key mapping now includes F4.
+- Added `--profile-animation-timer`, which selects the animated showcase page and uses the ordinary timer-driven loop; other `--profile*` runs remain bounded visible uncapped profiles. The demo profile is visible so minimized-window pausing does not produce a misleading zero-frame result.
+- Updated animation, styling, performance, widget, and getting-started documentation with timer behavior, cancellation semantics, visibility behavior, profile modes, and the F4 metric.
+
+### Verification and remaining gaps
+
+- Windows MSVC/Ninja build completed for all default targets after the parser/runtime/API changes. CTest passed **1/1**; the test binary reports **188 tests, 0 failures**. Coverage includes no-input animation ticks, cursor leave, finish-current transition, finish-current infinite keyframe iteration, hidden-clock pause/resume, and F4 independence from FPS mode.
+- The first visible `--profile-animation-timer` run, before changing the timer wait from a full interval to the remaining deadline, measured **210 frames / 6.70965 s / 31.30 FPS**. The user did not approve the post-fix visible rerun, so the new cadence has not been measured in a live window and the >60 FPS visible target is **not verified**. The earlier **382.77 FPS** uncapped profile is a different mode and does not prove normal timer-loop cadence.
+- No manual mouse, minimize/restore, or unfocused-window session was completed. Automated runtime tests verify state and clock behavior; the GLFW callback compiles, but desktop interaction should still be confirmed.
+- Trade-off: custom `Platform` implementations default to always visible to preserve compatibility. They must override `windowVisible()` to pause clocks on their own hidden/minimized state.
+- Next: rerun `xui_glfw_demo --profile-animation-timer` visibly after the deadline change; confirm >60 FPS with the pointer still and after leaving the window; minimize/restore and verify animation time pauses; press F4 with FPS off and confirm it does not keep the loop active.
+
+## Custom titlebar duplication on maximize — 2026-10-21
+
+### Audit and root cause
+
+- The showcase has one authored `TitleBar`; runtime materializes it once and paints the caption buttons as an overlay on that bar. There is no maximize-specific tree insertion or second widget paint path.
+- The Windows GLFW subclass installed `WS_THICKFRAME` for native snap/resize, but intercepted `WM_NCCALCSIZE` only when `wParam` was true. The false form fell through to GLFW/`DefWindowProc`, allowing default non-client layout during a maximize/restore frame transition. The custom maximize action itself uses GLFW's maximize/restore calls; it did not explicitly request window decorations.
+- The renderer clears and paints the normal retained tree; source audit found no second titlebar draw caused by the double-buffer swap path. The taskbar is separate from the titlebar symptom; maximized client bounds are now explicitly taken from the monitor work area.
+
+### Changes and decisions
+
+- Kept the fix inside the Windows GLFW backend; `platform_interface` and the shared layout/runtime contracts are unchanged. `applySnapStyles()` now explicitly removes `WS_CAPTION` while restoring thick-frame/snap styles. Maximize and restore reassert those styles after GLFW's transition.
+- The subclass now handles both `WM_NCCALCSIZE` forms for custom chrome and suppresses native `WM_NCACTIVATE` non-client painting. While maximized, it uses `MONITORINFO.rcWork`, keeping the taskbar visible and avoiding an invisible frame strip.
+- macOS/Linux GLFW still intentionally retains native decorations because this backend has no implemented system move/resize operation there. Its authored `TitleBar` remains an in-client bar, so those platforms do not meet the “replacement titlebar only” behavior yet. This existing fallback is documented; no unsupported cross-platform window-drag API was invented in this fix.
+
+### Verification and remaining gap
+
+- Windows MSVC/Ninja rebuilt `xui_glfw_demo`; the full default build completed and CTest passed **1/1** (test binary: **183 passed, 0 failed**).
+- The hidden GLFW menubar profile completed **3,066 frames / 6.25464 s / 490.196 FPS**. This verifies backend initialization and hidden-loop throughput only, not visible maximize behavior or input/resize latency.
+- Windows desktop automation was unavailable (“Computer Use native pipe is unavailable”), so a screenshot-backed maximize/restore/minimize/close check could not be completed. macOS/Linux builds and visible runs were also unavailable. Do not mark the visual issue fully verified until those runs are recorded.
+- The user-facing TitleBar platform caveats in `doc/widgets.md` now describe the Windows non-client handling and maximized work-area behavior.
+
+## Recent-files submenu paint freeze — 2026-10-21
+
+- Reproduced the freeze path in `UiRuntime::paint()`: while an open submenu was painted, the `while (nested)` traversal selected that same root submenu again on every pass because it did not exclude nodes already marked `submenuPainted`. `nested` was therefore reset to true forever. Opening the showcase's “Recent files” submenu caused the redraw to hang the UI thread.
+- The submenu traversal now skips `submenuPainted` items. This preserves parent-before-child ordering for recursive submenu painting while allowing each open submenu surface to be painted exactly once per pass.
+- Added a regression assertion to `ui_runtime_menu_anchors_items_keyboard_and_outside_close`: it opens the nested menu, paints a frame before choosing a submenu item, and verifies that drawing completes with geometry. This specifically covers the previously non-terminating paint path.
+- Verification: rebuilt `xui_tests` and `xui_glfw_demo`, then rebuilt all default Ninja targets. CTest passed **1/1**; direct test output reports **183 tests, 0 failures**. No visible interactive GLFW session or FPS measurement was available, so desktop confirmation and visible performance remain unverified.
+- Trade-off: a per-frame marker is used rather than restructuring menu traversal; the existing retained hierarchy and popup z-order remain intact.
+- Next: open the GLFW demo and click Menu → Recent files, move into the submenu, select an enabled item, then verify normal close and responsiveness at visible frame rate.
+
+## MSVC errors and anchored menu regression — 2026-10-21
+
+- Fixed the screenshot's `glfw_platform.hpp` parse cascade by qualifying the resize inset types as `xui::f32`. The subsequent missing-member and `resizeInset` errors in `glfw_platform.cpp` were parser fallout from the unqualified type, not separate API mismatches.
+- Fixed warnings promoted to errors in `runtime.cpp`: renamed the fallback stepper mark, used the correct `DockHostState` argument for dock damage, and removed local-name shadowing in stepper input and `setValue` branches.
+- Repaired compile errors in the existing test source (a lambda mistakenly stored as `Vec2`, packed RGBA passed where `Color` is expected, duplicate local name, and malformed duplicate label syntax). Updated the docking-scale benchmark helper to build into its caller-owned `UiRuntime`, which is non-movable.
+- The full test run then exposed a real menu bug: an anchored `Menu` used its structural node's layout rectangle for opening, popup placement, and outside/anchor hit checks. The menu node is intentionally excluded from normal layout, so clicks on the authored anchor could not open it and popup rows were placed incorrectly. Those paths now use the resolved `menuAnchorHitRect()` rectangle.
+- Decision: fix the shared anchor geometry helpers in runtime rather than assigning fake layout bounds to the Menu node. This keeps popup geometry, painting, and input based on the actual authored anchor and does not perturb layout or backend code.
+- Verification: full Windows MSVC/Ninja build completed all default targets, including `xui_tests`, `xui_glfw_demo`, demos, and benchmarks. CTest passed **1/1**; direct test output reports **183 tests, 0 failures**. `git diff --check` reports no whitespace errors (only standard LF/CRLF normalization notices).
+- Remaining boundary: this verifies compilation and headless tests. No visible demo session or FPS measurement was run in this fix pass, so visual menu placement, desktop interaction, and the >60 FPS user-visible target remain subject to the project's existing M0 verification gap.
+- This follow-up supersedes the earlier “full target rebuild blocked” note below: the identified compile errors were resolved and the full build now passes.
+
+## Unused resize-inset parameter warning — 2026-10-21
+
+- Removed the parameter name from the default no-op `Platform::setResizeInset(WindowHandle, f32)` declaration. Concrete backends that use the inset retain their named parameters; the interface default no longer triggers MSVC C4100 when warnings are treated as errors.
+- `runtime.hpp` has no function parameter named `pixels`; its `pixels` occurrence is in a comment. No unrelated runtime API change was needed.
+- Full target rebuild was attempted. It is currently blocked by independent errors in the existing working-tree edits: `glfw_platform.hpp` uses unqualified `f32`, and `src/ui/runtime.cpp` reports an undeclared `mark`, invalid `addDockDamage(u32)` call, and two shadowing warnings under `/WX`. These are outside the reported unused-parameter fix and were left untouched.
+- Next: correct those independent compile issues in their owning changes, then rebuild all targets with warnings-as-errors.
+
+## Animation freeze root cause, borderless resize, popup menus, NumberField — 2026-10-21
+
+### Audit and findings
+
+- **Animation freeze (repeat failure, treated as a bug first):** the 2026-10-18 fix addressed the *scheduler* (timer wake-ups, paused keyframes) and was genuinely correct — `updateTimers`/`nextTimerDelay` sustain active animations without input. The real defect was in `paint()`'s transition-tween loop: a tween whose elapsed time reached its duration was **erased without applying its final value**. The last painted frame showed the ~97% sample; the tween list then emptied, the timer loop went idle, `nextTimerDelay` returned −1, and the widget froze short of its target until the next input-driven state change re-resolved the style. Exactly the reported signature: freezes without mouse movement, resumes on input, no idle CPU burn. Keyframes were never affected (they paint `progress = 1` on completion); only hover/press state tweens froze.
+- **Borderless resize:** confirmed against the bundled GLFW 3.5.1 source — `getWindowStyle()` gives undecorated windows `WS_POPUP` with **no `WS_THICKFRAME`**, so `DefWindowProc` never enters the native sizing loop even when our `WM_NCHITTEST` returns `HT*`. Drag worked (native `HTCAPTION` modal loop) while resize was dead.
+- **Dropdown vs popup menu:** the existing `Dropdown` is a value selector (flat pipe-separated options, committed value changes the control's own text) with no separator/disabled/checked/submenu support; overloading it would have risked the documented dropdown regressions. Per the user's decision, popup menus are a new `Menu`/`MenuItem` widget reusing the dropdown's popup plumbing (anchored overlay, virtual rows, outside-click close, topmost-row hit testing).
+- **NumberField:** audit showed it already reuses the `TextBox` editing path (caret/selection/focus/blink), fires `change` per valid keystroke (per-keystroke `commitNumberText`), and has steppers, arrow keys, and clamping. Gaps: no invalid visual state, fixed stepper visuals.
+
+### Changes
+
+- **Animation:** completed tweens now paint `to` exactly before retiring, then the loop returns to idle (regression test drives a transition to completion with no input and asserts the final color plus an idle timer path). New per-widget `.xss` property `animation-keep: none | until-done` (`PropId::AnimationKeep`): `until-done` keeps a mid-flight transition animating to the new state's values instead of snapping when the state exits, using the first declared `transition` timing on that widget. Keyframe/one-shot/loop/cancel semantics unchanged.
+- **Borderless resize:** the GLFW chrome subclass now also restores `WS_THICKFRAME` (with the snap boxes) so the native sizing loop engages from all edges/corners; `WM_NCCALCSIZE` keeps the frame invisible. New `Platform::setResizeInset(WindowHandle, f32)` sets the hit-test margin in physical px (default = native frame metric, clamped 0–64). Per-edge cursors come from the OS because the edges are non-client.
+- **Popup menus:** `Menu` (anchor label, `anchor: "<id>"`, `context: true` for right-click) and `MenuItem` (label, `press`, `shortcut`, `checked`, `disabled`, `-` separators, one submenu level via nested `MenuItem`s). Rows are retained nodes kept out of the layout tree; geometry (popup placement, flip when clipped, row rects) is computed on demand and shared by painting, hit testing, and keyboard navigation. Routing: menu popups hit-test above all other popups; right-press only reaches context menus; opening any menu closes dropdowns/other menus and vice versa; press on the open anchor toggles. Keyboard: Up/Down (enabled rows only), Enter, Escape (closes submenu first), Left/Right for submenus, hover-open for parents. Value API: `value(menuId)` = last activated item; `setValue(menuId, bool)` open/close; `setValue(itemId, bool)` check/uncheck; item `press` fires, falling back to the menu's handler. Painted through the `Menu`/`MenuItem` selectors with `resting`/`hover`/`checked`/`disabled` states, checked mark, shortcut column, and submenu arrow.
+- **NumberField:** unparseable text now sets the `.xss` `error` state (existing `State::Error`) and keeps reporting the last valid value; losing focus with invalid text reverts the editor to the canonical last-valid text. Stepper buttons paint through the styleable `NumberButton` part (`resting`/`hover`/`pressed`), shared with the `Stepper` widget, with the previous built-in look as fallback. Live per-keystroke commit behavior is documented (it already existed).
+- **Demo:** the showcase TitleBar gains a Menu button with an anchored menu (items, separator, checked row, disabled item, shortcut, submenu) and a right-click context menu on the section tabs; `onMenuAction` reports the activated item in the action readout. Styles added to `showcase.xss`.
+- **Tests:** tween-completion regression (final color + idle-after-completion), menu behaviors (disabled rows stay open, activation + value, Escape, outside close, keyboard activation, submenu), NumberField (live per-keystroke commits, invalid blur revert, arrow stepping). 34 tests total in the binary once compiled.
+
+### Decisions and trade-offs
+
+- The freeze fix was made at the paint site (apply `to` before erase) rather than keeping completed tweens alive — keeping them alive would have kept the timer loop ticking for no visual change.
+- `animation-keep` reuses the first declared transition's timing for properties the new state does not itself transition — simple and predictable; a per-property timing override was rejected as over-configured.
+- Menu rows are virtual (never appended to the layout tree), matching the dropdown/picker pattern; this keeps menu items out of hit testing, timers, and layout at the cost of not being individually addressable by selectors.
+- Menu activation happens on press (not release), consistent with the existing dropdown rows.
+- Submenus are limited to one nesting level; deeper chains need a recursive overlay design (documented).
+- The resize inset is physical pixels (what `WM_NCHITTEST` works in) and backend-level, not `.xss`-styleable: window edges are non-client, so the `.xss cursor` option does not apply there.
+
+### Verification status
+
+- **Not yet compiled or run.** All four changes are code-complete with headless tests written. Required pass: framework targets, `xui_tests` (37 total test cases expected incl. the 3 new ones), `xui_glfw_demo` visible run — borderless resize from all edges/corners with correct cursors, menu open/navigate/activate with z-order above other popups, animations running with the mouse still and resuming correctly after completion, NumberField live/invalid/steppers, plus the standing regression checklist.
+
+### Next steps
+
+- Build + fix reported compile errors; run the suite; visible demo pass per the checklist above.
+- Revisit the paused docking-optimization task (scale benchmark staged in `benchmarks/bench_docking_scale.cpp`).
+
 ## Custom window chrome: `platformTopMenu` + `TitleBar` — 2026-10-19
 
 ### Audit and findings

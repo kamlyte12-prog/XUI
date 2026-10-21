@@ -103,6 +103,9 @@ namespace xui {
 		virtual Vec2 windowSizeLogical(WindowHandle) const = 0;  ///< logical px
 		virtual Vec2i windowSizePixels(WindowHandle) const = 0;  ///< physical px (framebuffer)
 		virtual f32 dpiScale(WindowHandle) const = 0;
+		/// Whether a window can currently be seen. Minimized/hidden windows may pause visual timers.
+		/// Platforms without visibility state can keep the default and report true.
+		virtual bool windowVisible(WindowHandle) const { return true; }
 
 		/// Pop the next queued event. Returns false when the queue is empty.
 		virtual bool pumpEvents(Event& out) = 0;
@@ -146,6 +149,10 @@ namespace xui {
 		/// Request a window close (equivalent to the user clicking the native close button);
 		/// delivered as a CloseRequest/Quit event, not an immediate teardown.
 		virtual void closeWindow(WindowHandle) {}
+		/// Border inset (physical pixels from each window edge/corner) that activates borderless
+		/// edge resize. 0 (default) uses the platform's native frame thickness. Backends without
+		/// client-side resize borders may ignore or clamp this.
+		virtual void setResizeInset(WindowHandle, f32) {}
 	};
 
 } // namespace xui

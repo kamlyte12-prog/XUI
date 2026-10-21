@@ -23,6 +23,9 @@ Row.masthead { resting: { gap: 16px, align: Center, justify: SpaceBetween } }
 TitleBar.top-menu { resting: { bg: color.surface, pad: 4px, gap: 4px, border: 1px solid color.outline } }
 TitleButton { resting: { fg: color.muted } hover: { bg: color.surface-hover, fg: color.text } pressed: { bg: color.surface-pressed, fg: color.text } }
 Text.menu-title { resting: { fg: color.muted, font-size: 12px, align: Right, pad: 0px 8px } }
+// Popup menus: the anchor button uses the Menu rule, rows the MenuItem rule.
+Menu { resting: { bg: #151E32F5, fg: color.text, border: 1px solid color.outline, radius: 5px } }
+MenuItem { resting: { fg: color.text, radius: 4px } hover: { bg: color.surface-hover, fg: color.readout } disabled: { fg: color.disabled, opacity: 0.6 } checked: { fg: color.accent } }
 Dropdown.menu-dropdown { resting: { bg: color.surface-raised, fg: color.text, pad: 6px 9px, border: 1px solid color.outline-soft, radius: 5px, font-size: 12px } hover: { bg: color.surface-hover, border: 1px solid color.accent } focus: { border: 1px solid color.accent } open: { border: 1px solid color.accent } }
 Button.menu-help { resting: { bg: color.surface-raised, fg: color.text, pad: 6px, border: 1px solid color.outline-soft, radius: 5px, font-size: 12px } hover: { bg: color.surface-hover, border: 1px solid color.accent } focus: { border: 1px solid color.accent } }
 Text.title { resting: { fg: color.text, font-size: 25px, font-weight: 700 } }
@@ -154,7 +157,9 @@ Button.motion-button { resting: { bg: color.surface-raised, fg: color.text, bord
   transition: hover -> pressed 70ms ease-out
   transition: pressed -> resting 140ms ease-out
 }
-Panel.motion-swatch { resting: { bg: color.surface-raised, border: 1px solid color.outline-soft, radius: 7px, align: Center, justify: Center, animation: pulse 1.4s infinite ease-in-out } }
+Button.finish-hover { resting: { animation-cancel: finish } }
+Panel.motion-swatch { resting: { bg: color.surface-raised, border: 1px solid color.outline-soft, radius: 7px, align: Center, justify: Center, animation: pulse 1.4s infinite ease-in-out cancel(finish) }
+  hover: { border: 1px solid color.accent } }
 ProgressBar.motion-progress { resting: { bg: color.outline, fg: color.accent, radius: 6px } }
 ProgressBar.event-meter { resting: { bg: color.outline, fg: color.accent-hover, radius: 6px, animation: fill-to-value 1200ms paused ease-out } }
 

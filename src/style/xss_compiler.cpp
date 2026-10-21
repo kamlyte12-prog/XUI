@@ -269,6 +269,15 @@ namespace xui {
 			std::vector<Atom> shown; std::vector<AtomKind> kinds;
 			for (u32 vi : d.values) {
 				const xss::Expr& e = ex(vi);
+				if (d.prop == PropId::Animation && e.kind == xss::ExprKind::Call && m_in.view(e.name) == "cancel") {
+					if (e.argCount != 1) { err(e.off, e.len, "animation cancel() takes one argument: stop or finish"); return false; }
+					const xss::Expr& choice = ex(m_a.args[e.argFirst]);
+					const std::string_view policy = choice.kind == xss::ExprKind::Path ? m_in.view(choice.name) : std::string_view{};
+					if (policy != "stop" && policy != "finish") { err(choice.off, choice.len, "animation cancel() expects stop or finish"); return false; }
+					Atom modifier = Atom::ident(m_in.intern(std::string("cancel-") + std::string(policy)));
+					kinds.push_back(modifier.kind); shown.push_back(modifier);
+					continue;
+				}
 				if (d.prop == PropId::Transform && e.kind == xss::ExprKind::Call) {   // translate(10px, 4px) -> [Func, 10px, 4px]
 					Atom f; f.kind = AtomKind::Func; f.bits = e.name.v;
 					shown.push_back(f); kinds.push_back(AtomKind::Func);
@@ -288,6 +297,13 @@ namespace xui {
 			if (kinds.size() < pi.minN || kinds.size() > pi.maxN) {
 				err(d.off, d.len, "'" + std::string(pi.name) + "' takes " + (pi.minN == pi.maxN ? std::to_string(pi.minN) : std::to_string(pi.minN) + " to " + std::to_string(pi.maxN)) + " value(s), got " + std::to_string(kinds.size()));
 				return false;
+			}
+			if (d.prop == PropId::AnimationCancel && !shown.empty() && shown[0].kind == AtomKind::Ident) {
+				const std::string_view policy = m_in.view(shown[0].str());
+				if (policy != "stop" && policy != "finish") {
+					err(d.off, d.len, "animation-cancel expects stop or finish");
+					return false;
+				}
 			}
 			for (std::size_t i = 0; i < kinds.size(); ++i)
 				if (!(pi.kindMask & (1u << static_cast<int>(kinds[i])))) {

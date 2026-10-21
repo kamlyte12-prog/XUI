@@ -86,6 +86,7 @@ See [`platform.hpp`](../include/xui/platform/platform.hpp). Implement:
 
 - `init` / `shutdown` and `createWindow` / `destroyWindow`.
 - Title, logical client size, physical framebuffer size, DPI, and opaque native handles.
+- `windowVisible()` for hidden/minimized timer policy. It defaults to `true`; implement it when the backend can query visibility so the facade can pause animation clocks while hidden.
 - A normalized event queue through `pumpEvents()` and a blocking/non-busy `waitEvents(timeoutSec)`.
 - Monotonic `time()`, cursor and clipboard methods.
 - GL context activation (`makeGlCurrent`, `nativeGlContext`) and `swapBuffers`; use safe no-ops when your platform/renderer pair does not need them.

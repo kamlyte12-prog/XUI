@@ -27,9 +27,9 @@ namespace xui {
 	};
 	bool atomEqual(const Atom& a, const Atom& b);
 
-	/// A property value: up to 6 atoms (shorthands are expanded to their canonical arity).
+	/// A property value: up to 8 atoms (shorthands are expanded to their canonical arity).
 	struct StyleValue {
-		static constexpr int kMaxAtoms = 6;
+		static constexpr int kMaxAtoms = 8;
 		u8 count = 0;
 		Atom atoms[kMaxAtoms];
 	};
@@ -41,7 +41,7 @@ namespace xui {
 	enum class PropId : u8 {
 		Bg, Fg, Border, Radius, Pad, Margin, Gap, Size, MinSize, MaxSize, MinWidth, MaxWidth, MinHeight, MaxHeight, Opacity, Shadow, Glow, Gradient, Blur, Transform,
 		Font, FontSize, FontWeight, LetterSpacing, Align, Justify, Grow, Shrink, Cursor, ZIndex, Clip, Overflow,
-		Animation, ScrollTrack, ScrollThumb, ScrollbarSize, ScrollbarVisibility, ScrollBehavior, ScrollSpeed, Value, Count
+		Animation, AnimationKeep, AnimationCancel, ScrollTrack, ScrollThumb, ScrollbarSize, ScrollbarVisibility, ScrollBehavior, ScrollSpeed, Value, Count
 	};
 	constexpr int kPropCount = static_cast<int>(PropId::Count);
 	enum class Expand : u8 { None, Sides4, Pair };

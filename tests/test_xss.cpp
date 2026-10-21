@@ -211,7 +211,7 @@ TEST(xss_keyframes_and_animation) {
 	StringInterner in;
 	StyleSheet sh = mustCompile(in, R"(
         keyframes pulse { to { opacity: 0.4 } from { opacity: 1 } 50% { opacity: 0.7, blur: 2px } }
-        Spinner { resting: { animation: pulse 1s cubic-bezier(0.4, 0, 0.2, 1) infinite } }
+        Spinner { resting: { animation: pulse 1s cubic-bezier(0.4, 0, 0.2, 1) infinite cancel(finish), animation-cancel: stop } }
     )");
 	const KeyframesDef* k = sh.findKeyframes(in.intern("pulse"));
 	CHECK(k != nullptr);
@@ -223,9 +223,11 @@ TEST(xss_keyframes_and_animation) {
 	}
 	MatchInput mi; mi.type = in.intern("Spinner"); PropTable t; sh.resolve(sh.match(mi), 0, 0, t);
 	const StyleValue& a = t.get(PropId::Animation);
-	CHECK_EQ(a.count, 4);
+	CHECK_EQ(a.count, 5);
 	CHECK(a.atoms[1].unit == Unit::S && a.atoms[2].kind == AtomKind::Curve);
 	CHECK(sh.curve(a.atoms[2].bits).kind == EaseKind::CubicBezier && sh.curve(a.atoms[2].bits).p[3] == 1.f);
+	CHECK(a.atoms[4].kind == AtomKind::Ident && in.view(a.atoms[4].str()) == "cancel-finish");
+	CHECK(t.has(PropId::AnimationCancel) && in.view(t.get(PropId::AnimationCancel).atoms[0].str()) == "stop");
 }
 
 TEST(xss_gradients_glow_alpha_and_existing_typography_compile) {

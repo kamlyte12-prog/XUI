@@ -25,7 +25,7 @@ target_link_libraries(my_app PRIVATE xui_widgets)
 
 `xui_widgets` publicly links the core, asset parser, layout, rendering, and text libraries used by the facade.
 
-The cross-platform demo target is `xui_glfw_demo`. It uses the bundled GLFW source and requires system OpenGL development files. The GLFW platform adapter and OpenGL renderer are separate optional targets in `backends/glfw/` and `backends/opengl/`; the demo links both without adding either implementation to the core libraries. The default launch loads `showcase.xui` and `showcase.xss`. Press F3 to toggle the FPS counter.
+The cross-platform demo target is `xui_glfw_demo`. It uses the bundled GLFW source and requires system OpenGL development files. The GLFW platform adapter and OpenGL renderer are separate optional targets in `backends/glfw/` and `backends/opengl/`; the demo links both without adding either implementation to the core libraries. The default launch loads `showcase.xui` and `showcase.xss`. Press F3 to toggle FPS and F4 to show draw batches without enabling continuous rendering.
 
 To build the GLFW demo explicitly:
 
@@ -176,4 +176,4 @@ Pass `XuiOptions` to the `Xui` constructor to configure the app/window and glyph
 | `XUI_WERROR` | Treat warnings as errors | ON |
 | `XUI_SANITIZE` | Enable ASan/UBSan on GCC/Clang | OFF |
 
-Demo controls: `--profile` runs a hidden bounded loop; F3 toggles the visible FPS overlay; `XUI_DEMO_FONT` adds a TrueType file to the demo's font search list.
+Demo controls: `--profile` runs a bounded visible render loop; F3 toggles continuous FPS sampling, F4 toggles the last frame's draw-batch readout, and `XUI_DEMO_FONT` adds a TrueType file to the demo's font search list.

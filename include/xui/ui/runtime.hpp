@@ -95,6 +95,12 @@ namespace xui {
 		/// Cursor feedback for the frontmost widget under the pointer.
 		CursorShape cursorAt(Vec2 point) const;
 		bool pointerDown(Vec2 point);
+		/// Button-aware press routing. Right presses only reach context menus; ordinary widgets
+		/// keep left-only activation.
+		bool pointerDown(Vec2 point, MouseButton button);
+		/// Clears pointer hover state when the platform reports that the cursor left the client area.
+		/// Active drags continue; only hover-dependent state is updated.
+		bool pointerLeave();
 		bool pointerUp(Vec2 point);
 		bool scrollWheel(Vec2 point, Vec2 delta);
 		bool keyDown(Key key);
@@ -103,7 +109,11 @@ namespace xui {
 		bool textInput(std::string_view utf8);
 		bool updateTimers(std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
 		f64 nextTimerDelay(std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now()) const;
+		/// Pause visual animation clocks while the host window is hidden/minimized.
+		void setAnimationsPaused(bool paused, std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
 		bool fpsCounterEnabled() const { return m_fpsEnabled; }
+		bool drawBatchCounterEnabled() const { return m_drawBatchCounterEnabled; }
+		void setDrawBatchCount(u32 batches) { m_drawBatchCount = batches; }
 		bool takeDamage(Rect& out) { if (!m_hasDamage) return false; out = m_damage; m_hasDamage = false; return true; }
 
 		void setEventHandler(UiEventFn fn, void* context) { m_eventFn = fn; m_eventContext = context; }
@@ -165,9 +175,12 @@ namespace xui {
 			std::vector<StyleTween> styleTweens;
 			StrId keyframeName;
 			std::chrono::steady_clock::time_point keyframeStart{};
+			std::chrono::steady_clock::time_point keyframeStopAt{};
 			f32 keyframeDurationMs = 0;
 			u32 keyframeIterations = 1;
 			bool keyframeInfinite = false, keyframeActive = false;
+			bool keyframeCancelFinish = false, keyframeFinishRequested = false;
+			i8 keyframeCancelOverride = -1; // -1 uses animation-cancel, otherwise 0=stop / 1=finish
 			bool animationTriggered = false, animationCancelled = false;
 			AnimationMode animationMode = AnimationMode::Once;
 			Easing keyframeEase;
@@ -189,8 +202,19 @@ namespace xui {
 			bool indeterminate = false;
 			bool dockHost = false, dockPanel = false, dockClosable = true, dockClosed = false;
 			bool dockFloatingInitial = false;
+			bool menu = false, menuItem = false, submenuOpen = false;
+			std::string menuShortcut;
+			std::string menuSelectedItem;   // Menu: label of the last activated item
+			u32 menuAnchor = 0xFFFFFFFFu;   // Menu: widget id this menu opens from
+			bool menuContext = false;       // Menu: open on right-click over the anchor/at the pointer
+			i32 menuHover = -1;             // Menu/submenu owner: hovered row ordinal
+			Vec2 menuPoint{};               // Menu: position used by context opens
+			Rect submenuRect{};             // MenuItem: on-screen row rect while its submenu is open
+			bool submenuPainted = false;   // MenuItem: transient paint-pass marker for open submenus
 			bool titleBar = false, titleBarButtons = true;
 			StyleSetId titleButtonStyleSet;
+			StyleSetId numberButtonStyleSet;
+			bool inputInvalid = false;   // NumberField: current text does not parse
 			Vec2 dockPreferredSize{ 360.f, 260.f };
 			f32 dockHeaderHeight = 30.f, dockGutter = 5.f;
 			bool scrollSmooth = false, scrollAnimating = false, scrollDragX = false, scrollDragY = false;
@@ -275,6 +299,22 @@ namespace xui {
 		bool titlePointerDown(Vec2 point);
 		bool titlePointerMove(Vec2 point);
 		bool titlePointerUp(Vec2 point);
+		// Popup menus: virtual anchored overlays (rows are retained nodes, never laid out).
+		u32 nodeIndexOf(const Node& node) const;
+		u32 firstMenuChildIndex(u32 owner) const;
+		u32 nextMenuSiblingIndex(u32 index) const;
+		static bool menuRowIsSeparator(const Node& row);
+		Rect menuAnchorHitRect(const Node& menu) const;
+		Rect menuPopupRect(const Node& menu) const;
+		Rect submenuPopupRect(const Node& item) const;
+		u32 menuHitRow(const Node& owner, const Rect& popupRect, Vec2 point, Rect* rowRect = nullptr) const;
+		void closeAllMenus(const Node* except = nullptr);
+		bool menuOpenAtAnchor(Vec2 point, MouseButton button);
+		bool menuPointerDown(Vec2 point);
+		bool menuPointerMove(Vec2 point);
+		bool menuRowPress(u32 itemIndex, const Rect& row);
+		void menuActivateItem(Node& item);
+		bool menuKeyDown(Key key);
 		DockHostState* dockHostForPanel(u32 panelNode);
 		const DockHostState* dockHostForPanel(u32 panelNode) const;
 		DockHostState* dockHostAt(Vec2 point);
@@ -302,6 +342,7 @@ namespace xui {
 		std::vector<u32> m_interactiveNodes;
 		std::vector<u32> m_splitNodes;
 		std::vector<u32> m_titleBars;
+		std::vector<std::pair<u32, std::string>> m_pendingMenuAnchors;   // menu node -> authored anchor id
 		Platform* m_platform = nullptr;
 		WindowHandle m_windowHandle{};
 		bool m_clientChrome = false;
@@ -331,6 +372,8 @@ namespace xui {
 		Renderer* m_renderer = nullptr;
 		std::chrono::steady_clock::time_point m_spinnerDeadline{};
 		std::chrono::steady_clock::time_point m_animationDeadline{};
+		std::chrono::steady_clock::time_point m_animationsPausedAt{};
+		bool m_animationsPaused = false;
 		std::chrono::steady_clock::time_point m_caretBlinkDeadline{};
 		bool m_caretVisible = true;
 		bool m_showWhitespace = false;
@@ -342,6 +385,8 @@ namespace xui {
 		f32 m_dragScrollStart = 0, m_dragPointerStart = 0;
 		f32 m_dpiScale = 1.f;
 		bool m_fpsEnabled = false;
+		bool m_drawBatchCounterEnabled = false;
+		u32 m_drawBatchCount = 0;
 		u32 m_theme = 0;
 		f64 m_fpsElapsed = 0;
 		u32 m_fpsFrames = 0;
@@ -359,6 +404,7 @@ namespace xui {
 		f32 m_frameTimeMs = 0.f;
 		u32 m_dockCandidate = 0xFFFFFFFFu, m_dockDragPanel = 0xFFFFFFFFu;
 		u32 m_dockDragHost = 0xFFFFFFFFu, m_dockDragSplit = 0xFFFFFFFFu;
+		u32 m_openMenu = 0xFFFFFFFFu;   // menu node currently open (or nested submenu chain root)
 		Vec2 m_dockDragStart{};
 		Rect m_dockFloatStart{};
 		DockPreview m_dockPreview{};

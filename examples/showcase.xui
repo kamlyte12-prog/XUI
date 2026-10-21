@@ -9,16 +9,39 @@ Window(title: "Xui widget and layout showcase", size: 1080x760)[platformTopMenu:
     Dropdown[id: "menu-edit", class: "menu-dropdown", options: "Edit|Undo|Redo|Select all", value: "Edit", width: 120px, height: 30px]
     Dropdown[id: "menu-view", class: "menu-dropdown", options: "View|Show panels|Reset layout", value: "View", width: 120px, height: 30px]
     Button(label: "Help")[class: "menu-help", width: 64px, height: 30px]
+    Button(label: "Menu")[class: "menu-help", id: "menu-anchor", width: 64px, height: 30px]
     Text("Xui showcase")[class: "menu-title", grow: 1, height: 30px]
+  }
+  // Anchored popup menu: opens from the Menu button above. Items, a separator, a checked row,
+  // and a submenu are all authored here; activation fires each item's press handler.
+  Menu[id: "file-menu", anchor: "menu-anchor", width: 190px] {
+    MenuItem(label: "New project")[press: onMenuAction]
+    MenuItem(label: "Open…")[press: onMenuAction]
+    MenuItem("-")
+    MenuItem(label: "Save")[press: onMenuAction, shortcut: "Ctrl+S"]
+    MenuItem(label: "Snap to grid")[checked: true]
+    MenuItem(label: "Import")[disabled: true]
+    MenuItem(label: "Recent files") {
+      MenuItem(label: "alpha.xui")[press: onMenuAction]
+      MenuItem(label: "beta.xui")[press: onMenuAction, disabled: true]
+      MenuItem(label: "gamma.xui")[press: onMenuAction]
+    }
+  }
+  // Context menu: right-click the section tabs to open it.
+  Menu[id: "tab-context", context: true, anchor: "demo-sections", width: 170px] {
+    MenuItem(label: "Reset layout")[press: onMenuAction]
+    MenuItem(label: "Copy settings")[press: onMenuAction, disabled: true]
+    MenuItem("-")
+    MenuItem(label: "About this demo")[press: onMenuAction]
   }
   Column[class: "app", width: 100%, grow: 1, minSize: 0x0, pad: 18px, gap: 12px] {
     Row(gap: 16)[class: "masthead", width: 100%, align: Center, justify: SpaceBetween] {
       Column(gap: 3px)[grow: 1] {
         Text("Xui interactive showcase")[class: "title"]
-        Text("Explore layout, inputs, selection, ranges, popups, and containers. Resize the window; press F3 for FPS.")[class: "subtitle"]
+        Text("Explore layout, inputs, selection, ranges, popups, and containers. Resize the window; F3 toggles FPS and F4 shows draw batches.")[class: "subtitle"]
       }
       Text("Section 1")[id: "tab-readout", class: "value-readout", width: 110px, height: 30px]
-      FpsCounter[id: "fps", class: "fps", width: 150px, height: 30px]
+      FpsCounter[id: "fps", class: "fps", width: 280px, height: 30px]
     }
 
     Tabs[id: "demo-sections", selected: 0, change: onTabChange, class: "tabs", width: 100%, height: 100%, grow: 1, minSize: 0x0] {
@@ -260,7 +283,7 @@ Window(title: "Xui widget and layout showcase", size: 1080x760)[platformTopMenu:
               Badge("NEW")[class: "badge", width: 64px, height: 26px]
               Spinner[class: "spinner", width: 24px, height: 24px]
               Spinner[disabled: true, class: "spinner disabled-spinner", width: 24px, height: 24px]
-              FpsCounter[class: "fps fps-secondary", width: 150px, height: 30px]
+              FpsCounter[class: "fps fps-secondary", width: 280px, height: 30px]
             }
             Toolbar[id: "demo-toolbar", class: "chrome toolbar", width: 100%, height: 42px] {
               Label("Toolbar")[class: "chrome-label"]
@@ -454,7 +477,7 @@ Window(title: "Xui widget and layout showcase", size: 1080x760)[platformTopMenu:
             ScrollView[class: "page-scroll", width: 100%, height: 100%, vertical: true, horizontal: false] {
               Column[class: "page", gap: 14px, pad: 18px] {
                 Text("Declarative animation")[class: "section-title"]
-                Text("Hover and press the button to transition its fill and glow. Twelve panels sample the same XSS keyframes; animation ticks stop when this tab is hidden or the finite animation ends.")[class: "help"]
+                Text("Hover and press the buttons to transition their fill and glow. The second button finishes its current transition before applying hover-out. F4 shows Painter draw batches next to the FPS readout; it does not create frames while idle.")[class: "help"]
                 Text("Start a paused keyframe from an application event. Once holds at 100%; Loop repeats until cancelled.")[class: "help"]
                 Row(gap: 8px)[width: 100%, align: Center] {
                   Button(label: "Play once")[id: "play-meter-once", press: onMeterOnce, class: "small-button", width: 96px, height: 34px]
@@ -464,6 +487,7 @@ Window(title: "Xui widget and layout showcase", size: 1080x760)[platformTopMenu:
                 }
                 Row(gap: 12px)[width: 100%, height: 72px, align: Center] {
                   Button(label: "Hover, then press")[id: "motion-button", class: "motion-button", width: 220px, height: 46px]
+                  Button(label: "Finish hover-out")[id: "finish-motion-button", class: "motion-button finish-hover", width: 190px, height: 46px]
                   Panel[class: "fade-card", width: 240px, height: 60px] { Text("One-shot fade on entry")[class: "fade-label"] }
                   ProgressBar[class: "motion-progress", width: 240px, height: 20px, indeterminate: true]
                 }

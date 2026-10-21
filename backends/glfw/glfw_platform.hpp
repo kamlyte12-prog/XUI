@@ -16,6 +16,7 @@ public:
 	xui::Vec2 windowSizeLogical(xui::WindowHandle) const override;
 	xui::Vec2i windowSizePixels(xui::WindowHandle) const override;
 	xui::f32 dpiScale(xui::WindowHandle) const override;
+	bool windowVisible(xui::WindowHandle) const override;
 	bool pumpEvents(xui::Event&) override;
 	void waitEvents(xui::f64 timeoutSec) override;
 	xui::f64 time() const override;
@@ -40,12 +41,13 @@ public:
 	bool toggleMaximize(xui::WindowHandle) override;
 	bool windowMaximized(xui::WindowHandle) const override;
 	void closeWindow(xui::WindowHandle) override;
+	void setResizeInset(xui::WindowHandle, xui::f32 pixels) override;
 
 	/// One GLFW window. Public so the file-local Win32 chrome helpers in the .cpp can operate
 	/// on records without exposing windows.h types in this header.
 	struct Window { GLFWwindow* native = nullptr; xui::WindowHandle handle; GlfwPlatform* owner = nullptr;
 	                void (*liveResizeFn)(void*) = nullptr; void* liveResizeContext = nullptr;
-	                bool customChrome = false; void* chromeState = nullptr; };
+	                bool customChrome = false; void* chromeState = nullptr; xui::f32 resizeInset = 0.f; };
 
 private:
 	static Window* record(GLFWwindow* window);
@@ -57,6 +59,7 @@ private:
 #endif
 	static void onSize(GLFWwindow*, int, int);
 	static void onCursor(GLFWwindow*, double, double);
+	static void onCursorEnter(GLFWwindow*, int);
 	static void onScroll(GLFWwindow*, double, double);
 	static void onMouse(GLFWwindow*, int, int, int);
 	static void onKey(GLFWwindow*, int, int, int, int);

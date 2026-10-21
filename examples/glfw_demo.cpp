@@ -149,6 +149,15 @@ namespace {
 		else if (name == "onScrollToTarget") {
 			app.runtime().scrollIntoView("scroll-target-last", true);
 		}
+		else if (name == "onMenuAction") {
+			// Popup menu activation: the anchored menu reports its last selected item through the
+			// value API; context-menu activations surface through the same handler.
+			std::string picked;
+			if (const auto value = valueAs<std::string>(app, "file-menu")) picked = *value;
+			if (const auto value = valueAs<std::string>(app, "tab-context"); value && !value->empty()) picked = *value;
+			setText(app, "action-readout", "Menu: " + (picked.empty() ? std::string("(none)") : picked));
+			app.setWindowTitle("Xui showcase - " + (picked.empty() ? std::string("menu") : picked));
+		}
 		else if (name == "onDockChange") {
 			std::string summary = "Dock state: ";
 			for (const std::string_view id : { "dock-editor", "dock-hierarchy", "dock-inspector", "dock-console", "dock-preview" }) {
@@ -224,6 +233,7 @@ int main(int argc, char** argv) {
 		if (arg == "--profile") profileCase = "idle";
 		else if (arg == "--profile-glow") profileCase = "glow";
 		else if (arg == "--profile-animation") profileCase = "animation";
+		else if (arg == "--profile-animation-timer") profileCase = "animation-timer";
 		else if (arg == "--profile-transform") profileCase = "transform";
 		else if (arg == "--profile-docking") profileCase = "docking";
 		else if (arg == "--profile-menubar") profileCase = "menubar";
@@ -234,7 +244,9 @@ int main(int argc, char** argv) {
 	options.windowTitle = "Xui GLFW/OpenGL widget showcase";
 	options.width = 1080; options.height = 760;
 	options.minWidth = 900; options.minHeight = 640;   // keeps the three-field input row unclipped
-	options.visible = !profile;
+	// Profiles need a visible window so the runtime's minimize/hidden animation policy does not
+	// suppress rendering and report a misleading zero-frame result.
+	options.visible = true;
 	options.glContext = true;
 	options.vsync = false;
 
@@ -278,7 +290,7 @@ int main(int argc, char** argv) {
 		std::cerr << app.lastError() << '\n';
 		return 1;
 	}
-	if (profileCase == "glow" || profileCase == "animation" || profileCase == "transform") {
+	if (profileCase == "glow" || profileCase == "animation" || profileCase == "animation-timer" || profileCase == "transform") {
 		app.runtime().setValue("demo-sections", xui::u32{ 7 });
 		app.runtime().setValue("motion-tabs", xui::u32{ profileCase == "glow" ? 0u : 1u });
 		app.runtime().layout(1080.f, 760.f);
@@ -302,10 +314,8 @@ int main(int argc, char** argv) {
 		app.runtime().layout(1080.f, 760.f);
 	}
 
-	// The showcase keeps the FPS counter visible from its first frame; F3 still toggles it.
-	app.runtime().keyDown(xui::Key::F3);
-
-	const int result = profile ? app.run({ 5.0, true }) : app.run();
+	const bool continuousProfile = profile && profileCase != "animation-timer";
+	const int result = profile ? app.run({ 5.0, continuousProfile }) : app.run();
 	if (profile) {
 		const auto& stats = app.lastRunStats();
 		std::cout << "Xui " << profileCase << " profile: " << stats.frames << " frames in " << stats.elapsedSeconds

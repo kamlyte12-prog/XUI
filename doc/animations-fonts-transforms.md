@@ -24,9 +24,37 @@ ui.cancelAnimation("spinner");
 
 For an event-triggered value animation, give a `ProgressBar` a paused `value` keyframe in `.xss`, then call `playAnimation(id, Once)` from the button/event callback. Use `Loop` for a repeating animation and `cancelAnimation(id)` to stop at the current value. The GLFW showcase's Motion & Style → Animation tab demonstrates all three controls.
 
-`Once` restarts from the first keyframe, plays one duration, and holds the final sample. `Loop` repeats until cancelled. A second play request replaces the current playback and starts over. Cancellation leaves the current sample painted. Application conditions are handled by calling `cancelAnimation(id)` from the application's event logic; the stylesheet does not contain application-specific predicates. Only visible, active animations schedule timer-driven frames. Paused and completed animations do not keep the idle loop awake. Visible-window background behavior was tested through the timer path, but minimized-window pausing is not currently reported by `Platform` and is not guaranteed.
+`Once` restarts from the first keyframe, plays one duration, and holds the final sample. `Loop` repeats until cancelled. A second play request replaces the current playback and starts over. The imperative `cancelAnimation(id)` stops immediately and leaves the current sample painted. Only visible, active animations schedule timer-driven frames. Paused and completed animations do not keep the idle loop awake. The GLFW platform pauses animation clocks while hidden or minimized, then resumes with elapsed animation time preserved; it continues while visible but unfocused. Custom platforms default to visible and should override `Platform::windowVisible()` if they support hiding/minimizing.
 
 Numbers with matching units, colors, and compatible transform function sequences interpolate. The `value` keyframe property currently updates numeric progress controls such as `ProgressBar`. Keyframes do not alter layout sizes, font face/weight, or arbitrary application values.
+
+### Animations without input, and `animation-keep`
+
+Active visible animations and state-transition tweens run on a 16 ms timer path: the event loop wakes, samples, damages the animated nodes, and returns to waiting when nothing animates. Mouse movement is not required. GLFW sends cursor-enter/leave events so hover transitions return to resting after the pointer exits the client area. A completed transition paints its exact final value before the timer retires. The event loop blocks between frames, so an idle window does not spin.
+
+By default a mid-flight transition is cleared when the state exits early. The legacy per-widget property `animation-keep: until-done` retargets it to the new state's values. For a widget that should finish the current target before applying a newer state, use `animation-cancel: finish`; `stop` (the default) applies the latest state immediately. This applies to both transitions and keyframe animation. On an infinite keyframe, `finish` completes the current iteration, then applies the latest state.
+
+```xss
+Button.keep { resting: { bg: #222222 } hover: { bg: #3A5FA8 }
+  transition: resting -> hover 160ms ease-out
+  transition: hover -> resting 160ms ease-out
+  animation-keep: until-done }
+```
+
+The per-animation `cancel(finish)` modifier overrides the widget default. `cancel(stop)` overrides it in the other direction.
+
+```xss
+Panel.pulse { resting: { animation: pulse 900ms infinite ease-in-out cancel(finish) } }
+Button.exit { resting: { animation-cancel: finish } hover: { bg: #3A5FA8 }
+  transition: resting -> hover 160ms ease-out
+  transition: hover -> resting 160ms ease-out }
+```
+
+`animation-keep` retains its older retargeting behavior; `animation-cancel` is the finish-current-target policy. Keyframes use their duration, iteration count, and `infinite` marker for one-shot/looping behavior. Application calls to `cancelAnimation(id)` remain immediate and do not use stylesheet cancellation policy. Animations pause while their node is hidden in the UI tree (docked-away or on an unselected tab) and while the host window is minimized/hidden; they continue while the visible window is unfocused.
+
+### Draw-batch counter
+
+Press F4 in the GLFW showcase to display the previous completed frame's `Painter::Stats.drawCalls` beside the FPS readout. This counts backend-neutral draw-list batches, not GPU draw submissions. It updates when the app renders for another reason and does not force continuous rendering while idle. F3 still enables the FPS readout's continuous sampling mode.
 
 ## Widget transforms
 

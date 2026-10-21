@@ -147,6 +147,8 @@ namespace xui {
 	int Xui::run(XuiRunOptions options) {
 		if (!m_attached || !m_renderer || !m_platform) { setError("Call attach() before run()."); return 1; }
 		bool running = true, redraw = true;
+		bool wasVisible = m_platform->windowVisible(m_window);
+		m_runtime.setAnimationsPaused(!wasVisible);
 		const auto start = Clock::now();
 		m_stats = {};
 		while (running) {
@@ -160,8 +162,17 @@ namespace xui {
 					redraw |= m_runtime.pointerMove({ event.x, event.y });
 					m_platform->setCursor(m_runtime.cursorAt({ event.x, event.y }));
 					break;
+				case EventType::MouseEnter:
+					redraw |= m_runtime.pointerMove({ event.x, event.y });
+					m_platform->setCursor(m_runtime.cursorAt({ event.x, event.y }));
+					break;
+				case EventType::MouseLeave:
+					redraw |= m_runtime.pointerLeave();
+					m_platform->setCursor(CursorShape::Arrow);
+					break;
 				case EventType::MouseDown:
-					if (event.button == MouseButton::Left) redraw |= m_runtime.pointerDown({ event.x, event.y });
+					if (event.button == MouseButton::Left || event.button == MouseButton::Right)
+						redraw |= m_runtime.pointerDown({ event.x, event.y }, event.button);
 					break;
 				case EventType::MouseUp:
 					if (event.button == MouseButton::Left) redraw |= m_runtime.pointerUp({ event.x, event.y });
@@ -170,7 +181,8 @@ namespace xui {
 					redraw |= m_runtime.scrollWheel({ event.x, event.y }, { event.dx, event.dy });
 					break;
 				case EventType::KeyDown:
-					if (!(event.key == Key::F3 && event.repeat)) redraw |= m_runtime.keyDown(event.key, event.mods, m_platform);
+					if (!((event.key == Key::F3 || event.key == Key::F4) && event.repeat))
+						redraw |= m_runtime.keyDown(event.key, event.mods, m_platform);
 					break;
 				case EventType::TextInput:
 					if (event.codepoint) redraw |= m_runtime.textInput(event.codepoint);
@@ -187,10 +199,18 @@ namespace xui {
 				}
 			}
 			if (!running) break;
+			const bool visible = m_platform->windowVisible(m_window);
+			if (visible != wasVisible) {
+				m_runtime.setAnimationsPaused(!visible);
+				wasVisible = visible;
+				if (visible) redraw = true;
+				else redraw = false;
+			}
+			if (!visible) redraw = false;
 			// Enabling the FPS overlay opts into continuous rendering so it measures actual
 			// throughput instead of counting its own 250 ms idle refresh timer as 4 FPS.
-			if (options.redrawContinuously || m_runtime.fpsCounterEnabled()) redraw = true;
-			redraw |= m_runtime.updateTimers();
+			if (visible && (options.redrawContinuously || m_runtime.fpsCounterEnabled())) redraw = true;
+			if (visible) redraw |= m_runtime.updateTimers();
 
 			const Vec2 logical = m_platform->windowSizeLogical(m_window);
 			const Vec2i pixels = m_platform->windowSizePixels(m_window);
@@ -201,7 +221,7 @@ namespace xui {
 				m_widthPixels = u32(pixels.x); m_heightPixels = u32(pixels.y);
 				redraw = true;
 			}
-			if (redraw && pixels.x > 0 && pixels.y > 0) {
+			if (visible && redraw && pixels.x > 0 && pixels.y > 0) {
 				renderFrame();
 				redraw = false;
 			}
@@ -210,8 +230,8 @@ namespace xui {
 			if (options.maxSeconds > 0 && m_stats.elapsedSeconds >= options.maxSeconds) break;
 			// FPS sampling schedules a bounded 250 ms refresh through nextTimerDelay().
 			// It never inserts a wait into continuous redraw/profile mode.
-			if (!redraw && !options.redrawContinuously) {
-				const f64 timerDelay = m_runtime.nextTimerDelay();
+			if (!redraw && (!options.redrawContinuously || !visible)) {
+				const f64 timerDelay = visible ? m_runtime.nextTimerDelay() : -1.0;
 				if (options.maxSeconds > 0) {
 					const f64 remaining = std::max(0.0, options.maxSeconds - m_stats.elapsedSeconds);
 					m_platform->waitEvents(timerDelay < 0 ? remaining : std::min(remaining, timerDelay));
@@ -241,6 +261,7 @@ namespace xui {
 		}
 		m_runtime.layout(logical.x, logical.y, dpi);
 		m_text.beginFrame();
+		m_runtime.setDrawBatchCount(m_painter.stats().drawCalls);
 		m_painter.begin(u32(pixels.x), u32(pixels.y), dpi);
 		m_runtime.paint(m_painter, dpi);
 		const DrawList draw = m_painter.finish();

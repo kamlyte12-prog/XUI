@@ -112,14 +112,14 @@ Behavior, owned by the framework through `platform_interface` (never per-app cod
 - **Drag to move:** pressing the bar outside interactive children starts a native window move. Interactive children (buttons, dropdowns, tabs, fields) keep their clicks and never start a drag; non-interactive children and empty gaps do.
 - **Double-click** the bar's non-interactive area toggles maximize/restore (platform convention; detected press-to-press because native move loops swallow the first release).
 - **Caption buttons:** with `platformButtons: true` (the default) the framework draws minimize, maximize/restore, and close zones at the bar's right end. They fire on release inside their zone and route through the platform (minimize, maximize/restore, close). Set `platformButtons: false` to author your own controls instead. The bar's right padding is reserved automatically so children never underlap the zones.
-- **Edge resize:** with native decorations hidden, a resize border operates at the window edges/corners with native resize cursors (Windows backend). Edge resize is unavailable while maximized, matching native behavior.
+- **Edge resize:** with native decorations hidden, resizing works from every edge and corner (N/S/E/W plus all four diagonals) through the platform's native sizing loop, so the OS draws the per-edge resize cursors (`resize-ew`, `resize-ns`, `resize-nwse`, `resize-nesw`) and runs the modal resize loop — live layout keeps rendering through the existing resize hook. The hit-test margin defaults to the platform's frame thickness and is configurable in physical pixels through `Platform::setResizeInset(window, pixels)` (0 restores the default; the GLFW/Windows backend clamps to 64). Edge resize is unavailable while maximized, matching native behavior. The outermost few pixels of the TitleBar resize the window rather than dragging it — the same convention as native chrome. The `.xss cursor` option does not apply to window edges: the OS owns those cursors.
 
 Styling: the bar is styled like any widget (`TitleBar`, classes, id). The caption zones are styled through the `TitleButton` selector with `resting`/`hover`/`pressed` states (`fg`, `bg`, `radius`). Minimize/maximize glyphs are painter primitives; the close glyph is an `×` label.
 
 Platform caveats:
 
-- **Windows (GLFW):** full support — borderless frame with native drag, Aero Snap (drag-to-edge and Win+arrow), snap-aware double-click maximize, drag-to-restore when maximized, and edge resize.
-- **macOS / Linux (GLFW):** hiding decorations would leave no supported way to move or resize the window (Wayland especially), so `setDecorated(false)` is refused, the native title bar is kept, and the `TitleBar` renders as a normal non-dragging bar above your content. Do not rely on window dragging from the bar there.
+- **Windows (GLFW):** full support — borderless frame with native drag, Aero Snap (drag-to-edge and Win+arrow), snap-aware double-click maximize, drag-to-restore when maximized, and edge resize. The backend restores the `WS_THICKFRAME` sizing border that GLFW's undecorated style omits (without it the native sizing loop never engages); the subclass strips non-client chrome for both `WM_NCCALCSIZE` forms, suppresses native non-client activation painting, and uses the monitor work area while maximized so the taskbar remains visible.
+- **macOS / Linux (GLFW):** hiding decorations would leave no supported way to move or resize the window (Wayland especially), so `setDecorated(false)` is refused, the native title bar is kept, and the `TitleBar` renders as a normal non-dragging bar above your content. Do not rely on window dragging from the bar there. Where a platform's window manager provides resize borders for undecorated windows, the native path is used and documented per backend.
 
 `platformTopMenu: false` without a `TitleBar` (or a `TitleBar` without it) is a document build error, so a window can never end up with neither native nor custom chrome.
 
@@ -257,6 +257,12 @@ NumberField[id: "delay", value: 250, min: 0, max: 2000, step: 50, unit: "ms", ch
 ```
 
 Typing is filtered to numeric characters (`0-9`, `.`, `-`, `+`, `e`, `E`, spaces). Every valid edit commits immediately and fires `change`; a partially typed value (for example a lone `-`) stays in the editor without changing the value. Up/Down step by `step` and reformat the text clamped to `min`/`max` when provided. `value(id)` returns the committed `f64`; `setValue(id, f64)` clamps, reformats with the unit, and is silent unless `notify=true`; `setValue(id, std::string)` parses and commits like typed input. Invalid entries never change the value, and the editor keeps what you typed until a step or programmatic set reformats it.
+
+NumberField behavior details:
+
+- **Live value reflection**: each keystroke that parses updates `value(id)` and fires `change` immediately, so readouts update in real time while typing (no Enter needed). Steps, paste, and clipboard edits go through the same path.
+- **Invalid input state**: while the text does not parse (a lone `-`, trailing garbage), the field resolves the `.xss` `error` state (e.g. `NumberField { error: { border: 1px solid #C0392B } }`) and keeps reporting the last valid value. Losing focus with invalid text reverts the editor text to the last valid value.
+- **Stepper buttons**: the −/+ zone at the right end paints through the styleable `NumberButton` selector with `resting`/`hover`/`pressed` states (`bg`, `fg`, `radius`); the built-in look applies when no rule is authored. The `Stepper` widget uses the same part.
 
 ```xss
 NumberField.number { resting: { size: 140px 36px, pad: 8px, bg: #172033, fg: #f5f7ff, border: 1px solid #40506b, radius: 6px, font-size: 14px } focus: { border: 2px solid #70a7ff } disabled: { opacity: 0.45 } readonly: { fg: #929db1 } }
@@ -399,7 +405,7 @@ ProgressBar[value: 0.72, min: 0, max: 1][class: "progress"]
 
 ### `FpsCounter`
 
-A text object that reports frame rate and average frame time over the same sample window. It displays `FPS: 120 | 8.3 ms` by default. Set `showFrameTime: false` for FPS-only display. Press **F3** to toggle the counters; while enabled, the label samples and refreshes every 250 ms. In an otherwise idle event-driven app, this schedules at most four overlay frames per second. Input and resize events still trigger prompt redraws. Continuous profile mode does not add an FPS timer wait or force redraws on every loop iteration.
+A text object that reports frame rate and average frame time over the same sample window. It displays `FPS: 120 | 8.3 ms` by default. Set `showFrameTime: false` for FPS-only display. Press **F3** to show it and enable continuous sampling; this intentionally keeps rendering active until F3 is pressed again. In the GLFW showcase, **F4** adds the last completed frame's Painter draw-batch count without forcing new frames, so it refreshes on input, resize, or active animation redraws. Continuous profile mode is separately selected by `--profile`.
 
 ```xui
 FpsCounter[class: "fps"]
@@ -420,6 +426,33 @@ Read the selected string with `ui.runtime().value("density")` (or the older `con
 
 ```xss
 Dropdown.dropdown { resting: { size: 240px 38px, pad: 8px, bg: #172033, fg: #f5f7ff, border: 1px solid #40506b, radius: 6px } hover: { bg: #202d43 } focus: { border: 2px solid #70a7ff } open: { border: 2px solid #70a7ff } disabled: { opacity: 0.45 } }
+```
+
+### `Menu` and `MenuItem`
+
+A command popup menu, distinct from `Dropdown`: Dropdown is a *value selector* (its own committed text/value changes; flat option list), while `Menu` is an *action launcher* — it reports the last activated item but changes no control value, and supports separators, disabled items, checked items, and one nesting level of submenus. A `Menu` may anchor to another widget with `anchor: "<id>"` (opens on left-press over the anchor) or open as a context menu with `context: true` (opens on right-press over the anchor). Items fire their own `press: handler` on activation.
+
+```xui
+Button(label: "Menu")[id: "menu-anchor", width: 64px, height: 30px]
+Menu[anchor: "menu-anchor", width: 190px] {
+  MenuItem(label: "New")[press: onNew]
+  MenuItem(label: "Open…")[press: onOpen]
+  MenuItem("-")
+  MenuItem(label: "Save")[press: onSave, shortcut: "Ctrl+S"]
+  MenuItem(label: "Snap to grid")[checked: true]
+  MenuItem(label: "Import")[disabled: true]
+  MenuItem(label: "Recent") {
+    MenuItem(label: "alpha.xui")[press: onRecent]
+    MenuItem(label: "beta.xui")[press: onRecent, disabled: true]
+  }
+}
+```
+
+Behavior: clicking outside any menu surface, activating an item, or pressing Escape closes the menus; hovering a parent item opens its submenu, Escape/Left closes it, Right/Enter opens/activates; Up/Down move the hover to the next enabled row. Only one menu chain is open at a time (opening one closes dropdowns and other menus), and popups paint above every other surface with topmost-row hit testing. `value(menuId)` returns the last activated item's label; `setValue(menuId, bool)` opens/closes; `setValue(itemId, bool)` checks/unchecks; the menu's `press: handler` fires when an activated item has no handler of its own. Styling: the popup surface uses the `Menu` rule's `bg`/`fg`/`border`/`radius`; rows use `MenuItem` with `resting`/`hover`/`checked`/`disabled` states. Rows are virtual targets (like dropdown options), not laid-out children. `MenuItem("-")` or a `Separator` child renders a divider.
+
+```xss
+Menu { resting: { bg: #151E32F5, fg: #f5f7ff, border: 1px solid #40506b, radius: 5px } }
+MenuItem { resting: { fg: #f5f7ff, radius: 4px } hover: { bg: #293d59 } checked: { fg: #69a7ff } disabled: { fg: #73839a, opacity: 0.6 } }
 ```
 
 ### `ColorPicker`
@@ -488,7 +521,7 @@ Breadcrumb[id: "trail", options: "Project|Assets|Textures|Wood", value: "Texture
 ```
 
 ### `KeybindField`
-Captures a keyboard shortcut. Focus it and press a combination; the field shows the normalized label (for example `Ctrl+Shift+S`) and fires `change`. Bare modifier presses keep waiting; Escape clears the binding; Tab and F3 stay reserved (focus traversal and the FPS toggle). The optional `value` sets the initial label and `placeholder` replaces the "Press keys…" hint. `value()`/`setValue()` use the label string.
+Captures a keyboard shortcut. Focus it and press a combination; the field shows the normalized label (for example `Ctrl+Shift+S`) and fires `change`. Bare modifier presses keep waiting; Escape clears the binding; Tab, F3, and F4 stay reserved (focus traversal, FPS, and draw-batch toggles). The optional `value` sets the initial label and `placeholder` replaces the "Press keys…" hint. `value()`/`setValue()` use the label string.
 
 ```xui
 KeybindField[id: "save-key", value: "Ctrl+S", placeholder: "Press keys…", change: onKeybind][class: "keybind"]
@@ -541,7 +574,7 @@ Limitations: inertial/momentum scrolling, touch/gesture input, scrollbar corner 
 
 ## Schema-recognized, runtime-unsupported objects
 
-The current core schema also recognizes names that are not materialized by `UiRuntime::build()`: `Grid`, `Stack`, `Menu`, `MenuItem`, `Popover`, `Modal`, `ContextMenu`, `IconButton`, `RangeSlider`, `ComboBox`, `Icon`, `TreeView`, `ListView`, `Table`, `Canvas`, `HUD`, `Crosshair`, `RadialMenu`, `HealthBar`, and `DamageNumber`. (`DockSpace` aliases the runtime `DockHost`; `Toolbar`, `StatusBar`, and `MenuBar` are horizontal containers.) `MenuBar` remains a plain client-area row of ordinary controls; the custom draggable top menu is the [`TitleBar`](#titlebar) widget together with `Window[platformTopMenu: false]`. A dedicated command-menu model and menu keyboard navigation are not implemented.
+The current core schema also recognizes names that are not materialized by `UiRuntime::build()`: `Grid`, `Stack`, `Popover`, `Modal`, `ContextMenu`, `IconButton`, `RangeSlider`, `ComboBox`, `Icon`, `TreeView`, `ListView`, `Table`, `Canvas`, `HUD`, `Crosshair`, `RadialMenu`, `HealthBar`, and `DamageNumber`. (`DockSpace` aliases the runtime `DockHost`; `Toolbar`, `StatusBar`, and `MenuBar` are horizontal containers; `Menu`/`MenuItem` are the runtime [popup menu](#menu-and-menuitem).) `MenuBar` remains a plain client-area row of ordinary controls; the custom draggable top menu is the [`TitleBar`](#titlebar) widget together with `Window[platformTopMenu: false]`. A dedicated command-menu model and menu keyboard navigation are not implemented.
 
 ```xui
 MenuBar[class: "client-menu"] {

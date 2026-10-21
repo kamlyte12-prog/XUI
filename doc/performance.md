@@ -8,7 +8,7 @@ Recorded benchmark values and their build conditions are kept in the canonical [
 
 No benchmark guarantees a particular FPS on other GPUs, drivers, display sizes, operating systems, or under vsync. Uncapped hidden frame-loop FPS is a throughput ceiling, not a displayed monitor refresh rate or an interaction-latency guarantee. Visible scrolling, clipping, resize smoothness, and ordinary close still need an interactive smoke test.
 
-Run the examples with `--profile` to measure their actual shared assets and loop. Feature profiles `--profile-animation`, `--profile-glow`, `--profile-transform`, `--profile-docking`, and `--profile-menubar` select representative showcase states. These run hidden and uncapped, so they report loop throughput, not visible frame pacing. Use `bench_docking` for headless DockTree/UiRuntime drag-preview and splitter-update timings. It measures runtime calls only, not event pumping, painting, GPU submission, or display presentation. Use dedicated benchmarks for stage-level profiling; the simple sample profile reports frame count, elapsed seconds, and effective FPS.
+Run the examples with `--profile` to measure their actual shared assets and loop. Feature profiles `--profile-animation`, `--profile-glow`, `--profile-transform`, `--profile-docking`, and `--profile-menubar` select representative showcase states in a visible window and run uncapped. `--profile-animation-timer` selects the animation page but uses the normal event/timer loop, so it should continue repainting without input near the framework's 60 Hz animation cadence. The uncapped profiles report rendered loop throughput, not normal visible frame pacing or input latency. Use `bench_docking` for headless DockTree/UiRuntime drag-preview and splitter-update timings. It measures runtime calls only, not event pumping, painting, GPU submission, or display presentation. Use dedicated benchmarks for stage-level profiling; the simple sample profile reports frame count, elapsed seconds, and effective FPS.
 
 ## Keep layout inexpensive
 
@@ -24,7 +24,7 @@ Run the examples with `--profile` to measure their actual shared assets and loop
 
 - Use a GPU renderer for interactive full-window redraws. The CPU `SoftRenderer` is deterministic but full-frame software rasterization is much slower.
 - Let the facade's event loop sleep when idle. Continuous redraw is intended for animation/profile use, not normal static UI.
-- Enabling the FPS counter opts into continuous redraw so the displayed FPS measures rendered frame cadence instead of event-driven idle refresh. This intentionally raises CPU/GPU use while visible; turn it off with F3 for event-driven idle behavior.
+- Enabling FPS with F3 opts into continuous redraw so the displayed FPS measures rendered frame cadence. This intentionally raises CPU/GPU use while visible; turn it off with F3 for event-driven idle behavior. F4 adds the previous frame's draw-batch count without enabling continuous redraw.
 - Keep glyph atlases reusable and load fonts before `attach()` so atlas setup and glyph upload happen through the normal renderer lifecycle.
 - Avoid very large shadows or thousands of separately styled objects. Painter batches compatible draw commands, but each visible object still contributes geometry and style/layout work.
 - Do not force `vsync = false` in shipped applications unless uncapped throughput is intentional. Vsync can cap frame rate at display refresh and reduce tearing.

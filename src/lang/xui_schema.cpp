@@ -35,7 +35,7 @@ namespace xui {
 		W("Panel", { "title" }, { "collapsed", "collapsible" });
 		W("Tabs", {}, { "selected" });          W("Tab", { "title" }, { "icon" });
 		W("Toolbar", {}, {});                 W("MenuBar", {}, {});     W("StatusBar", {}, {});
-		W("Menu", { "label" }, {});             W("MenuItem", { "label" }, { "shortcut", "checked", "icon" });
+		W("Menu", { "label" }, { "anchor", "context" }); W("MenuItem", { "label" }, { "shortcut", "checked", "icon", "disabled" });
 		W("Popover", {}, { "open", "anchor" }); W("Modal", { "title" }, { "open" });
 		W("ContextMenu", {}, {});             W("Tooltip", { "text" }, {});
 		W("DockHost", {}, { "gutter", "headerHeight" }); W("DockSpace", {}, { "gutter", "headerHeight" });

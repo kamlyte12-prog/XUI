@@ -451,6 +451,7 @@ namespace xui {
 
 		m_dockHosts.clear();
 		m_titleBars.clear();
+		m_pendingMenuAnchors.clear();
 		m_clientChrome = false;
 		m_styles = &styles;
 		m_strings = &strings;
@@ -500,6 +501,22 @@ namespace xui {
 			return false;
 		}
 		m_root = m_nodes.front().layout;
+		// Resolve Menu anchors now that every authored id exists.
+		for (const auto& [menuIndex, anchorId] : m_pendingMenuAnchors) {
+			u32 anchor = 0xFFFFFFFFu;
+			for (u32 candidate = 0; candidate < m_nodes.size(); ++candidate)
+				if (m_nodes[candidate].id.v && m_strings->view(m_nodes[candidate].id) == anchorId) { anchor = candidate; break; }
+			if (anchor == 0xFFFFFFFFu || anchor == menuIndex) {
+				error = "Menu anchor '" + anchorId + "' does not name a widget in this document";
+				m_nodes.clear();
+				m_titleBars.clear();
+				m_pendingMenuAnchors.clear();
+				m_root = NodeId{};
+				return false;
+			}
+			m_nodes[menuIndex].menuAnchor = anchor;
+		}
+		m_pendingMenuAnchors.clear();
 		for (u32 hostIndex = 0; hostIndex < m_nodes.size(); ++hostIndex) {
 			Node& hostNode = m_nodes[hostIndex];
 			if (!hostNode.dockHost) continue;
@@ -686,6 +703,8 @@ namespace xui {
 		node.dockHost = typeIs(source.type, *m_strings, "DockHost") || typeIs(source.type, *m_strings, "DockSpace");
 		node.dockPanel = typeIs(source.type, *m_strings, "DockPanel");
 		node.titleBar = typeIs(source.type, *m_strings, "TitleBar");
+		node.menu = typeIs(source.type, *m_strings, "Menu");
+		node.menuItem = typeIs(source.type, *m_strings, "MenuItem");
 		node.scrollView = typeIs(source.type, *m_strings, "ScrollView");
 		node.slider = typeIs(source.type, *m_strings, "Slider");
 		node.progressBar = typeIs(source.type, *m_strings, "ProgressBar");
@@ -741,7 +760,7 @@ namespace xui {
 		else if (node.tab) {
 			node.layout = m_layout.create(LayoutKind::Column);
 		}
-		else if (typeIs(source.type, *m_strings, "Text") || node.button || node.checkItem || node.checkBox || node.slider || node.progressBar || node.fpsCounter || node.dropdown || node.colorPicker || node.textBox || node.textArea || node.radioGroup || node.switchToggle || node.toggleButton || node.label || node.badge || node.separator || node.spinner || node.image || node.datePicker || node.segmented || node.stepper || node.rating || node.breadcrumb || node.keybindField) {
+		else if (typeIs(source.type, *m_strings, "Text") || node.button || node.checkItem || node.checkBox || node.slider || node.progressBar || node.fpsCounter || node.dropdown || node.colorPicker || node.textBox || node.textArea || node.radioGroup || node.switchToggle || node.toggleButton || node.label || node.badge || node.separator || node.spinner || node.image || node.datePicker || node.segmented || node.stepper || node.rating || node.breadcrumb || node.keybindField || node.menu || node.menuItem) {
 			node.layout = m_layout.create(LayoutKind::Leaf);
 		}
 		else {
@@ -750,7 +769,10 @@ namespace xui {
 		}
 
 		if (node.layout.index != m_nodes.size()) { error = "runtime node storage lost its layout index invariant"; return false; }
-		if (parentIndex != 0xFFFFFFFFu && !m_layout.append(m_nodes[parentIndex].layout, node.layout)) {
+		// Menu popups are virtual: item rows are retained nodes but never join the layout tree.
+		const bool menuRowChild = (node.menuItem || node.separator) && parentIndex != 0xFFFFFFFFu
+			&& (m_nodes[parentIndex].menu || m_nodes[parentIndex].menuItem);
+		if (!menuRowChild && parentIndex != 0xFFFFFFFFu && !m_layout.append(m_nodes[parentIndex].layout, node.layout)) {
 			error = "could not attach .xui child to its parent";
 			return false;
 		}
@@ -758,8 +780,16 @@ namespace xui {
 			error = "DockPanel must be a direct child of DockHost";
 			return false;
 		}
+		if (node.menu && parentIndex != 0xFFFFFFFFu && (m_nodes[parentIndex].menu || m_nodes[parentIndex].menuItem)) {
+			error = "Menu is a top-level anchor; nest MenuItems inside a MenuItem to build a submenu";
+			return false;
+		}
+		if (node.menuItem && !(m_nodes[parentIndex].menu || m_nodes[parentIndex].menuItem)) {
+			error = "MenuItem must be a child of a Menu or MenuItem submenu";
+			return false;
+		}
 
-		if ((typeIs(source.type, *m_strings, "Text") || node.button || node.checkItem || node.checkBox || node.fpsCounter || node.label || node.badge || node.toggleButton) && source.argCount) {
+		if ((typeIs(source.type, *m_strings, "Text") || node.button || node.checkItem || node.checkBox || node.fpsCounter || node.label || node.badge || node.toggleButton || node.menuItem) && source.argCount) {
 			node.text.assign(literal(document, *m_strings, document.args[source.argFirst].expr));
 		}
 		if (node.tab && source.argCount) node.tabTitle.assign(literal(document, *m_strings, document.args[source.argFirst].expr));
@@ -797,6 +827,15 @@ namespace xui {
 			}
 			if (node.titleBar && name == "platformButtons" && prop.role == XPropRole::Value && prop.expr < document.exprs.size())
 				node.titleBarButtons = document.exprs[prop.expr].kind != XExprKind::Bool || document.exprs[prop.expr].bval;
+			if (node.menu && name == "anchor" && prop.role == XPropRole::Value) {
+				node.menuAnchor = 0xFFFFFFFEu;   // resolved by id after the whole tree is built
+				m_pendingMenuAnchors.push_back({ runtimeIndex, std::string(value) });
+			}
+			if (node.menu && name == "context" && prop.role == XPropRole::Value && prop.expr < document.exprs.size())
+				node.menuContext = document.exprs[prop.expr].kind == XExprKind::Bool && document.exprs[prop.expr].bval;
+			if (node.menuItem && name == "shortcut" && prop.role == XPropRole::Value) node.menuShortcut.assign(value);
+			if (node.menuItem && name == "label" && prop.role == XPropRole::Value) node.text.assign(value);
+			if (node.menu && name == "label" && prop.role == XPropRole::Value) node.text.assign(value);
 			if (node.scrollView && name == "scrollSpeed" && prop.expr < document.exprs.size() && document.exprs[prop.expr].kind == XExprKind::Number)
 				{ node.scrollSpeed = std::clamp(document.exprs[prop.expr].num, 1.f, 400.f); node.xuiScrollSpeed = true; }
 			else if (node.scrollView && name == "scrollBehavior") { node.scrollSmooth = value == "smooth" || value == "Smooth"; node.xuiScrollBehavior = true; }
@@ -1010,6 +1049,13 @@ namespace xui {
 			part.classes = node.classes;
 			node.titleButtonStyleSet = m_styles->match(part);
 			m_titleBars.push_back(runtimeIndex);
+		}
+		if (node.numberField || node.stepper) {
+			MatchInput part;
+			part.type = m_strings->intern("NumberButton");
+			part.id = node.id;
+			part.classes = node.classes;
+			node.numberButtonStyleSet = m_styles->match(part);
 		}
 		m_styles->resolve(node.styleSet, stateBit(State::Resting), m_theme, node.style);
 		if (node.scrollView) {
@@ -1663,6 +1709,320 @@ namespace xui {
 		return regions;
 	}
 
+	// ---- popup menus ---------------------------------------------------------------------------
+	// Rows are the retained MenuItem/Separator children (never laid out); geometry is computed
+	// on demand so hit-testing, painting and keyboard navigation share one source of truth.
+
+	u32 UiRuntime::nodeIndexOf(const Node& node) const {
+		const uintptr_t index = static_cast<uintptr_t>(&node - m_nodes.data());
+		return index < m_nodes.size() ? static_cast<u32>(index) : 0xFFFFFFFFu;
+	}
+
+	u32 UiRuntime::firstMenuChildIndex(u32 owner) const {
+		if (owner >= m_nodes.size()) return 0xFFFFFFFFu;
+		for (u32 i = owner + 1; i < m_nodes.size(); ++i)
+			if (m_nodes[i].parentIndex == owner) return i;
+		return 0xFFFFFFFFu;
+	}
+
+	u32 UiRuntime::nextMenuSiblingIndex(u32 index) const {
+		if (index >= m_nodes.size()) return 0xFFFFFFFFu;
+		const u32 parent = m_nodes[index].parentIndex;
+		for (u32 i = index + 1; i < m_nodes.size(); ++i)
+			if (m_nodes[i].parentIndex == parent) return i;
+		return 0xFFFFFFFFu;
+	}
+
+	bool UiRuntime::menuRowIsSeparator(const Node& row) {
+		return row.separator || (row.menuItem && (row.text == "-" || row.text == "--"));
+	}
+
+	Rect UiRuntime::menuAnchorHitRect(const Node& menu) const {
+		if (menu.menuAnchor < m_nodes.size()) return m_layout.absRect(m_nodes[menu.menuAnchor].layout);
+		return m_layout.absRect(menu.layout);
+	}
+
+	u32 UiRuntime::menuHitRow(const Node& owner, const Rect& popupRect, Vec2 point, Rect* rowRect) const {
+		if (!popupRect.contains(point)) return 0xFFFFFFFFu;
+		const u32 ownerIndex = nodeIndexOf(owner);
+		f32 y = popupRect.y + 4.f;   // matches the painted row inset
+		for (u32 child = firstMenuChildIndex(ownerIndex); child != 0xFFFFFFFFu; child = nextMenuSiblingIndex(child)) {
+			const Node& row = m_nodes[child];
+			const f32 height = menuRowIsSeparator(row) ? 9.f : 28.f;
+			if (point.y >= y && point.y < y + height) {
+				if (rowRect) *rowRect = { popupRect.x, y, popupRect.w, height };
+				return child;
+			}
+			y += height;
+		}
+		return 0xFFFFFFFFu;
+	}
+
+	Rect UiRuntime::menuPopupRect(const Node& menu) const {
+		// Menus are retained as structural children of the root, not laid out at their
+		// anchor. Resolve popup geometry from the authored anchor widget instead.
+		const Rect anchor = menuAnchorHitRect(menu);
+		f32 height = 8.f;
+		for (u32 child = firstMenuChildIndex(nodeIndexOf(menu)); child != 0xFFFFFFFFu; child = nextMenuSiblingIndex(child))
+			height += menuRowIsSeparator(m_nodes[child]) ? 9.f : 28.f;
+		const f32 width = std::max(140.f, anchor.w);
+		Rect popup{ anchor.x, anchor.bottom() + 4.f, width, height };
+		if (popup.bottom() > m_lastLayoutHeight && anchor.y > popup.h + 4.f) {
+			popup.y = anchor.y - popup.h - 4.f;                       // flip above when clipped
+			if (popup.y < 0.f) popup.y = std::max(0.f, m_lastLayoutHeight - popup.h);
+		}
+		popup.x = std::clamp(popup.x, 0.f, std::max(0.f, m_lastLayoutWidth - popup.w));
+		popup.y = std::clamp(popup.y, 0.f, std::max(0.f, m_lastLayoutHeight - popup.h));
+		return popup;
+	}
+
+	Rect UiRuntime::submenuPopupRect(const Node& item) const {
+		// The item row's on-screen rect was stored when its submenu opened.
+		const Rect row = item.submenuRect;
+		f32 height = 8.f;
+		for (u32 child = firstMenuChildIndex(nodeIndexOf(item)); child != 0xFFFFFFFFu; child = nextMenuSiblingIndex(child))
+			height += menuRowIsSeparator(m_nodes[child]) ? 9.f : 28.f;
+		const f32 width = 150.f;
+		Rect popup{ row.right() - 4.f, row.y, width, height };
+		if (popup.right() > m_lastLayoutWidth) popup.x = std::max(0.f, row.x + 4.f - popup.w);   // flip left
+		popup.x = std::clamp(popup.x, 0.f, std::max(0.f, m_lastLayoutWidth - popup.w));
+		popup.y = std::clamp(popup.y, 0.f, std::max(0.f, m_lastLayoutHeight - popup.h));
+		return popup;
+	}
+
+	void UiRuntime::closeAllMenus(const Node* except) {
+		for (u32 i = 0; i < m_nodes.size(); ++i) {
+			Node& node = m_nodes[i];
+			if (except && &node == except) continue;
+			if (node.menu && node.popupOpen) { addDamage(menuPopupRect(node)); node.popupOpen = false; node.menuHover = -1; }
+			if (node.menuItem && node.submenuOpen) { node.submenuOpen = false; node.menuHover = -1; }
+		}
+		if (!except) m_openMenu = 0xFFFFFFFFu;
+	}
+
+	bool UiRuntime::menuOpenAtAnchor(Vec2 point, MouseButton button) {
+		// Context menus open on right-press over their anchor; anchor menus on left-press.
+		for (u32 i = 0; i < m_nodes.size(); ++i) {
+			Node& menu = m_nodes[i];
+			if (!menu.menu || menu.disabled || !isNodeVisible(i)) continue;
+			const bool contextHit = menu.menuContext && button == MouseButton::Right && menuAnchorHitRect(menu).contains(point);
+			const bool anchorHit = !menu.menuContext && button == MouseButton::Left && menuAnchorHitRect(menu).contains(point);
+			if (!contextHit && !anchorHit) continue;
+			if (menu.popupOpen) {
+				// Pressing the open anchor toggles it closed (pointer-up never arrives to do it).
+				addDamage(menuPopupRect(menu));
+				menu.popupOpen = false;
+				menu.menuHover = -1;
+				m_openMenu = 0xFFFFFFFFu;
+				return true;
+			}
+			closeAllMenus(&menu);
+			for (Node& node : m_nodes) if ((node.dropdown || node.colorPicker || node.datePicker) && node.popupOpen) node.popupOpen = false;
+			menu.popupOpen = true;
+			menu.menuHover = -1;
+			if (contextHit) menu.menuPoint = point;
+			m_openMenu = i;
+			addDamage(m_layout.absRect(menu.layout));
+			addDamage(menuPopupRect(menu));
+			return true;
+		}
+		return false;
+	}
+
+	bool UiRuntime::menuRowPress(u32 itemIndex, const Rect& row) {
+		Node& item = m_nodes[itemIndex];
+		if (menuRowIsSeparator(item)) return true;    // separators swallow clicks harmlessly
+		if (item.disabled) { addDamage(row); return true; }
+		if (firstMenuChildIndex(itemIndex) != 0xFFFFFFFFu) { // submenu parents toggle
+			item.submenuOpen = !item.submenuOpen;
+			item.submenuRect = row;
+			addDamage(row);
+			return true;
+		}
+		if (m_openMenu < m_nodes.size()) {
+			Node& menu = m_nodes[m_openMenu];
+			menu.menuSelectedItem = item.text;
+			menu.popupOpen = false;
+			addDamage(menuPopupRect(menu));
+		}
+		addDamage(row);
+		closeAllMenus();
+		if (item.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(item.pressHandler));
+		return true;
+	}
+
+	bool UiRuntime::menuPointerDown(Vec2 point) {
+		if (m_openMenu >= m_nodes.size()) return false;
+		Node& menu = m_nodes[m_openMenu];
+		if (!menu.popupOpen) { m_openMenu = 0xFFFFFFFFu; return false; }
+		const Rect popup = menuPopupRect(menu);
+		Rect row{};
+		// Nested submenu surfaces paint above the parent popup, so they are hit-tested first.
+		for (u32 i = 0; i < m_nodes.size(); ++i) {
+			Node& item = m_nodes[i];
+			if (!item.menuItem || !item.submenuOpen) continue;
+			const u32 subHit = menuHitRow(item, submenuPopupRect(item), point, &row);
+			if (subHit != 0xFFFFFFFFu) return menuRowPress(subHit, row);
+		}
+		const u32 hit = menuHitRow(menu, popup, point, &row);
+		if (hit != 0xFFFFFFFFu) return menuRowPress(hit, row);
+		// Press on the open anchor toggles it closed on release-free semantics; anything
+		// else outside the surfaces closes every menu.
+		if (menuAnchorHitRect(menu).contains(point)) return true;
+		addDamage(popup);
+		closeAllMenus();
+		return true;
+	}
+
+	bool UiRuntime::menuPointerMove(Vec2 point) {
+		if (m_openMenu >= m_nodes.size()) return false;
+		Node& menu = m_nodes[m_openMenu];
+		if (!menu.popupOpen) return false;
+		bool changed = false;
+		const Rect popup = menuPopupRect(menu);
+		Rect row{};
+		u32 hovered = 0xFFFFFFFFu;
+		// Submenu surfaces take hover priority; hovering elsewhere on the parent popup closes
+		// any open submenu unless the pointer is on the parent row that owns it.
+		for (u32 i = 0; i < m_nodes.size(); ++i) {
+			Node& item = m_nodes[i];
+			if (!item.menuItem || !item.submenuOpen) continue;
+			const Rect sub = submenuPopupRect(item);
+			const u32 subHit = menuHitRow(item, sub, point, &row);
+			if (subHit != 0xFFFFFFFFu) {
+				hovered = subHit;
+				if (item.menuHover != static_cast<i32>(subHit)) { item.menuHover = static_cast<i32>(subHit); changed = true; }
+			}
+		}
+		if (hovered == 0xFFFFFFFFu) {
+			const u32 hit = menuHitRow(menu, popup, point, &row);
+			hovered = hit;
+			if (menu.menuHover != (hit == 0xFFFFFFFFu ? -1 : static_cast<i32>(hit))) {
+				menu.menuHover = hit == 0xFFFFFFFFu ? -1 : static_cast<i32>(hit);
+				changed = true;
+			}
+			// Open/collapse submenus from the hovered parent row; close on any other row.
+			bool anyOpen = false;
+			for (u32 child = firstMenuChildIndex(m_openMenu); child != 0xFFFFFFFFu; child = nextMenuSiblingIndex(child)) {
+				Node& item = m_nodes[child];
+				if (!item.menuItem) continue;
+				const bool shouldOpen = child == hit && firstMenuChildIndex(child) != 0xFFFFFFFFu;
+				if (item.submenuOpen && !shouldOpen) { item.submenuOpen = false; item.menuHover = -1; changed = true; }
+				if (shouldOpen) {
+					anyOpen = true;
+					if (!item.submenuOpen) { item.submenuOpen = true; item.submenuRect = row; item.menuHover = -1; changed = true; }
+				}
+			}
+			if (!anyOpen) {
+				for (u32 i = 0; i < m_nodes.size(); ++i) {
+					if (m_nodes[i].menuItem && m_nodes[i].submenuOpen) {
+						// Only close submenus whose owning row is not under the pointer.
+						bool ownsPointer = false;
+						for (u32 child = firstMenuChildIndex(m_openMenu); child != 0xFFFFFFFFu; child = nextMenuSiblingIndex(child))
+							if (child == i && child == hit) ownsPointer = true;
+						if (!ownsPointer) { m_nodes[i].submenuOpen = false; changed = true; }
+					}
+				}
+			}
+		}
+		if (changed) { addDamage(popup); for (u32 i = 0; i < m_nodes.size(); ++i) if (m_nodes[i].menuItem && m_nodes[i].submenuOpen) addDamage(submenuPopupRect(m_nodes[i])); }
+		return changed;
+	}
+
+	void UiRuntime::menuActivateItem(Node& item) {
+		const u32 itemIndex = nodeIndexOf(item);
+		if (item.disabled || menuRowIsSeparator(item)) return;
+		if (firstMenuChildIndex(itemIndex) != 0xFFFFFFFFu) {   // submenu parents toggle instead
+			item.submenuOpen = !item.submenuOpen;
+			return;
+		}
+		if (m_openMenu < m_nodes.size()) {
+			Node& menu = m_nodes[m_openMenu];
+			menu.menuSelectedItem = item.text;
+			menu.popupOpen = false;
+			addDamage(menuPopupRect(menu));
+		}
+		closeAllMenus();
+		if (item.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(item.pressHandler));
+	}
+
+	bool UiRuntime::menuKeyDown(Key key) {
+		if (m_openMenu >= m_nodes.size()) return false;
+		Node& menu = m_nodes[m_openMenu];
+		if (!menu.popupOpen) { m_openMenu = 0xFFFFFFFFu; return false; }
+		// Keyboard focus follows the deepest open submenu, else the root popup.
+		u32 ownerIndex = m_openMenu;
+		for (u32 i = 0; i < m_nodes.size(); ++i)
+			if (m_nodes[i].menuItem && m_nodes[i].submenuOpen) ownerIndex = i;
+		Node& owner = m_nodes[ownerIndex];
+		const bool inSubmenu = ownerIndex != m_openMenu;
+		std::vector<u32> rows;
+		for (u32 child = firstMenuChildIndex(ownerIndex); child != 0xFFFFFFFFu; child = nextMenuSiblingIndex(child))
+			if (!menuRowIsSeparator(m_nodes[child])) rows.push_back(child);
+		if (key == Key::Escape) {
+			if (inSubmenu) {
+				owner.submenuOpen = false;
+				owner.menuHover = -1;
+				addDamage(submenuPopupRect(owner));
+				return true;
+			}
+			addDamage(menuPopupRect(menu));
+			closeAllMenus();
+			return true;
+		}
+		if (rows.empty()) return key == Key::Enter || key == Key::Up || key == Key::Down;
+		if (key == Key::Up || key == Key::Down) {
+			const i32 direction = key == Key::Down ? 1 : -1;
+			// menuHover holds a row NODE index (same convention as the pointer path); -1 = none.
+			i32 ordinal = -1;
+			for (u32 i = 0; i < rows.size(); ++i)
+				if (rows[i] == static_cast<u32>(std::max(0, owner.menuHover))) { ordinal = static_cast<i32>(i); break; }
+			i32 current = ordinal;
+			for (i32 step = 0; step < static_cast<i32>(rows.size()); ++step) {
+				current = current < 0 ? (direction > 0 ? 0 : static_cast<i32>(rows.size()) - 1)
+					: (current + direction + static_cast<i32>(rows.size())) % static_cast<i32>(rows.size());
+				if (!m_nodes[rows[static_cast<u32>(current)]].disabled) break;
+			}
+			owner.menuHover = current < 0 ? -1 : static_cast<i32>(rows[static_cast<u32>(current)]);
+			addDamage(inSubmenu ? submenuPopupRect(owner) : menuPopupRect(menu));
+			return true;
+		}
+		if (key == Key::Left && inSubmenu) {
+			owner.submenuOpen = false;
+			owner.menuHover = -1;
+			addDamage(submenuPopupRect(owner));
+			return true;
+		}
+		if (key == Key::Right || key == Key::Enter) {
+			const u32 hovered = owner.menuHover >= 0 ? static_cast<u32>(owner.menuHover) : 0xFFFFFFFFu;
+			bool inRows = hovered != 0xFFFFFFFFu;
+			if (inRows) {
+				inRows = false;
+				for (u32 row : rows) if (row == hovered) { inRows = true; break; }
+			}
+			if (!inRows) return false;
+			Node& item = m_nodes[hovered];
+			if (key == Key::Right) {
+				if (firstMenuChildIndex(hovered) == 0xFFFFFFFFu) return false;
+				item.submenuOpen = true;
+				// Anchor the submenu to the hovered row's on-screen rect.
+				const Rect surface = inSubmenu ? submenuPopupRect(owner) : menuPopupRect(menu);
+				f32 y = surface.y + 4.f;
+				for (u32 child = firstMenuChildIndex(ownerIndex); child != 0xFFFFFFFFu; child = nextMenuSiblingIndex(child)) {
+					const f32 height = menuRowIsSeparator(m_nodes[child]) ? 9.f : 28.f;
+					if (child == hovered) { item.submenuRect = { surface.x, y, surface.w, height }; break; }
+					y += height;
+				}
+				item.menuHover = -1;
+				addDamage(submenuPopupRect(item));
+				return true;
+			}
+			menuActivateItem(item);
+			return true;
+		}
+		return false;
+	}
+
 	Rect UiRuntime::scrollBarRect(u32 index, bool horizontal, Rect* trackOut) const {
 		if (index >= m_nodes.size() || !m_nodes[index].scrollView || m_nodes[index].scrollBarVisibility == 2) return {};
 		const Node& node = m_nodes[index];
@@ -1826,8 +2186,12 @@ namespace xui {
 				m_fpsValue = static_cast<f32>(m_fpsFrames / m_fpsElapsed);
 				m_frameTimeMs = m_fpsFrames ? static_cast<f32>(m_fpsElapsed * 1000.0 / m_fpsFrames) : 0.f;
 				for (Node& fps : m_nodes) if (fps.fpsCounter) {
-					char value[48];
-					if (fps.showFrameTime) std::snprintf(value, sizeof(value), "FPS: %.0f | %.1f ms", double(m_fpsValue), double(m_frameTimeMs));
+					char value[80];
+					if (m_drawBatchCounterEnabled && m_fpsEnabled)
+						std::snprintf(value, sizeof(value), "FPS: %.0f | %.1f ms | Batches: %u", double(m_fpsValue), double(m_frameTimeMs), m_drawBatchCount);
+					else if (m_drawBatchCounterEnabled)
+						std::snprintf(value, sizeof(value), "Batches: %u", m_drawBatchCount);
+					else if (fps.showFrameTime) std::snprintf(value, sizeof(value), "FPS: %.0f | %.1f ms", double(m_fpsValue), double(m_frameTimeMs));
 					else std::snprintf(value, sizeof(value), "FPS: %.0f", double(m_fpsValue));
 					if (fps.text == value) continue;
 					fps.text = value;
@@ -1838,6 +2202,14 @@ namespace xui {
 			}
 		}
 		m_fpsLastFrame = now;
+		if (m_drawBatchCounterEnabled) {
+			for (Node& fps : m_nodes) if (fps.fpsCounter) {
+				char value[80];
+				if (m_fpsEnabled) std::snprintf(value, sizeof(value), "FPS: %.0f | %.1f ms | Batches: %u", double(m_fpsValue), double(m_frameTimeMs), m_drawBatchCount);
+				else std::snprintf(value, sizeof(value), "Batches: %u", m_drawBatchCount);
+				if (fps.text != value) { fps.text = value; m_layout.markContentChanged(fps.layout); }
+			}
+		}
 		auto drawLabel = [&](std::string_view text, Rect rect, FontHandle fontHandle, const PropTable& style,
 			Color fallback, f32 inset, bool wrap) {
 				if (!m_text || !m_text->atlas()->ready() || !fontHandle.valid() || text.empty()) return;
@@ -1895,12 +2267,32 @@ namespace xui {
 		}
 		for (u32 nodeIndex = 0; nodeIndex < m_nodes.size(); ++nodeIndex) {
 			Node& node = m_nodes[nodeIndex];
-			if ((node.fpsCounter && !m_fpsEnabled) || !isNodeVisible(nodeIndex)) continue;
+			if ((node.fpsCounter && !m_fpsEnabled && !m_drawBatchCounterEnabled) || !isNodeVisible(nodeIndex)) continue;
+			// Menu nodes and their virtual rows never paint in the retained pass.
+			if (node.menu || node.menuItem || (node.separator && node.parentIndex != 0xFFFFFFFFu
+				&& (m_nodes[node.parentIndex].menu || m_nodes[node.parentIndex].menuItem))) continue;
 			struct ScrollClipScope { Painter& painter; u32 count = 0; ~ScrollClipScope() { while (count--) painter.popClip(); } } scrollClips{ painter };
 			for (u32 parent = node.parentIndex; parent != 0xFFFFFFFFu && parent < m_nodes.size(); parent = m_nodes[parent].parentIndex)
 				if (m_nodes[parent].scrollView) { painter.pushClip(m_layout.absRect(m_nodes[parent].layout)); ++scrollClips.count; }
-			const StateMask states = activeStates(node);
+			StateMask states = activeStates(node);
 			const StateMask previousStates = node.resolvedStates;
+			bool finishCurrent = false;
+			if (node.styleResolved && previousStates != states && (node.keyframeActive || !node.styleTweens.empty())) {
+				const StyleValue& cancel = node.style.get(PropId::AnimationCancel);
+				const bool widgetFinish = node.style.has(PropId::AnimationCancel) && cancel.count && cancel.atoms[0].kind == AtomKind::Ident
+					&& m_strings->view(cancel.atoms[0].str()) == "finish";
+				finishCurrent = node.keyframeCancelOverride >= 0 ? node.keyframeCancelFinish : (widgetFinish || node.keyframeCancelFinish);
+			}
+			if (finishCurrent) {
+				states = previousStates;
+				if (node.keyframeActive && node.keyframeInfinite && node.keyframeDurationMs > 0.f && !node.keyframeFinishRequested) {
+					const f64 elapsed = std::max(0.0, std::chrono::duration<f64, std::milli>(now - node.keyframeStart).count());
+					const f64 cycles = std::ceil(elapsed / node.keyframeDurationMs);
+					node.keyframeStopAt = node.keyframeStart + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+						std::chrono::duration<f64, std::milli>(cycles * node.keyframeDurationMs));
+					node.keyframeFinishRequested = true;
+				}
+			}
 			const bool stateChanged = node.styleResolved && node.resolvedStates != states;
 			PropTable previousStyle;
 			if (stateChanged) previousStyle = node.style;
@@ -1949,6 +2341,31 @@ namespace xui {
 					if (transition.allProps) for (PropId property : animatable) addTween(property);
 					else addTween(transition.prop);
 				}
+				// animation-keep: until-done — a mid-flight transition animates to the new state's
+				// values instead of snapping when the state exits before the tween finished. The
+				// first declared transition supplies timing for properties without a matching pair.
+				const StyleValue& keep = node.style.get(PropId::AnimationKeep);
+				if (node.style.has(PropId::AnimationKeep) && keep.count && keep.atoms[0].kind == AtomKind::Ident
+					&& m_strings->view(keep.atoms[0].str()) == "until-done") {
+					const auto& declared = m_styles->transitions(node.styleSet);
+					if (!declared.empty() && declared.front().durationMs > 0.f) {
+						const Transition& timing = declared.front();
+						for (PropId property : animatable) {
+							const u64 bit = u64{ 1 } << static_cast<int>(property);
+							const bool already = std::any_of(node.styleTweens.begin(), node.styleTweens.end(),
+								[&](const StyleTween& item) { return item.property == property; });
+							if (already || !(previousStyle.mask & bit) || !(node.style.mask & bit)) continue;
+							StyleTween tween;
+							tween.property = property;
+							tween.from = previousStyle.v[static_cast<int>(property)];
+							tween.to = node.style.v[static_cast<int>(property)];
+							StyleValue probe;
+							if (!interpolateStyle(tween.from, tween.to, 0.f, probe)) continue;
+							tween.start = now; tween.durationMs = timing.durationMs; tween.delayMs = timing.delayMs; tween.easing = timing.ease;
+							node.styleTweens.push_back(std::move(tween));
+						}
+					}
+				}
 			}
 			// Declarative keyframes are sampled only while the named animation is active. Static
 			// state styles are resolved first, then animated paint properties are overlaid.
@@ -1956,10 +2373,22 @@ namespace xui {
 			if (node.style.has(PropId::Animation) && !node.animationCancelled) {
 				const StyleValue& animation = node.style.get(PropId::Animation);
 				if (animation.count >= 2 && animation.atoms[0].kind == AtomKind::Ident) {
+					node.keyframeCancelOverride = -1;
+					for (u8 arg = 2; arg < animation.count; ++arg) if (animation.atoms[arg].kind == AtomKind::Ident) {
+						const std::string_view modifier = m_strings->view(animation.atoms[arg].str());
+						if (modifier == "cancel-finish") node.keyframeCancelOverride = 1;
+						else if (modifier == "cancel-stop") node.keyframeCancelOverride = 0;
+					}
+					const StyleValue& cancel = node.style.get(PropId::AnimationCancel);
+					const bool widgetFinish = node.style.has(PropId::AnimationCancel) && cancel.count && cancel.atoms[0].kind == AtomKind::Ident
+						&& m_strings->view(cancel.atoms[0].str()) == "finish";
+					node.keyframeCancelFinish = node.keyframeCancelOverride >= 0 ? node.keyframeCancelOverride == 1 : widgetFinish;
 					const StrId name = animation.atoms[0].str();
 					if (node.keyframeName != name) {
 						node.keyframeName = name;
 						node.keyframeStart = now;
+						node.keyframeFinishRequested = false;
+						node.keyframeStopAt = {};
 					}
 					node.keyframeDurationMs = animationDurationMs(animation.atoms[1]);
 					node.keyframeIterations = 1;
@@ -1987,8 +2416,10 @@ namespace xui {
 					const f32 duration = std::max(1.f, node.keyframeDurationMs);
 					const f32 elapsed = std::chrono::duration<f32, std::milli>(now - node.keyframeStart).count();
 					const f32 total = duration * static_cast<f32>(node.keyframeIterations);
-					node.keyframeActive = !paused && (node.keyframeInfinite || elapsed < total);
-					f32 progress = paused ? 0.f : (node.keyframeActive || node.keyframeInfinite ? std::fmod(elapsed, duration) / duration : 1.f);
+					const bool finishCycle = node.keyframeFinishRequested && node.keyframeStopAt.time_since_epoch().count() != 0 && now >= node.keyframeStopAt;
+					node.keyframeActive = !paused && !finishCycle && (node.keyframeInfinite || elapsed < total);
+					f32 progress = paused ? 0.f : (finishCycle ? 1.f : (node.keyframeActive || node.keyframeInfinite ? std::fmod(elapsed, duration) / duration : 1.f));
+					if (finishCycle) { node.keyframeFinishRequested = false; node.keyframeStopAt = {}; }
 					progress = easeProgress(progress, node.keyframeEase);
 					if (const KeyframesDef* def = m_styles->findKeyframes(name)) {
 						const auto frames = m_styles->frames(*def);
@@ -2019,10 +2450,23 @@ namespace xui {
 				// Removing an animation and applying it later starts a fresh playback.
 				node.keyframeName = {};
 				node.keyframeStart = {};
+				node.keyframeFinishRequested = false;
+				node.keyframeStopAt = {};
+				node.keyframeCancelFinish = false;
+				node.keyframeCancelOverride = -1;
 			}
 			for (auto it = node.styleTweens.begin(); it != node.styleTweens.end();) {
 				const f32 elapsed = std::chrono::duration<f32, std::milli>(now - it->start).count() - it->delayMs;
-				if (elapsed >= it->durationMs) { it = node.styleTweens.erase(it); continue; }
+				if (elapsed >= it->durationMs) {
+					// Completion must paint the exact target value before the tween retires.
+					// Erasing without it leaves the widget at the last sub-frame sample: the
+					// timer loop then goes idle and the animation freezes until the next
+					// input-driven state change repaints the style.
+					StyleValue value;
+					if (interpolateStyle(it->from, it->to, 1.f, value)) node.style.v[static_cast<int>(it->property)] = value;
+					it = node.styleTweens.erase(it);
+					continue;
+				}
 				const f32 t = easeProgress(std::max(0.f, elapsed / std::max(1.f, it->durationMs)), it->easing);
 				StyleValue value;
 				if (interpolateStyle(it->from, it->to, t, value)) node.style.v[static_cast<int>(it->property)] = value;
@@ -2356,15 +2800,41 @@ namespace xui {
 			}
 			if (node.numberField && !node.disabled) {
 				// Stepper buttons in the reserved right zone; clicks are routed in pointerDown().
-				const Color mark = color(node.style, PropId::Fg, Color::fromRGBA8(0xD1D1D1FFu)).withAlpha(0.7f);
+				// Visuals come from the NumberButton style part when authored, else the built-in look.
+				const Color fallbackMark = color(node.style, PropId::Fg, Color::fromRGBA8(0xD1D1D1FFu)).withAlpha(0.7f);
 				const f32 button = std::min(20.f, rect.w * 0.22f);
 				const Rect minus{ rect.right() - button * 2.f, rect.y, button, rect.h };
 				const Rect plus{ rect.right() - button, rect.y, button, rect.h };
-				painter.line({ minus.x, rect.y + 3.f }, { minus.x, rect.bottom() - 3.f }, 1.f, mark.withAlpha(0.35f));
-				painter.line({ plus.x, rect.y + 3.f }, { plus.x, rect.bottom() - 3.f }, 1.f, mark.withAlpha(0.35f));
-				painter.line({ minus.x + 5.f, minus.y + minus.h * 0.5f }, { minus.right() - 5.f, minus.y + minus.h * 0.5f }, 1.5f, mark);
-				painter.line({ plus.x + plus.w * 0.5f, plus.y + 7.f }, { plus.x + plus.w * 0.5f, plus.bottom() - 7.f }, 1.5f, mark);
-				painter.line({ plus.x + 5.f, plus.y + plus.h * 0.5f }, { plus.right() - 5.f, plus.y + plus.h * 0.5f }, 1.5f, mark);
+				auto paintNumberButton = [&](const Rect& zone, u8 zoneId, bool plusGlyph) {
+					StateMask zoneStates = stateBit(State::Resting) | stateBit(State::Enabled);
+					const bool hot = zone.contains(m_pointerPosition);
+					if (hot) zoneStates |= stateBit(State::Hover);
+					if (node.stepperZone == zoneId) zoneStates |= stateBit(State::Pressed);
+					PropTable buttonStyle;
+					m_styles->resolve(node.numberButtonStyleSet, zoneStates, m_theme, buttonStyle);
+					const Color background = color(buttonStyle, PropId::Bg, Color{ 0, 0, 0, 0 });
+					const Color mark = color(buttonStyle, PropId::Fg, fallbackMark);
+					const f32 zoneRadius = buttonStyle.has(PropId::Radius) ? number(buttonStyle.get(PropId::Radius), 0) : 0.f;
+					if (background.a > 0.f) painter.fillRect(zone, background, CornerRadii::all(zoneRadius));
+					const f32 thickness = std::max(1.f, zone.h * 0.075f);
+					if (plusGlyph) {
+						const f32 cx = zone.x + zone.w * 0.5f;
+						const f32 cy = zone.y + zone.h * 0.5f;
+						const f32 arm = std::max(4.f, zone.w * 0.25f);
+						painter.line({ cx - arm, cy }, { cx + arm, cy }, thickness, mark);
+						painter.line({ cx, cy - arm }, { cx, cy + arm }, thickness, mark);
+					}
+					else {
+						const f32 cy = zone.y + zone.h * 0.5f;
+						const f32 arm = std::max(4.f, zone.w * 0.25f);
+						painter.line({ zone.x + zone.w * 0.5f - arm, cy }, { zone.x + zone.w * 0.5f + arm, cy }, thickness, mark);
+					}
+				};
+				paintNumberButton(minus, 1, false);
+				paintNumberButton(plus, 2, true);
+				painter.line({ minus.x, rect.y + 3.f }, { minus.x, rect.bottom() - 3.f }, 1.f, fallbackMark.withAlpha(0.35f));
+				painter.line({ plus.x, rect.y + 3.f }, { plus.x, rect.bottom() - 3.f }, 1.f, fallbackMark.withAlpha(0.35f));
+				painter.line({ plus.x + 5.f, plus.y + plus.h * 0.5f }, { plus.right() - 5.f, plus.y + plus.h * 0.5f }, 1.5f, fallbackMark);
 			}
 			const bool placeholderText = (node.textBox || node.textArea) && node.text.empty() && !node.placeholder.empty();
 			std::string passwordMask;
@@ -2879,6 +3349,82 @@ namespace xui {
 				painter.line({ rect.x + 5.f + caretX,rect.y + 5.f }, { rect.x + 5.f + caretX,rect.bottom() - 5.f }, 1.f, foreground);
 			}
 		}
+		// Menus paint above every other popup surface; submenus paint above their parents.
+		for (u32 menuIndex = 0; menuIndex < m_nodes.size(); ++menuIndex) {
+			Node& menu = m_nodes[menuIndex];
+			if (!menu.menu || !menu.popupOpen || !isNodeVisible(menuIndex)) continue;
+			auto paintMenuSurface = [&](u32 ownerIndex, const Rect& surface, const Rect& clip) {
+				const Color panel = color(menu.style, PropId::Bg, Color::fromRGBA8(0x151E32FFu));
+				const f32 radius = menu.style.has(PropId::Radius) ? number(menu.style.get(PropId::Radius), 0, 5.f) : 5.f;
+				painter.fillRect(surface, panel, CornerRadii::all(radius));
+				if (menu.style.has(PropId::Border) && menu.style.get(PropId::Border).count >= 3) {
+					const auto& border = menu.style.get(PropId::Border);
+					const Color edge = border.atoms[2].kind == AtomKind::Color ? Color::fromRGBA8(border.atoms[2].bits) : Color{};
+					painter.roundRect(surface, RectStyle{ Color{0,0,0,0}, edge, number(border, 0), CornerRadii::all(radius) });
+				}
+				painter.pushClip(clip);
+				f32 y = surface.y + 4.f;
+				for (u32 child = firstMenuChildIndex(ownerIndex); child != 0xFFFFFFFFu; child = nextMenuSiblingIndex(child)) {
+					Node& row = m_nodes[child];
+					const bool separatorRow = menuRowIsSeparator(row);
+					const f32 height = separatorRow ? 9.f : 28.f;
+					const Rect rowRect{ surface.x + 4.f, y, surface.w - 8.f, height };
+					if (separatorRow) {
+						const Color line = color(menu.style, PropId::Fg, Color::fromRGBA8(0xF2F6FFFFu)).withAlpha(0.2f);
+						painter.line({ rowRect.x + 6.f, y + height * 0.5f }, { rowRect.right() - 6.f, y + height * 0.5f }, 1.f, line);
+					}
+					else {
+						StateMask rowStates = stateBit(State::Resting) | stateBit(State::Enabled);
+						if (static_cast<i32>(child) == m_nodes[ownerIndex].menuHover && !row.disabled) rowStates |= stateBit(State::Hover);
+						if (row.checked) rowStates |= stateBit(State::Checked);
+						if (row.disabled) { rowStates |= stateBit(State::Disabled); rowStates &= ~stateBit(State::Enabled); }
+						PropTable rowStyle;
+						m_styles->resolve(row.styleSet, rowStates, m_theme, rowStyle);
+						const Color background = color(rowStyle, PropId::Bg, Color{ 0, 0, 0, 0 });
+						const f32 rowRadius = rowStyle.has(PropId::Radius) ? number(rowStyle.get(PropId::Radius), 0, 4.f) : 4.f;
+						if (background.a > 0.f) painter.fillRect(rowRect, background, CornerRadii::all(rowRadius));
+						const Color foreground = color(rowStyle, PropId::Fg, color(menu.style, PropId::Fg, Color::fromRGBA8(0xF2F6FFFFu)));
+						const FontHandle rowFont = row.font.valid() ? row.font : menu.font;
+						if (row.checked) drawLabel("✓", { rowRect.x, rowRect.y, 20.f, rowRect.h }, rowFont, rowStyle, foreground, 2.f, false);
+						const f32 arrowZone = firstMenuChildIndex(child) != 0xFFFFFFFFu ? 20.f : 0.f;
+						const f32 shortcutZone = row.menuShortcut.empty() ? 0.f : 64.f;
+						drawLabel(row.text, { rowRect.x + (row.checked ? 20.f : 8.f), rowRect.y, rowRect.w - (row.checked ? 20.f : 8.f) - arrowZone - shortcutZone, rowRect.h },
+							rowFont, rowStyle, foreground, 0.f, false);
+						if (shortcutZone) drawLabel(row.menuShortcut, { rowRect.right() - arrowZone - shortcutZone, rowRect.y, shortcutZone, rowRect.h },
+							rowFont, rowStyle, foreground.withAlpha(0.55f), 0.f, false);
+						if (arrowZone) drawLabel("›", { rowRect.right() - arrowZone, rowRect.y, arrowZone, rowRect.h },
+							rowFont, rowStyle, foreground, 0.f, false);
+					}
+					y += height;
+				}
+				painter.popClip();
+			};
+			const Rect rootSurface = menuPopupRect(menu);
+			painter.pushOpacity(1.f);
+			paintMenuSurface(menuIndex, rootSurface, rootSurface);
+			// Open submenus, outermost first so inner surfaces end up on top.
+			bool nested = true;
+			while (nested) {
+				nested = false;
+				for (u32 i = 0; i < m_nodes.size(); ++i) {
+					Node& item = m_nodes[i];
+					if (!item.menuItem || !item.submenuOpen || item.submenuPainted) continue;
+					// Paint only the outermost not-yet-painted open submenu each pass.
+					bool parentPainted = false;
+					for (u32 p = item.parentIndex; p != 0xFFFFFFFFu; p = m_nodes[p].parentIndex)
+						if (m_nodes[p].menuItem && m_nodes[p].submenuPainted) { parentPainted = true; break; }
+					const bool isRootChild = item.parentIndex == menuIndex;
+					if (isRootChild || parentPainted) {
+						const Rect sub = submenuPopupRect(item);
+						paintMenuSurface(i, sub, sub);
+						item.submenuPainted = true;
+						nested = true;
+					}
+				}
+			}
+			for (Node& node : m_nodes) node.submenuPainted = false;
+			painter.popOpacity();
+		}
 		const bool popupOpen = m_tooltipVisible && std::any_of(m_nodes.begin(), m_nodes.end(), [](const Node& node) { return node.popupOpen; });
 		if (m_tooltipVisible && !popupOpen && m_tooltipOwner < m_nodes.size()) {
 			const Node& owner = m_nodes[m_tooltipOwner];
@@ -2908,6 +3454,7 @@ namespace xui {
 		m_pointerPosition = point;
 		bool changed = dockPointerMove(point);
 		changed |= titlePointerMove(point);
+		changed |= menuPointerMove(point);
 		if (m_dragScroll < m_nodes.size()) {
 			const u32 index = m_dragScroll;
 			Rect track;
@@ -3013,6 +3560,29 @@ namespace xui {
 		return changed;
 	}
 
+	bool UiRuntime::pointerLeave() {
+		m_pointerPosition = { -1.f, -1.f };
+		bool changed = menuPointerMove(m_pointerPosition);
+		for (u32 i = 0; i < m_nodes.size(); ++i) {
+			Node& node = m_nodes[i];
+			if (node.hovered) {
+				node.hovered = false;
+				if (!node.focused) node.tooltipDismissed = false;
+				addDamage(node.pickerEditor ? pickerEditorRect(node) : m_layout.absRect(node.layout));
+				changed = true;
+			}
+			if (node.hoveredOption >= 0) {
+				node.hoveredOption = -1;
+				if (node.dropdown && node.popupOpen)
+					addDamage(popupBounds(m_layout.absRect(node.layout), true, node.options.size(), m_lastLayoutHeight, node.pickerWidth, node.pickerHeight));
+				else addDamage(m_layout.absRect(node.layout));
+				changed = true;
+			}
+		}
+		refreshTooltipTarget();
+		return changed;
+	}
+
 	CursorShape UiRuntime::cursorAt(Vec2 point) const {
 		for (auto it = m_dockHosts.rbegin(); it != m_dockHosts.rend(); ++it) {
 			const DockHostState& host = *it;
@@ -3104,7 +3674,9 @@ namespace xui {
 		return false;
 	}
 
-	bool UiRuntime::pointerDown(Vec2 point) {
+	bool UiRuntime::pointerDown(Vec2 point) { return pointerDown(point, MouseButton::Left); }
+
+	bool UiRuntime::pointerDown(Vec2 point, MouseButton button) {
 		m_pointerPosition = point;
 		bool changed = false;
 		bool popupCoversPoint = false;
@@ -3116,6 +3688,18 @@ namespace xui {
 				popupCoversPoint = true; break;
 			}
 		}
+		for (u32 i = 0; i < m_nodes.size() && !popupCoversPoint; ++i) {
+			const Node& node = m_nodes[i];
+			if (!node.menu || !node.popupOpen || !isNodeVisible(i)) continue;
+			if (menuPopupRect(node).contains(point)) { popupCoversPoint = true; break; }
+			bool overSubmenu = false;
+			for (u32 j = 0; j < m_nodes.size(); ++j)
+				if (m_nodes[j].menuItem && m_nodes[j].submenuOpen && submenuPopupRect(m_nodes[j]).contains(point)) { overSubmenu = true; break; }
+			if (overSubmenu) break;
+		}
+		if (!popupCoversPoint && menuOpenAtAnchor(point, button)) return true;
+		if (menuPointerDown(point)) return true;
+		if (button == MouseButton::Right) return popupCoversPoint;   // right-press never presses widgets
 		if (!popupCoversPoint && titlePointerDown(point)) return true;
 		if (!popupCoversPoint && dockPointerDown(point)) return true;
 		for (std::size_t i = popupCoversPoint ? 0 : m_nodes.size(); i > 0; --i) {
@@ -3286,7 +3870,15 @@ namespace xui {
 			const bool focus = target == &node && !node.disabled;
 			changed |= node.focused != focus;
 			if (node.focused != focus) addDamage(m_layout.absRect(node.layout));
-			if (!focus && node.focused && node.numberField && !node.disabled) commitNumberText(node);
+			if (!focus && node.focused && node.numberField && !node.disabled) {
+				// Blur commits; text that never parsed reverts to the last valid value.
+				if (!commitNumberText(node) && node.inputInvalid) {
+					node.text = formatNumberText(node.value, node.numberPrecision);
+					if (!node.unit.empty()) { node.text += " "; node.text += node.unit; }
+					node.inputInvalid = false;
+					m_layout.markContentChanged(node.layout);
+				}
+			}
 			node.focused = focus;
 			if (focus && (node.textBox || node.textArea)) resetCaretBlink();
 			if (!node.hovered && !node.focused) node.tooltipDismissed = false;
@@ -3350,9 +3942,9 @@ namespace xui {
 				return true;
 			}
 			if ((target->stepper || target->numberField) && rect.w > 24.f) {
-				const f32 button = std::min(20.f, rect.w * 0.22f);
-				if (point.x >= rect.right() - button * 2.f) {
-					const bool minus = point.x < rect.right() - button;
+				const f32 stepperButtonWidth = std::min(20.f, rect.w * 0.22f);
+				if (point.x >= rect.right() - stepperButtonWidth * 2.f) {
+					const bool minus = point.x < rect.right() - stepperButtonWidth;
 					target->stepperZone = minus ? 1u : 2u;
 					applyNumberStep(*target, minus ? -1.f : 1.f);
 					addDamage(rect);
@@ -3393,6 +3985,7 @@ namespace xui {
 				changed = true;
 				addDamage(m_layout.absRect(target->layout));
 				if (target->dropdown || target->colorPicker || target->datePicker) {
+					closeAllMenus();
 					for (Node& node : m_nodes) if (&node != target && node.popupOpen) node.popupOpen = false;
 					target->popupOpen = true;
 					if (target->datePicker) { target->viewYear = target->dateYear; target->viewMonth = target->dateMonth; }
@@ -3463,6 +4056,7 @@ namespace xui {
 			m_dockPreview = {};
 			return true;
 		}
+		if (menuKeyDown(key)) return true;
 		if (key == Key::F3) {
 			m_fpsEnabled = !m_fpsEnabled;
 			m_fpsElapsed = 0;
@@ -3470,6 +4064,11 @@ namespace xui {
 			m_fpsLastFrame = {};
 			m_fpsDeadline = m_fpsEnabled ? std::chrono::steady_clock::now() + kFpsRefreshInterval
 				: std::chrono::steady_clock::time_point{};
+			for (const Node& node : m_nodes) if (node.fpsCounter) addDamage(m_layout.absRect(node.layout));
+			return true;
+		}
+		if (key == Key::F4) {
+			m_drawBatchCounterEnabled = !m_drawBatchCounterEnabled;
 			for (const Node& node : m_nodes) if (node.fpsCounter) addDamage(m_layout.absRect(node.layout));
 			return true;
 		}
@@ -3583,11 +4182,11 @@ namespace xui {
 			return true;
 		}
 		// A focused KeybindField captures the next non-modifier key combination. Tab stays reserved
-		// for focus traversal and F3 stays the global FPS toggle, so neither can be bound.
+		// for focus traversal; F3 and F4 are global FPS/draw-batch toggles, so neither can be bound.
 		for (u32 index : m_interactiveNodes) {
 			Node& field = m_nodes[index];
 			if (!field.keybindField || !field.focused || field.disabled) continue;
-			if (key == Key::F3 || key == Key::Tab) break;
+			if (key == Key::F3 || key == Key::F4 || key == Key::Tab) break;
 			const u16 code = static_cast<u16>(key);
 			if (code >= 0xE060 && code <= 0xE067) return false;   // bare modifier press: keep waiting
 			if (key == Key::Escape) {
@@ -4000,12 +4599,13 @@ namespace xui {
 		const char* text = node.text.c_str();
 		char* end = nullptr;
 		const f32 parsed = std::strtof(text, &end);
-		if (end == text || !std::isfinite(parsed)) return false;
+		if (end == text || !std::isfinite(parsed)) { node.inputInvalid = !node.text.empty(); return false; }
 		while (end && *end == ' ') ++end;
-		if (end && *end != '\0' && (node.unit.empty() || std::string_view(end) != std::string_view(node.unit))) return false;
+		if (end && *end != '\0' && (node.unit.empty() || std::string_view(end) != std::string_view(node.unit))) { node.inputInvalid = true; return false; }
 		const f32 clamped = node.numberBounded ? std::clamp(parsed, std::min(node.minValue, node.maxValue), std::max(node.minValue, node.maxValue)) : parsed;
 		const bool changed = clamped != node.value;
 		node.value = clamped;
+		node.inputInvalid = false;
 		if (changed && node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
 		return true;
 	}
@@ -4052,7 +4652,7 @@ namespace xui {
 			const u32 index = static_cast<u32>(i - 1);
 			const Node& node = m_nodes[index];
 			if (!isNodeVisible(index) || !pointInsideScrollAncestors(index, point)) continue;
-			if (node.fpsCounter && !m_fpsEnabled) continue;
+			if (node.fpsCounter && !m_fpsEnabled && !m_drawBatchCounterEnabled) continue;
 			if (node.pickerEditor) continue;
 			const Rect rect = m_layout.absRect(node.layout);
 			if (rect.empty() || !rect.contains(inverseTransformPoint(node.paintTransform, point))) continue;
@@ -4093,6 +4693,7 @@ namespace xui {
 		if (node.disabled) states |= stateBit(State::Disabled);
 		else states |= stateBit(State::Enabled);
 		if ((node.textBox || node.textArea) && node.readOnly) states |= stateBit(State::ReadOnly);
+		if (node.numberField && node.inputInvalid) states |= stateBit(State::Error);
 		if (node.popupOpen) states |= stateBit(State::Open);
 		if (node.tab && node.parentIndex < m_nodes.size() && m_nodes[node.parentIndex].tabs) {
 			const Node& tabs = m_nodes[node.parentIndex];
@@ -4116,6 +4717,7 @@ namespace xui {
 
 	bool UiRuntime::isNodeVisible(u32 index) const {
 		if (index >= m_nodes.size()) return false;
+		if (m_nodes[index].menuItem) return false;   // menu rows are virtual popup content only
 		if (m_nodes[index].dockPanel) {
 			if (m_nodes[index].dockClosed) return false;
 			const DockHostState* host = dockHostForPanel(index);
@@ -4168,6 +4770,7 @@ namespace xui {
 	}
 
 	bool UiRuntime::updateTimers(std::chrono::steady_clock::time_point now) {
+		if (m_animationsPaused) return false;
 		bool redraw = false;
 		for (u32 i = 0; i < m_nodes.size(); ++i) {
 			Node& node = m_nodes[i];
@@ -4248,6 +4851,7 @@ namespace xui {
 	}
 
 	f64 UiRuntime::nextTimerDelay(std::chrono::steady_clock::time_point now) const {
+		if (m_animationsPaused) return -1.0;
 		f64 delay = -1.0;
 		if (m_tooltipOwner != 0xFFFFFFFFu && !m_tooltipVisible)
 			delay = std::max(0.0, std::chrono::duration<f64>(m_tooltipDeadline - now).count());
@@ -4275,14 +4879,37 @@ namespace xui {
 		for (u32 i = 0; i < m_nodes.size(); ++i) {
 			const Node& node = m_nodes[i];
 			if (!isNodeVisible(i)) continue;
-			if (node.keyframeActive) { delay = delay < 0.0 ? 1.0 / 60.0 : std::min(delay, 1.0 / 60.0); break; }
+			const f64 frameDelay = m_animationDeadline.time_since_epoch().count() == 0
+				? 1.0 / 60.0 : std::max(0.0, std::chrono::duration<f64>(m_animationDeadline - now).count());
+			if (node.keyframeActive) { delay = delay < 0.0 ? frameDelay : std::min(delay, frameDelay); break; }
 			for (const StyleTween& tween : node.styleTweens) {
 				const auto ready = tween.start + std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<f64, std::milli>(tween.delayMs));
-				const f64 tweenDelay = now < ready ? std::chrono::duration<f64>(ready - now).count() : 1.0 / 60.0;
+				const f64 tweenDelay = now < ready ? std::chrono::duration<f64>(ready - now).count() : frameDelay;
 				delay = delay < 0.0 ? tweenDelay : std::min(delay, tweenDelay);
 			}
 		}
 		return delay;
+	}
+
+	void UiRuntime::setAnimationsPaused(bool paused, std::chrono::steady_clock::time_point now) {
+		if (paused == m_animationsPaused) return;
+		if (paused) {
+			m_animationsPausedAt = now;
+			m_animationsPaused = true;
+			return;
+		}
+		if (m_animationsPausedAt.time_since_epoch().count() != 0) {
+			const auto elapsed = now - m_animationsPausedAt;
+			for (Node& node : m_nodes) {
+				if (node.keyframeStart.time_since_epoch().count() != 0) node.keyframeStart += elapsed;
+				if (node.keyframeStopAt.time_since_epoch().count() != 0) node.keyframeStopAt += elapsed;
+				for (StyleTween& tween : node.styleTweens) tween.start += elapsed;
+			}
+			if (m_animationDeadline.time_since_epoch().count() != 0) m_animationDeadline += elapsed;
+			if (m_spinnerDeadline.time_since_epoch().count() != 0) m_spinnerDeadline += elapsed;
+		}
+		m_animationsPausedAt = {};
+		m_animationsPaused = false;
 	}
 
 	Color UiRuntime::controlColor(std::string_view id) const {
@@ -4314,6 +4941,8 @@ namespace xui {
 				if (active < m_nodes.size() && m_nodes[active].id.v) value.activeTab.assign(m_strings->view(m_nodes[active].id));
 				return UiValue{ std::move(value) };
 			}
+			if (node.menu) return UiValue{ node.menuSelectedItem };
+			if (node.menuItem) return UiValue{ node.text };
 			if (node.checkItem || node.checkBox || node.switchToggle || node.toggleButton) return UiValue{ node.checked };
 			if (node.slider || node.rating || node.progressBar) return UiValue{ static_cast<f64>(node.value) };
 			if (node.numberField || node.stepper) return UiValue{ static_cast<f64>(node.value) };
@@ -4330,6 +4959,33 @@ namespace xui {
 		for (Node& node : m_nodes) {
 			if (!node.id.v || m_strings->view(node.id) != id) continue;
 			bool changed = false;
+			if (node.menu) {
+				if (const bool* requestedOpen = std::get_if<bool>(&valueToSet)) {
+					changed = *requestedOpen != node.popupOpen;
+					if (*requestedOpen) {
+						closeAllMenus(&node);
+						for (Node& other : m_nodes) if ((other.dropdown || other.colorPicker || other.datePicker) && other.popupOpen) other.popupOpen = false;
+						node.popupOpen = true;
+						node.menuHover = -1;
+					}
+					else closeAllMenus();
+				}
+				else if (const std::string* requestedSelection = std::get_if<std::string>(&valueToSet)) {
+					changed = node.menuSelectedItem != *requestedSelection;
+					node.menuSelectedItem = *requestedSelection;
+					if (notify && changed && node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
+				}
+				return changed;
+			}
+			if (node.menuItem) {
+				// Checking/unchecking through the value API; activation is event-driven.
+				// No damage here: rows are virtual and repaint when their menu next opens.
+				if (const bool* requestedChecked = std::get_if<bool>(&valueToSet)) {
+					changed = node.checked != *requestedChecked;
+					if (changed) node.checked = *requestedChecked;
+					return changed;
+				}
+			}
 			if (node.dockPanel) {
 				const DockPanelValue* requested = std::get_if<DockPanelValue>(&valueToSet);
 				if (!requested) return false;

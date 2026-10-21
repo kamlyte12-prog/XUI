@@ -2,6 +2,7 @@
 
 This file records project changes, design decisions, trade-offs, current status, and next steps. It is updated as implementation work lands.
 
+<<<<<<< HEAD
 ## Animation timer cadence, cursor exit, cancellation policy, and F4 draw batches — 2026-10-21
 
 ### Audit and root causes
@@ -113,6 +114,8 @@ This file records project changes, design decisions, trade-offs, current status,
 - Build + fix reported compile errors; run the suite; visible demo pass per the checklist above.
 - Revisit the paused docking-optimization task (scale benchmark staged in `benchmarks/bench_docking_scale.cpp`).
 
+=======
+>>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 ## Custom window chrome: `platformTopMenu` + `TitleBar` — 2026-10-19
 
 ### Audit and findings

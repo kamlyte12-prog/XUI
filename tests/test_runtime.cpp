@@ -363,6 +363,7 @@ Button { resting: { bg: #000000ff } hover: { bg: #ffffffff } transition: resting
 	CHECK(complete == 0xFFFFFFFFu);
 }
 
+<<<<<<< HEAD
 TEST(ui_runtime_animation_timer_continues_without_pointer_input_and_after_leave) {
 	constexpr std::string_view xuiSource = R"(Window(size: 240x120) { Button[id: "animated", width: 160px, height: 48px] })";
 	constexpr std::string_view xssSource = R"(
@@ -513,6 +514,8 @@ TEST(ui_runtime_f4_draw_batch_counter_is_independent_of_fps_sampling) {
 	CHECK(!ui.drawBatchCounterEnabled());
 }
 
+=======
+>>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 TEST(ui_runtime_xss_keyframes_tick_only_while_visible_animation_runs) {
 	constexpr std::string_view xuiSource = R"(Window(size: 240x120) { Panel[id: "animated", class: "animated", width: 160px, height: 48px] })";
 	constexpr std::string_view xssSource = R"(
@@ -1635,7 +1638,11 @@ TitleButton { resting: { fg: #edf3fb } hover: { bg: #293d59 } pressed: { bg: #14
 	CHECK_NEAR(region.minimize.right(), region.maximize.x, 0.5f);
 	CHECK(region.minimize.x < region.maximize.x && region.maximize.x < region.close.x);
 
+<<<<<<< HEAD
 	const auto zoneCenter = [](const Rect& r) { return Vec2{ r.x + r.w * 0.5f, r.y + r.h * 0.5f }; };
+=======
+	const Vec2 zoneCenter = [](const Rect& r) { return Vec2{ r.x + r.w * 0.5f, r.y + r.h * 0.5f }; };
+>>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 	// Close triggers once, on release inside the zone.
 	ui.pointerDown(zoneCenter(region.close));
 	CHECK_EQ(platform.closeCount(), 0u);
@@ -1728,6 +1735,7 @@ TEST(ui_runtime_titlebar_requires_matching_platform_top_menu) {
 		if (withoutAttr) CHECK(!documentUsesClientChrome(*withoutAttr, strings));
 	}
 }
+<<<<<<< HEAD
 
 TEST(ui_runtime_tween_reaches_final_value_without_input) {
 	// Regression for the animation freeze: a transition must paint its exact final value and
@@ -1891,3 +1899,5 @@ Window(size: 260x140) {
 	ui.keyDown(Key::Up);
 	if (const auto value = ui.value("nf")) { const auto* number = std::get_if<f64>(&*value); CHECK(number && *number == 6.0); }
 }
+=======
+>>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3

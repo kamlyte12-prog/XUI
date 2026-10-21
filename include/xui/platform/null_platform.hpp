@@ -56,9 +56,12 @@ namespace xui {
 		bool toggleMaximize(WindowHandle) override { m_maximized = !m_maximized; ++m_maximizeToggleCount; return m_maximized; }
 		bool windowMaximized(WindowHandle) const override { return m_maximized; }
 		void closeWindow(WindowHandle) override { ++m_closeCount; }
+<<<<<<< HEAD
 		void setResizeInset(WindowHandle, f32 pixels) override { m_resizeInset = pixels; }
 
 		f32 lastResizeInset() const { return m_resizeInset; }
+=======
+>>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 
 		bool lastDecorated() const { return m_lastDecorated; }
 		u32 setDecoratedCount() const { return m_setDecoratedCount; }
@@ -96,7 +99,10 @@ namespace xui {
 		bool m_lastDecorated = true;
 		WindowEdge m_lastResizeEdge = WindowEdge::Left;
 		bool m_maximized = false;
+<<<<<<< HEAD
 		f32 m_resizeInset = 0.f;
+=======
+>>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 		u32 m_setDecoratedCount = 0, m_systemMoveCount = 0, m_systemResizeCount = 0;
 		u32 m_minimizeCount = 0, m_maximizeToggleCount = 0, m_closeCount = 0;
 	};

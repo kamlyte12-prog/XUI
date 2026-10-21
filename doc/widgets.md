@@ -112,14 +112,23 @@ Behavior, owned by the framework through `platform_interface` (never per-app cod
 - **Drag to move:** pressing the bar outside interactive children starts a native window move. Interactive children (buttons, dropdowns, tabs, fields) keep their clicks and never start a drag; non-interactive children and empty gaps do.
 - **Double-click** the bar's non-interactive area toggles maximize/restore (platform convention; detected press-to-press because native move loops swallow the first release).
 - **Caption buttons:** with `platformButtons: true` (the default) the framework draws minimize, maximize/restore, and close zones at the bar's right end. They fire on release inside their zone and route through the platform (minimize, maximize/restore, close). Set `platformButtons: false` to author your own controls instead. The bar's right padding is reserved automatically so children never underlap the zones.
+<<<<<<< HEAD
 - **Edge resize:** with native decorations hidden, resizing works from every edge and corner (N/S/E/W plus all four diagonals) through the platform's native sizing loop, so the OS draws the per-edge resize cursors (`resize-ew`, `resize-ns`, `resize-nwse`, `resize-nesw`) and runs the modal resize loop — live layout keeps rendering through the existing resize hook. The hit-test margin defaults to the platform's frame thickness and is configurable in physical pixels through `Platform::setResizeInset(window, pixels)` (0 restores the default; the GLFW/Windows backend clamps to 64). Edge resize is unavailable while maximized, matching native behavior. The outermost few pixels of the TitleBar resize the window rather than dragging it — the same convention as native chrome. The `.xss cursor` option does not apply to window edges: the OS owns those cursors.
+=======
+- **Edge resize:** with native decorations hidden, a resize border operates at the window edges/corners with native resize cursors (Windows backend). Edge resize is unavailable while maximized, matching native behavior.
+>>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 
 Styling: the bar is styled like any widget (`TitleBar`, classes, id). The caption zones are styled through the `TitleButton` selector with `resting`/`hover`/`pressed` states (`fg`, `bg`, `radius`). Minimize/maximize glyphs are painter primitives; the close glyph is an `×` label.
 
 Platform caveats:
 
+<<<<<<< HEAD
 - **Windows (GLFW):** full support — borderless frame with native drag, Aero Snap (drag-to-edge and Win+arrow), snap-aware double-click maximize, drag-to-restore when maximized, and edge resize. The backend restores the `WS_THICKFRAME` sizing border that GLFW's undecorated style omits (without it the native sizing loop never engages); the subclass strips non-client chrome for both `WM_NCCALCSIZE` forms, suppresses native non-client activation painting, and uses the monitor work area while maximized so the taskbar remains visible.
 - **macOS / Linux (GLFW):** hiding decorations would leave no supported way to move or resize the window (Wayland especially), so `setDecorated(false)` is refused, the native title bar is kept, and the `TitleBar` renders as a normal non-dragging bar above your content. Do not rely on window dragging from the bar there. Where a platform's window manager provides resize borders for undecorated windows, the native path is used and documented per backend.
+=======
+- **Windows (GLFW):** full support — borderless frame with native drag, Aero Snap (drag-to-edge and Win+arrow), snap-aware double-click maximize, drag-to-restore when maximized, and edge resize.
+- **macOS / Linux (GLFW):** hiding decorations would leave no supported way to move or resize the window (Wayland especially), so `setDecorated(false)` is refused, the native title bar is kept, and the `TitleBar` renders as a normal non-dragging bar above your content. Do not rely on window dragging from the bar there.
+>>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 
 `platformTopMenu: false` without a `TitleBar` (or a `TitleBar` without it) is a document build error, so a window can never end up with neither native nor custom chrome.
 
@@ -574,7 +583,11 @@ Limitations: inertial/momentum scrolling, touch/gesture input, scrollbar corner 
 
 ## Schema-recognized, runtime-unsupported objects
 
+<<<<<<< HEAD
 The current core schema also recognizes names that are not materialized by `UiRuntime::build()`: `Grid`, `Stack`, `Popover`, `Modal`, `ContextMenu`, `IconButton`, `RangeSlider`, `ComboBox`, `Icon`, `TreeView`, `ListView`, `Table`, `Canvas`, `HUD`, `Crosshair`, `RadialMenu`, `HealthBar`, and `DamageNumber`. (`DockSpace` aliases the runtime `DockHost`; `Toolbar`, `StatusBar`, and `MenuBar` are horizontal containers; `Menu`/`MenuItem` are the runtime [popup menu](#menu-and-menuitem).) `MenuBar` remains a plain client-area row of ordinary controls; the custom draggable top menu is the [`TitleBar`](#titlebar) widget together with `Window[platformTopMenu: false]`. A dedicated command-menu model and menu keyboard navigation are not implemented.
+=======
+The current core schema also recognizes names that are not materialized by `UiRuntime::build()`: `Grid`, `Stack`, `Menu`, `MenuItem`, `Popover`, `Modal`, `ContextMenu`, `IconButton`, `RangeSlider`, `ComboBox`, `Icon`, `TreeView`, `ListView`, `Table`, `Canvas`, `HUD`, `Crosshair`, `RadialMenu`, `HealthBar`, and `DamageNumber`. (`DockSpace` aliases the runtime `DockHost`; `Toolbar`, `StatusBar`, and `MenuBar` are horizontal containers.) `MenuBar` remains a plain client-area row of ordinary controls; the custom draggable top menu is the [`TitleBar`](#titlebar) widget together with `Window[platformTopMenu: false]`. A dedicated command-menu model and menu keyboard navigation are not implemented.
+>>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 
 ```xui
 MenuBar[class: "client-menu"] {

@@ -41,13 +41,20 @@ public:
 	bool toggleMaximize(xui::WindowHandle) override;
 	bool windowMaximized(xui::WindowHandle) const override;
 	void closeWindow(xui::WindowHandle) override;
+<<<<<<< HEAD
 	void setResizeInset(xui::WindowHandle, xui::f32 pixels) override;
+=======
+>>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 
 	/// One GLFW window. Public so the file-local Win32 chrome helpers in the .cpp can operate
 	/// on records without exposing windows.h types in this header.
 	struct Window { GLFWwindow* native = nullptr; xui::WindowHandle handle; GlfwPlatform* owner = nullptr;
 	                void (*liveResizeFn)(void*) = nullptr; void* liveResizeContext = nullptr;
+<<<<<<< HEAD
 	                bool customChrome = false; void* chromeState = nullptr; xui::f32 resizeInset = 0.f; };
+=======
+	                bool customChrome = false; void* chromeState = nullptr; };
+>>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 
 private:
 	static Window* record(GLFWwindow* window);

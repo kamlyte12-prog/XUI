@@ -222,11 +222,14 @@ bool GlfwPlatform::toggleMaximize(WindowHandle h) {
 	if (!w || !w->native) return false;
 	if (glfwGetWindowAttrib(w->native, GLFW_MAXIMIZED) == GLFW_TRUE) glfwRestoreWindow(w->native);
 	else glfwMaximizeWindow(w->native);
+<<<<<<< HEAD
 #ifdef _WIN32
 	// GLFW's maximize/restore calls should preserve GLFW_DECORATED, but reassert the
 	// client-chrome style after the transition so a platform style refresh cannot add a caption.
 	if (w->customChrome) applySnapStyles(glfwGetWin32Window(w->native));
 #endif
+=======
+>>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 	return glfwGetWindowAttrib(w->native, GLFW_MAXIMIZED) == GLFW_TRUE;
 }
 
@@ -243,10 +246,13 @@ void GlfwPlatform::closeWindow(WindowHandle h) {
 	glfwPostEmptyEvent();
 }
 
+<<<<<<< HEAD
 void GlfwPlatform::setResizeInset(WindowHandle h, f32 pixels) {
 	if (Window* w = find(h)) w->resizeInset = std::clamp(pixels, 0.f, 64.f);
 }
 
+=======
+>>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 GlfwPlatform::Window* GlfwPlatform::find(WindowHandle h) { return h.index < m_windows.size() && m_windows[h.index].handle.gen == h.gen ? &m_windows[h.index] : nullptr; }
 const GlfwPlatform::Window* GlfwPlatform::find(WindowHandle h) const { return const_cast<GlfwPlatform*>(this)->find(h); }
 GlfwPlatform::Window* GlfwPlatform::record(GLFWwindow* w) { return static_cast<Window*>(glfwGetWindowUserPointer(w)); }
@@ -326,17 +332,25 @@ namespace {
 	constexpr wchar_t kChromeProp[] = L"XuiChromeProp";
 
 	void applySnapStyles(HWND hwnd) {
+<<<<<<< HEAD
 		// GLFW's undecorated style is WS_POPUP without WS_THICKFRAME, which disables both Aero
 		// Snap and the native sizing loop (HT* hits are ignored without a sizing border).
 		// Re-add THICKFRAME and the snap boxes; WM_NCCALCSIZE keeps the frame invisible.
 		const LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
 		SetWindowLongPtrW(hwnd, GWL_STYLE, (style & ~LONG_PTR(WS_CAPTION)) | WS_THICKFRAME | WS_MAXIMIZEBOX | WS_MINIMIZEBOX);
+=======
+		// GLFW's undecorated style omits WS_MAXIMIZEBOX/WS_MINIMIZEBOX, which also disables
+		// Aero Snap. Re-add both so drag-to-edge snap and Win+arrow tiling keep working.
+		const LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+		SetWindowLongPtrW(hwnd, GWL_STYLE, style | WS_MAXIMIZEBOX | WS_MINIMIZEBOX);
+>>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 		SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
 	}
 
 	LRESULT CALLBACK chromeWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 		auto* state = static_cast<ChromeState*>(GetPropW(hwnd, kChromeProp));
 		GlfwPlatform::Window* window = state ? state->window : nullptr;
+<<<<<<< HEAD
 		// Edge/corner resize margin in physical px: app-set inset or the native frame thickness.
 		const LONG insetX = window && window->resizeInset > 0.f ? LONG(window->resizeInset + 0.5f)
 			: GetSystemMetrics(SM_CXSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
@@ -356,14 +370,30 @@ namespace {
 					MONITORINFO monitor{ sizeof(MONITORINFO) };
 					if (GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &monitor))
 						*rect = monitor.rcWork;
+=======
+		switch (msg) {
+		case WM_NCCALCSIZE:
+			// Returning 0 with wParam TRUE makes the whole window client area (no native frame).
+			// When maximized, inset by the hidden frame so content stays inside the work area.
+			if (window && window->customChrome && wp) {
+				if (IsZoomed(hwnd)) {
+					auto* rect = reinterpret_cast<RECT*>(lp);
+					const LONG frameX = GetSystemMetrics(SM_CXSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+					const LONG frameY = GetSystemMetrics(SM_CYSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+					rect->left += frameX; rect->top += frameY;
+					rect->right -= frameX; rect->bottom -= frameY;
+>>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 				}
 				return 0;
 			}
 			break;
+<<<<<<< HEAD
 		case WM_NCACTIVATE:
 			// Native activation must not repaint a caption for our client-drawn frame.
 			if (window && window->customChrome) return TRUE;
 			break;
+=======
+>>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 		case WM_NCHITTEST:
 			if (window && window->customChrome) {
 				// Resize borders behave like a native frame; the rest stays client area so the
@@ -374,7 +404,13 @@ namespace {
 					GetWindowRect(hwnd, &rc);
 					const LONG x = pt.x - rc.left, y = pt.y - rc.top;
 					const LONG width = rc.right - rc.left, height = rc.bottom - rc.top;
+<<<<<<< HEAD
 					const bool left = x < insetX, right = x >= width - insetX, top = y < insetY, bottom = y >= height - insetY;
+=======
+					const LONG frameX = GetSystemMetrics(SM_CXSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+					const LONG frameY = GetSystemMetrics(SM_CYSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+					const bool left = x < frameX, right = x >= width - frameX, top = y < frameY, bottom = y >= height - frameY;
+>>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 					if (top && left) return HTTOPLEFT;
 					if (top && right) return HTTOPRIGHT;
 					if (bottom && left) return HTBOTTOMLEFT;

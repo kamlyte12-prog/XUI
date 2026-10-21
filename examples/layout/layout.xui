@@ -1,7 +1,11 @@
+<<<<<<< HEAD
 Window(title: "Xui Button", size: 760x480)[platformTopMenu: false] {
     TitleBar[] {
         Button(label: "Save")[id: "save", class: "primary"]
     }
+=======
+Window(title: "Xui Button", size: 760x480) {
+>>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
     Column(gap: 10)[class: "page"] { Text("Hello My Little Pony") }
     Row[class: "bar"] { Text("World! Extension ") Text("World! Extension ") }
 }

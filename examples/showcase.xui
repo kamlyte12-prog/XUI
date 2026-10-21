@@ -9,7 +9,6 @@ Window(title: "Xui widget and layout showcase", size: 1080x760)[platformTopMenu:
     Dropdown[id: "menu-edit", class: "menu-dropdown", options: "Edit|Undo|Redo|Select all", value: "Edit", width: 120px, height: 30px]
     Dropdown[id: "menu-view", class: "menu-dropdown", options: "View|Show panels|Reset layout", value: "View", width: 120px, height: 30px]
     Button(label: "Help")[class: "menu-help", width: 64px, height: 30px]
-<<<<<<< HEAD
     Button(label: "Menu")[class: "menu-help", id: "menu-anchor", width: 64px, height: 30px]
     Text("Xui showcase")[class: "menu-title", grow: 1, height: 30px]
   }
@@ -35,10 +34,6 @@ Window(title: "Xui widget and layout showcase", size: 1080x760)[platformTopMenu:
     MenuItem("-")
     MenuItem(label: "About this demo")[press: onMenuAction]
   }
-=======
-    Text("Xui showcase")[class: "menu-title", grow: 1, height: 30px]
-  }
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
   Column[class: "app", width: 100%, grow: 1, minSize: 0x0, pad: 18px, gap: 12px] {
     Row(gap: 16)[class: "masthead", width: 100%, align: Center, justify: SpaceBetween] {
       Column(gap: 3px)[grow: 1] {
@@ -482,11 +477,7 @@ Window(title: "Xui widget and layout showcase", size: 1080x760)[platformTopMenu:
             ScrollView[class: "page-scroll", width: 100%, height: 100%, vertical: true, horizontal: false] {
               Column[class: "page", gap: 14px, pad: 18px] {
                 Text("Declarative animation")[class: "section-title"]
-<<<<<<< HEAD
                 Text("Hover and press the buttons to transition their fill and glow. The second button finishes its current transition before applying hover-out. F4 shows Painter draw batches next to the FPS readout; it does not create frames while idle.")[class: "help"]
-=======
-                Text("Hover and press the button to transition its fill and glow. Twelve panels sample the same XSS keyframes; animation ticks stop when this tab is hidden or the finite animation ends.")[class: "help"]
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
                 Text("Start a paused keyframe from an application event. Once holds at 100%; Loop repeats until cancelled.")[class: "help"]
                 Row(gap: 8px)[width: 100%, align: Center] {
                   Button(label: "Play once")[id: "play-meter-once", press: onMeterOnce, class: "small-button", width: 96px, height: 34px]
@@ -496,10 +487,7 @@ Window(title: "Xui widget and layout showcase", size: 1080x760)[platformTopMenu:
                 }
                 Row(gap: 12px)[width: 100%, height: 72px, align: Center] {
                   Button(label: "Hover, then press")[id: "motion-button", class: "motion-button", width: 220px, height: 46px]
-<<<<<<< HEAD
                   Button(label: "Finish hover-out")[id: "finish-motion-button", class: "motion-button finish-hover", width: 190px, height: 46px]
-=======
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
                   Panel[class: "fade-card", width: 240px, height: 60px] { Text("One-shot fade on entry")[class: "fade-label"] }
                   ProgressBar[class: "motion-progress", width: 240px, height: 20px, indeterminate: true]
                 }

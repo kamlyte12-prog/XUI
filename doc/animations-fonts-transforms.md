@@ -24,7 +24,6 @@ ui.cancelAnimation("spinner");
 
 For an event-triggered value animation, give a `ProgressBar` a paused `value` keyframe in `.xss`, then call `playAnimation(id, Once)` from the button/event callback. Use `Loop` for a repeating animation and `cancelAnimation(id)` to stop at the current value. The GLFW showcase's Motion & Style → Animation tab demonstrates all three controls.
 
-<<<<<<< HEAD
 `Once` restarts from the first keyframe, plays one duration, and holds the final sample. `Loop` repeats until cancelled. A second play request replaces the current playback and starts over. The imperative `cancelAnimation(id)` stops immediately and leaves the current sample painted. Only visible, active animations schedule timer-driven frames. Paused and completed animations do not keep the idle loop awake. The GLFW platform pauses animation clocks while hidden or minimized, then resumes with elapsed animation time preserved; it continues while visible but unfocused. Custom platforms default to visible and should override `Platform::windowVisible()` if they support hiding/minimizing.
 
 Numbers with matching units, colors, and compatible transform function sequences interpolate. The `value` keyframe property currently updates numeric progress controls such as `ProgressBar`. Keyframes do not alter layout sizes, font face/weight, or arbitrary application values.
@@ -57,12 +56,6 @@ Button.exit { resting: { animation-cancel: finish } hover: { bg: #3A5FA8 }
 
 Press F4 in the GLFW showcase to display the previous completed frame's `Painter::Stats.drawCalls` beside the FPS readout. This counts backend-neutral draw-list batches, not GPU draw submissions. It updates when the app renders for another reason and does not force continuous rendering while idle. F3 still enables the FPS readout's continuous sampling mode.
 
-=======
-`Once` restarts from the first keyframe, plays one duration, and holds the final sample. `Loop` repeats until cancelled. A second play request replaces the current playback and starts over. Cancellation leaves the current sample painted. Application conditions are handled by calling `cancelAnimation(id)` from the application's event logic; the stylesheet does not contain application-specific predicates. Only visible, active animations schedule timer-driven frames. Paused and completed animations do not keep the idle loop awake. Visible-window background behavior was tested through the timer path, but minimized-window pausing is not currently reported by `Platform` and is not guaranteed.
-
-Numbers with matching units, colors, and compatible transform function sequences interpolate. The `value` keyframe property currently updates numeric progress controls such as `ProgressBar`. Keyframes do not alter layout sizes, font face/weight, or arbitrary application values.
-
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 ## Widget transforms
 
 The runtime accepts these functions in `.xss`:

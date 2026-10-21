@@ -257,34 +257,6 @@ Panel.conic { resting: { gradient: conic-gradient(45deg, #ff0000, #00ff00, #0000
 	CHECK(table.has(PropId::Opacity) && table.has(PropId::FontSize) && table.has(PropId::FontWeight));
 	CHECK(!errorsOf("Panel { resting: { gradient: radial-gradient(#fff) } }").empty());
 }
-
-TEST(xss_gradients_glow_alpha_and_existing_typography_compile) {
-	StringInterner in;
-	auto styles = mustCompile(in, R"(
-Button.demo {
-  resting: {
-    gradient: linear-gradient(25deg, #102030, #405060, #708090, #a0b0c0),
-    glow: 12px 2px #4488cc80,
-    bg: #11223344,
-    opacity: 0.6,
-    font-size: 18px,
-    font-weight: 700
-  }
-}
-Panel.radial { resting: { gradient: radial-gradient(#ffffff, #000000) } }
-Panel.conic { resting: { gradient: conic-gradient(45deg, #ff0000, #00ff00, #0000ff) } }
-)");
-	MatchInput match; match.type = in.intern("Button");
-	const StrId klass = in.intern("demo"); match.classes = std::span<const StrId>(&klass, 1);
-	PropTable table; styles.resolve(styles.match(match), stateBit(State::Resting), 0, table);
-	CHECK(table.has(PropId::Gradient)); CHECK_EQ(table.get(PropId::Gradient).count, 6);
-	CHECK(in.view(table.get(PropId::Gradient).atoms[0].str()) == "linear-gradient");
-	CHECK_NEAR(table.get(PropId::Gradient).atoms[1].num, 25.f * 0.0174532925f, 1e-5f);
-	CHECK(table.has(PropId::Glow) && table.get(PropId::Glow).count == 3);
-	CHECK(table.has(PropId::Bg) && table.get(PropId::Bg).atoms[0].bits == 0x11223344u);
-	CHECK(table.has(PropId::Opacity) && table.has(PropId::FontSize) && table.has(PropId::FontWeight));
-	CHECK(!errorsOf("Panel { resting: { gradient: radial-gradient(#fff) } }").empty());
-}
 TEST(xss_transform_functions_flatten) {
 	StringInterner in;
 	StyleSheet sh = mustCompile(in, "Card { hover: { transform: translate(0px, -2px) scale(1.02) } }");

@@ -451,10 +451,7 @@ namespace xui {
 
 		m_dockHosts.clear();
 		m_titleBars.clear();
-<<<<<<< HEAD
 		m_pendingMenuAnchors.clear();
-=======
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 		m_clientChrome = false;
 		m_styles = &styles;
 		m_strings = &strings;
@@ -706,11 +703,8 @@ namespace xui {
 		node.dockHost = typeIs(source.type, *m_strings, "DockHost") || typeIs(source.type, *m_strings, "DockSpace");
 		node.dockPanel = typeIs(source.type, *m_strings, "DockPanel");
 		node.titleBar = typeIs(source.type, *m_strings, "TitleBar");
-<<<<<<< HEAD
 		node.menu = typeIs(source.type, *m_strings, "Menu");
 		node.menuItem = typeIs(source.type, *m_strings, "MenuItem");
-=======
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 		node.scrollView = typeIs(source.type, *m_strings, "ScrollView");
 		node.slider = typeIs(source.type, *m_strings, "Slider");
 		node.progressBar = typeIs(source.type, *m_strings, "ProgressBar");
@@ -833,7 +827,6 @@ namespace xui {
 			}
 			if (node.titleBar && name == "platformButtons" && prop.role == XPropRole::Value && prop.expr < document.exprs.size())
 				node.titleBarButtons = document.exprs[prop.expr].kind != XExprKind::Bool || document.exprs[prop.expr].bval;
-<<<<<<< HEAD
 			if (node.menu && name == "anchor" && prop.role == XPropRole::Value) {
 				node.menuAnchor = 0xFFFFFFFEu;   // resolved by id after the whole tree is built
 				m_pendingMenuAnchors.push_back({ runtimeIndex, std::string(value) });
@@ -843,8 +836,6 @@ namespace xui {
 			if (node.menuItem && name == "shortcut" && prop.role == XPropRole::Value) node.menuShortcut.assign(value);
 			if (node.menuItem && name == "label" && prop.role == XPropRole::Value) node.text.assign(value);
 			if (node.menu && name == "label" && prop.role == XPropRole::Value) node.text.assign(value);
-=======
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 			if (node.scrollView && name == "scrollSpeed" && prop.expr < document.exprs.size() && document.exprs[prop.expr].kind == XExprKind::Number)
 				{ node.scrollSpeed = std::clamp(document.exprs[prop.expr].num, 1.f, 400.f); node.xuiScrollSpeed = true; }
 			else if (node.scrollView && name == "scrollBehavior") { node.scrollSmooth = value == "smooth" || value == "Smooth"; node.xuiScrollBehavior = true; }
@@ -1059,7 +1050,6 @@ namespace xui {
 			node.titleButtonStyleSet = m_styles->match(part);
 			m_titleBars.push_back(runtimeIndex);
 		}
-<<<<<<< HEAD
 		if (node.numberField || node.stepper) {
 			MatchInput part;
 			part.type = m_strings->intern("NumberButton");
@@ -1067,8 +1057,6 @@ namespace xui {
 			part.classes = node.classes;
 			node.numberButtonStyleSet = m_styles->match(part);
 		}
-=======
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 		m_styles->resolve(node.styleSet, stateBit(State::Resting), m_theme, node.style);
 		if (node.scrollView) {
 			if (node.style.has(PropId::ScrollbarSize)) node.scrollBarSize = std::clamp(number(node.style.get(PropId::ScrollbarSize), 0, 10.f), 4.f, 24.f);
@@ -1721,7 +1709,6 @@ namespace xui {
 		return regions;
 	}
 
-<<<<<<< HEAD
 	// ---- popup menus ---------------------------------------------------------------------------
 	// Rows are the retained MenuItem/Separator children (never laid out); geometry is computed
 	// on demand so hit-testing, painting and keyboard navigation share one source of truth.
@@ -2036,8 +2023,6 @@ namespace xui {
 		return false;
 	}
 
-=======
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 	Rect UiRuntime::scrollBarRect(u32 index, bool horizontal, Rect* trackOut) const {
 		if (index >= m_nodes.size() || !m_nodes[index].scrollView || m_nodes[index].scrollBarVisibility == 2) return {};
 		const Node& node = m_nodes[index];
@@ -2289,7 +2274,6 @@ namespace xui {
 			struct ScrollClipScope { Painter& painter; u32 count = 0; ~ScrollClipScope() { while (count--) painter.popClip(); } } scrollClips{ painter };
 			for (u32 parent = node.parentIndex; parent != 0xFFFFFFFFu && parent < m_nodes.size(); parent = m_nodes[parent].parentIndex)
 				if (m_nodes[parent].scrollView) { painter.pushClip(m_layout.absRect(m_nodes[parent].layout)); ++scrollClips.count; }
-<<<<<<< HEAD
 			StateMask states = activeStates(node);
 			const StateMask previousStates = node.resolvedStates;
 			bool finishCurrent = false;
@@ -2309,10 +2293,6 @@ namespace xui {
 					node.keyframeFinishRequested = true;
 				}
 			}
-=======
-			const StateMask states = activeStates(node);
-			const StateMask previousStates = node.resolvedStates;
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 			const bool stateChanged = node.styleResolved && node.resolvedStates != states;
 			PropTable previousStyle;
 			if (stateChanged) previousStyle = node.style;
@@ -2361,7 +2341,6 @@ namespace xui {
 					if (transition.allProps) for (PropId property : animatable) addTween(property);
 					else addTween(transition.prop);
 				}
-<<<<<<< HEAD
 				// animation-keep: until-done — a mid-flight transition animates to the new state's
 				// values instead of snapping when the state exits before the tween finished. The
 				// first declared transition supplies timing for properties without a matching pair.
@@ -2387,8 +2366,6 @@ namespace xui {
 						}
 					}
 				}
-=======
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 			}
 			// Declarative keyframes are sampled only while the named animation is active. Static
 			// state styles are resolved first, then animated paint properties are overlaid.
@@ -2396,7 +2373,6 @@ namespace xui {
 			if (node.style.has(PropId::Animation) && !node.animationCancelled) {
 				const StyleValue& animation = node.style.get(PropId::Animation);
 				if (animation.count >= 2 && animation.atoms[0].kind == AtomKind::Ident) {
-<<<<<<< HEAD
 					node.keyframeCancelOverride = -1;
 					for (u8 arg = 2; arg < animation.count; ++arg) if (animation.atoms[arg].kind == AtomKind::Ident) {
 						const std::string_view modifier = m_strings->view(animation.atoms[arg].str());
@@ -2407,17 +2383,12 @@ namespace xui {
 					const bool widgetFinish = node.style.has(PropId::AnimationCancel) && cancel.count && cancel.atoms[0].kind == AtomKind::Ident
 						&& m_strings->view(cancel.atoms[0].str()) == "finish";
 					node.keyframeCancelFinish = node.keyframeCancelOverride >= 0 ? node.keyframeCancelOverride == 1 : widgetFinish;
-=======
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 					const StrId name = animation.atoms[0].str();
 					if (node.keyframeName != name) {
 						node.keyframeName = name;
 						node.keyframeStart = now;
-<<<<<<< HEAD
 						node.keyframeFinishRequested = false;
 						node.keyframeStopAt = {};
-=======
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 					}
 					node.keyframeDurationMs = animationDurationMs(animation.atoms[1]);
 					node.keyframeIterations = 1;
@@ -2445,15 +2416,10 @@ namespace xui {
 					const f32 duration = std::max(1.f, node.keyframeDurationMs);
 					const f32 elapsed = std::chrono::duration<f32, std::milli>(now - node.keyframeStart).count();
 					const f32 total = duration * static_cast<f32>(node.keyframeIterations);
-<<<<<<< HEAD
 					const bool finishCycle = node.keyframeFinishRequested && node.keyframeStopAt.time_since_epoch().count() != 0 && now >= node.keyframeStopAt;
 					node.keyframeActive = !paused && !finishCycle && (node.keyframeInfinite || elapsed < total);
 					f32 progress = paused ? 0.f : (finishCycle ? 1.f : (node.keyframeActive || node.keyframeInfinite ? std::fmod(elapsed, duration) / duration : 1.f));
 					if (finishCycle) { node.keyframeFinishRequested = false; node.keyframeStopAt = {}; }
-=======
-					node.keyframeActive = !paused && (node.keyframeInfinite || elapsed < total);
-					f32 progress = paused ? 0.f : (node.keyframeActive || node.keyframeInfinite ? std::fmod(elapsed, duration) / duration : 1.f);
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 					progress = easeProgress(progress, node.keyframeEase);
 					if (const KeyframesDef* def = m_styles->findKeyframes(name)) {
 						const auto frames = m_styles->frames(*def);
@@ -2484,7 +2450,6 @@ namespace xui {
 				// Removing an animation and applying it later starts a fresh playback.
 				node.keyframeName = {};
 				node.keyframeStart = {};
-<<<<<<< HEAD
 				node.keyframeFinishRequested = false;
 				node.keyframeStopAt = {};
 				node.keyframeCancelFinish = false;
@@ -2502,12 +2467,6 @@ namespace xui {
 					it = node.styleTweens.erase(it);
 					continue;
 				}
-=======
-			}
-			for (auto it = node.styleTweens.begin(); it != node.styleTweens.end();) {
-				const f32 elapsed = std::chrono::duration<f32, std::milli>(now - it->start).count() - it->delayMs;
-				if (elapsed >= it->durationMs) { it = node.styleTweens.erase(it); continue; }
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 				const f32 t = easeProgress(std::max(0.f, elapsed / std::max(1.f, it->durationMs)), it->easing);
 				StyleValue value;
 				if (interpolateStyle(it->from, it->to, t, value)) node.style.v[static_cast<int>(it->property)] = value;
@@ -3495,10 +3454,7 @@ namespace xui {
 		m_pointerPosition = point;
 		bool changed = dockPointerMove(point);
 		changed |= titlePointerMove(point);
-<<<<<<< HEAD
 		changed |= menuPointerMove(point);
-=======
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 		if (m_dragScroll < m_nodes.size()) {
 			const u32 index = m_dragScroll;
 			Rect track;
@@ -3732,7 +3688,6 @@ namespace xui {
 				popupCoversPoint = true; break;
 			}
 		}
-<<<<<<< HEAD
 		for (u32 i = 0; i < m_nodes.size() && !popupCoversPoint; ++i) {
 			const Node& node = m_nodes[i];
 			if (!node.menu || !node.popupOpen || !isNodeVisible(i)) continue;
@@ -3745,8 +3700,6 @@ namespace xui {
 		if (!popupCoversPoint && menuOpenAtAnchor(point, button)) return true;
 		if (menuPointerDown(point)) return true;
 		if (button == MouseButton::Right) return popupCoversPoint;   // right-press never presses widgets
-=======
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 		if (!popupCoversPoint && titlePointerDown(point)) return true;
 		if (!popupCoversPoint && dockPointerDown(point)) return true;
 		for (std::size_t i = popupCoversPoint ? 0 : m_nodes.size(); i > 0; --i) {
@@ -4926,19 +4879,12 @@ namespace xui {
 		for (u32 i = 0; i < m_nodes.size(); ++i) {
 			const Node& node = m_nodes[i];
 			if (!isNodeVisible(i)) continue;
-<<<<<<< HEAD
 			const f64 frameDelay = m_animationDeadline.time_since_epoch().count() == 0
 				? 1.0 / 60.0 : std::max(0.0, std::chrono::duration<f64>(m_animationDeadline - now).count());
 			if (node.keyframeActive) { delay = delay < 0.0 ? frameDelay : std::min(delay, frameDelay); break; }
 			for (const StyleTween& tween : node.styleTweens) {
 				const auto ready = tween.start + std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<f64, std::milli>(tween.delayMs));
 				const f64 tweenDelay = now < ready ? std::chrono::duration<f64>(ready - now).count() : frameDelay;
-=======
-			if (node.keyframeActive) { delay = delay < 0.0 ? 1.0 / 60.0 : std::min(delay, 1.0 / 60.0); break; }
-			for (const StyleTween& tween : node.styleTweens) {
-				const auto ready = tween.start + std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<f64, std::milli>(tween.delayMs));
-				const f64 tweenDelay = now < ready ? std::chrono::duration<f64>(ready - now).count() : 1.0 / 60.0;
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 				delay = delay < 0.0 ? tweenDelay : std::min(delay, tweenDelay);
 			}
 		}

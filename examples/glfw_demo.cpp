@@ -233,10 +233,7 @@ int main(int argc, char** argv) {
 		if (arg == "--profile") profileCase = "idle";
 		else if (arg == "--profile-glow") profileCase = "glow";
 		else if (arg == "--profile-animation") profileCase = "animation";
-<<<<<<< HEAD
 		else if (arg == "--profile-animation-timer") profileCase = "animation-timer";
-=======
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 		else if (arg == "--profile-transform") profileCase = "transform";
 		else if (arg == "--profile-docking") profileCase = "docking";
 		else if (arg == "--profile-menubar") profileCase = "menubar";
@@ -293,11 +290,7 @@ int main(int argc, char** argv) {
 		std::cerr << app.lastError() << '\n';
 		return 1;
 	}
-<<<<<<< HEAD
 	if (profileCase == "glow" || profileCase == "animation" || profileCase == "animation-timer" || profileCase == "transform") {
-=======
-	if (profileCase == "glow" || profileCase == "animation" || profileCase == "transform") {
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 		app.runtime().setValue("demo-sections", xui::u32{ 7 });
 		app.runtime().setValue("motion-tabs", xui::u32{ profileCase == "glow" ? 0u : 1u });
 		app.runtime().layout(1080.f, 760.f);

@@ -175,18 +175,12 @@ namespace xui {
 			std::vector<StyleTween> styleTweens;
 			StrId keyframeName;
 			std::chrono::steady_clock::time_point keyframeStart{};
-<<<<<<< HEAD
 			std::chrono::steady_clock::time_point keyframeStopAt{};
 			f32 keyframeDurationMs = 0;
 			u32 keyframeIterations = 1;
 			bool keyframeInfinite = false, keyframeActive = false;
 			bool keyframeCancelFinish = false, keyframeFinishRequested = false;
 			i8 keyframeCancelOverride = -1; // -1 uses animation-cancel, otherwise 0=stop / 1=finish
-=======
-			f32 keyframeDurationMs = 0;
-			u32 keyframeIterations = 1;
-			bool keyframeInfinite = false, keyframeActive = false;
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 			bool animationTriggered = false, animationCancelled = false;
 			AnimationMode animationMode = AnimationMode::Once;
 			Easing keyframeEase;
@@ -208,7 +202,6 @@ namespace xui {
 			bool indeterminate = false;
 			bool dockHost = false, dockPanel = false, dockClosable = true, dockClosed = false;
 			bool dockFloatingInitial = false;
-<<<<<<< HEAD
 			bool menu = false, menuItem = false, submenuOpen = false;
 			std::string menuShortcut;
 			std::string menuSelectedItem;   // Menu: label of the last activated item
@@ -222,10 +215,6 @@ namespace xui {
 			StyleSetId titleButtonStyleSet;
 			StyleSetId numberButtonStyleSet;
 			bool inputInvalid = false;   // NumberField: current text does not parse
-=======
-			bool titleBar = false, titleBarButtons = true;
-			StyleSetId titleButtonStyleSet;
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 			Vec2 dockPreferredSize{ 360.f, 260.f };
 			f32 dockHeaderHeight = 30.f, dockGutter = 5.f;
 			bool scrollSmooth = false, scrollAnimating = false, scrollDragX = false, scrollDragY = false;
@@ -310,7 +299,6 @@ namespace xui {
 		bool titlePointerDown(Vec2 point);
 		bool titlePointerMove(Vec2 point);
 		bool titlePointerUp(Vec2 point);
-<<<<<<< HEAD
 		// Popup menus: virtual anchored overlays (rows are retained nodes, never laid out).
 		u32 nodeIndexOf(const Node& node) const;
 		u32 firstMenuChildIndex(u32 owner) const;
@@ -327,8 +315,6 @@ namespace xui {
 		bool menuRowPress(u32 itemIndex, const Rect& row);
 		void menuActivateItem(Node& item);
 		bool menuKeyDown(Key key);
-=======
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 		DockHostState* dockHostForPanel(u32 panelNode);
 		const DockHostState* dockHostForPanel(u32 panelNode) const;
 		DockHostState* dockHostAt(Vec2 point);
@@ -356,10 +342,7 @@ namespace xui {
 		std::vector<u32> m_interactiveNodes;
 		std::vector<u32> m_splitNodes;
 		std::vector<u32> m_titleBars;
-<<<<<<< HEAD
 		std::vector<std::pair<u32, std::string>> m_pendingMenuAnchors;   // menu node -> authored anchor id
-=======
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 		Platform* m_platform = nullptr;
 		WindowHandle m_windowHandle{};
 		bool m_clientChrome = false;
@@ -389,11 +372,8 @@ namespace xui {
 		Renderer* m_renderer = nullptr;
 		std::chrono::steady_clock::time_point m_spinnerDeadline{};
 		std::chrono::steady_clock::time_point m_animationDeadline{};
-<<<<<<< HEAD
 		std::chrono::steady_clock::time_point m_animationsPausedAt{};
 		bool m_animationsPaused = false;
-=======
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 		std::chrono::steady_clock::time_point m_caretBlinkDeadline{};
 		bool m_caretVisible = true;
 		bool m_showWhitespace = false;

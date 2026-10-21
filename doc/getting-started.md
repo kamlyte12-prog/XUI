@@ -25,11 +25,7 @@ target_link_libraries(my_app PRIVATE xui_widgets)
 
 `xui_widgets` publicly links the core, asset parser, layout, rendering, and text libraries used by the facade.
 
-<<<<<<< HEAD
 The cross-platform demo target is `xui_glfw_demo`. It uses the bundled GLFW source and requires system OpenGL development files. The GLFW platform adapter and OpenGL renderer are separate optional targets in `backends/glfw/` and `backends/opengl/`; the demo links both without adding either implementation to the core libraries. The default launch loads `showcase.xui` and `showcase.xss`. Press F3 to toggle FPS and F4 to show draw batches without enabling continuous rendering.
-=======
-The cross-platform demo target is `xui_glfw_demo`. It uses the bundled GLFW source and requires system OpenGL development files. The GLFW platform adapter and OpenGL renderer are separate optional targets in `backends/glfw/` and `backends/opengl/`; the demo links both without adding either implementation to the core libraries. The default launch loads `showcase.xui` and `showcase.xss`. Press F3 to toggle the FPS counter.
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 
 To build the GLFW demo explicitly:
 

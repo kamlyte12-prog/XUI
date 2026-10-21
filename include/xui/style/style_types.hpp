@@ -41,11 +41,7 @@ namespace xui {
 	enum class PropId : u8 {
 		Bg, Fg, Border, Radius, Pad, Margin, Gap, Size, MinSize, MaxSize, MinWidth, MaxWidth, MinHeight, MaxHeight, Opacity, Shadow, Glow, Gradient, Blur, Transform,
 		Font, FontSize, FontWeight, LetterSpacing, Align, Justify, Grow, Shrink, Cursor, ZIndex, Clip, Overflow,
-<<<<<<< HEAD
 		Animation, AnimationKeep, AnimationCancel, ScrollTrack, ScrollThumb, ScrollbarSize, ScrollbarVisibility, ScrollBehavior, ScrollSpeed, Value, Count
-=======
-		Animation, ScrollTrack, ScrollThumb, ScrollbarSize, ScrollbarVisibility, ScrollBehavior, ScrollSpeed, Value, Count
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 	};
 	constexpr int kPropCount = static_cast<int>(PropId::Count);
 	enum class Expand : u8 { None, Sides4, Pair };

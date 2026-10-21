@@ -44,12 +44,8 @@ Side shorthands use one to four values: one applies to all sides; two means vert
 | `z-index` | One number | Accepted and compiled but not applied. Runtime stacking follows tree order; tab headers and popups use fixed overlay layers. |
 | `clip` | One identifier or number | Accepted and compiled; runtime clips text to widget bounds and popups to their boxes, but does not apply this property. |
 | `overflow` | 1–2 identifiers | Accepted and compiled; not interpreted by the standard runtime. |
-<<<<<<< HEAD
 | `animation` | `name duration [iterations|infinite|paused] [easing] [cancel(stop|finish)]` | Named keyframes start automatically unless `paused` is present. `cancel(...)` overrides the widget's `animation-cancel` rule for this animation. Duration accepts `ms` or `s`; default is one iteration. |
 | `animation-cancel` | `stop` or `finish` | Per-widget cancellation policy. `stop` is the default and applies the newest state immediately. `finish` completes the current transition target or current keyframe iteration before applying the newest state. |
-=======
-| `animation` | `name duration [iterations|infinite|paused] [easing]` | Named keyframes start automatically unless `paused` is present. `Xui::playAnimation(id, Once|Loop)` starts/restarts them; `cancelAnimation(id)` freezes the current sample. Duration accepts `ms` or `s`; default is one iteration. |
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 | `value` | One number, inside keyframes | Animates the normalized value of `ProgressBar` and other runtime controls that expose a numeric value; the ordinary visual style rule does not set control state. |
 | `scroll-track` | One color or color token | Scrollbar track tint for `ScrollView`; default translucent dark track. |
 | `scroll-thumb` | One color or color token | Scrollbar thumb tint; participates in `hover` and `pressed` state resolution. |
@@ -94,11 +90,8 @@ Every runtime-created authored node receives a matched `StyleSetId` and resolves
 | `Spinner` | Eight-tick geometry and 80 ms step cadence | Animation geometry is a control behavior; tick color and opacity inherit the resolved foreground/disabled state. |
 | `SearchField` | Clear affordance geometry is fixed | It is a built-in hit target; field surface, text, border, radius, opacity and states remain style-driven. |
 | `TitleBar` caption zones | Minimize/maximize glyph shapes are fixed painter marks; zones are equal-width (46 px) at the bar's right end | Zone geometry is owned by the window-chrome layer so children can never underlap it. The `TitleButton` selector styles zone `fg`, `bg`, `radius`, `opacity`, and `hover`/`pressed` states; the bar itself is a normal `TitleBar` style target. |
-<<<<<<< HEAD
 | `NumberField`/`Stepper` step buttons | −/+ glyph geometry is fixed painter marks in a reserved right zone | The `NumberButton` selector styles zone `fg`, `bg`, `radius`, and `hover`/`pressed` states; the field itself keeps the shared surface/typography/border states plus the `error` state while its text does not parse. |
 | `Menu` popup rows | Popup surface geometry (row heights, insets, flip rules) is internal; rows are virtual targets, not laid-out children | Per-item selectors are not available. The `Menu` rule styles the popup surface; the `MenuItem` rule styles every row with `resting`/`hover`/`checked`/`disabled` states. |
-=======
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 | Theme-driven layout metrics | Changing palette re-resolves paint/text but does not reconstruct the merged `.xui`/`.xss` `LayoutStyle` | Explicit `.xui` geometry precedence must be preserved during a theme swap; keep `pad`, `gap`, `size`, min/max, and margins theme-invariant for now. |
 
 No widget type is wholly unstyleable in the standard runtime. `blur`, `z-index`, and generic `overflow` are accepted by the compiler but are not applied by the runtime. Transformed clips use axis-aligned scissor bounds, and overlay popups remain in window coordinates.
@@ -124,17 +117,10 @@ Button.action {
 }
 ```
 
-<<<<<<< HEAD
 Named keyframes use `animation: name duration [count|infinite|paused] [easing] [cancel(stop|finish)]`:
 
 ```xss
 Panel.pulse { resting: { animation: pulse 900ms infinite ease-in-out cancel(finish) } }
-=======
-Named keyframes use `animation: name duration [count|infinite] [easing]`:
-
-```xss
-Panel.pulse { resting: { animation: pulse 900ms infinite ease-in-out } }
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 keyframes pulse {
   from { opacity: 0.5 }
   50% { opacity: 1 }
@@ -142,11 +128,7 @@ keyframes pulse {
 }
 ```
 
-<<<<<<< HEAD
 Numbers with matching units, colors, and compatible transform function sequences animate. Layout and font face/weight are not interpolated. `animation: name duration paused ...` holds the first keyframe until `Xui::playAnimation(id, mode)` is called. `Once` plays one cycle and leaves the last sample applied; `Loop` repeats until `cancelAnimation(id)`, which always stops immediately and holds its current sample. A later play request overrides and restarts playback. Visible animations schedule frames on a 16 ms timer; static and paused screens return to the platform event wait. GLFW reports pointer exit and window visibility, so hover-out animations run and hidden/minimized windows pause animation clocks. See [the motion showcase](../examples/showcase.xui) and [stylesheet](../examples/showcase.xss).
-=======
-Numbers with matching units, colors, and compatible transform function sequences animate. Layout and font face/weight are not interpolated. `animation: name duration paused ...` holds the first keyframe until `Xui::playAnimation(id, mode)` is called. `Once` plays one cycle and leaves the last sample applied; `Loop` repeats until `cancelAnimation(id)`, which holds its current sample. A later play request overrides and restarts playback. The runtime schedules frames only while visible animations are active; static and paused screens return to the event wait. See [the motion showcase](../examples/showcase.xui) and [stylesheet](../examples/showcase.xss).
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 
 ## Cursor values
 

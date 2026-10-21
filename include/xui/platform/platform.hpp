@@ -149,13 +149,10 @@ namespace xui {
 		/// Request a window close (equivalent to the user clicking the native close button);
 		/// delivered as a CloseRequest/Quit event, not an immediate teardown.
 		virtual void closeWindow(WindowHandle) {}
-<<<<<<< HEAD
 		/// Border inset (physical pixels from each window edge/corner) that activates borderless
 		/// edge resize. 0 (default) uses the platform's native frame thickness. Backends without
 		/// client-side resize borders may ignore or clamp this.
 		virtual void setResizeInset(WindowHandle, f32) {}
-=======
->>>>>>> d262d3498d1532fcaf2d920c57fbc4ddc03ae8e3
 	};
 
 } // namespace xui

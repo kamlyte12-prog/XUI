@@ -10,15 +10,18 @@ tokens {
 Window { resting: { bg: color.canvas } }
 Column.page { resting: { bg: #916920 } }
 Row.bar { resting: { bg: color.muted, fg: color.canvas } }
-Button.primary {
-    resting: { bg: color.primary, fg: color.text }
-    hover: { bg: color.primary.hover }
-    pressed: { opacity: 0.85 }
-    disabled: { opacity: 0.45 }
-}
-Button.bordered {
-    resting: { bg: color.canvas, fg: color.primary, pad: 8px, radius: 5px, border: 2px solid color.primary, font-weight: 700 }
-    hover: { bg: color.primary, fg: color.text }
-    pressed: { opacity: 0.85 }
-    disabled: { opacity: 0.45 }
+// Button.primary {
+//     resting: { bg: color.primary, fg: color.text }
+//     hover: { bg: color.primary.hover }
+//     pressed: { opacity: 0.85 }
+//     disabled: { opacity: 0.45 }
+// }
+// Button.bordered {
+//     resting: { bg: color.canvas, fg: color.primary, pad: 8px, radius: 5px, border: 2px solid color.primary, font-weight: 700 }
+//     hover: { bg: color.primary, fg: color.text }
+//     pressed: { opacity: 0.85 }
+//     disabled: { opacity: 0.45 }
+// }
+Text.title {
+    resting: { font-weight: 400 }
 }

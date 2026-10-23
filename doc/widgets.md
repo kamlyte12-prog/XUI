@@ -54,7 +54,7 @@ Panel[class: "card"] {
 
 ### `CheckList`
 
-A vertical container for `CheckItem` children. The schema accepts a `gap` property; set spacing through `.xss gap` for current runtime behavior.
+A vertical container for `CheckItem` children. The schema accepts a `gap` property; set spacing through `.xss gap` for current runtime behavior. Clicking an item or toggling it with Space/Enter updates the item's boolean value and the parent list's aggregate value.
 
 ```xui
 CheckList[class: "checklist"] {
@@ -156,7 +156,7 @@ Use a normal `Button(label: ...)` when the button needs only one label. Child co
 
 ### `CheckItem`
 
-A checkbox row with a label and retained checked state. Clicking or pressing Space/Enter toggles it. The runtime exposes visual checked state but does not yet expose a general checklist value/binding API.
+A checkbox row with a label and retained checked state. Clicking or pressing Space/Enter toggles it. With its own `id`, it exposes a `bool`. A `CheckList` with an `id` exposes `CheckListValue`, which is a vector of the IDs of checked, directly nested `CheckItem` children in document order. `setValue(listId, CheckListValue{...}, notify)` validates all IDs before changing state; unknown or nested non-child IDs fail without a partial update. When requested, a changed list emits its authored `change` callback once.
 
 ```xui
 CheckItem(label: "Release is ready", checked: false)[class: "check-item"]

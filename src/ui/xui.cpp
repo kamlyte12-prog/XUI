@@ -234,9 +234,14 @@ namespace xui {
 				const f64 timerDelay = visible ? m_runtime.nextTimerDelay() : -1.0;
 				if (options.maxSeconds > 0) {
 					const f64 remaining = std::max(0.0, options.maxSeconds - m_stats.elapsedSeconds);
-					m_platform->waitEvents(timerDelay < 0 ? remaining : std::min(remaining, timerDelay));
+					const f64 wait = timerDelay < 0 ? remaining : std::min(remaining, timerDelay);
+					// A zero timeout means "wait indefinitely" in Platform. A timer already due
+					// must instead be processed by the next loop iteration; passing zero here can
+					// strand animations, caret blinks, or bounded runs until unrelated input arrives.
+					if (wait > 0.0) m_platform->waitEvents(wait);
 				}
-				else m_platform->waitEvents(timerDelay < 0 ? 0.0 : timerDelay);
+				else if (timerDelay < 0.0) m_platform->waitEvents(0.0);
+				else if (timerDelay > 0.0) m_platform->waitEvents(timerDelay);
 			}
 		}
 		m_stats.elapsedSeconds = std::chrono::duration<f64>(Clock::now() - start).count();

@@ -2,6 +2,7 @@
 set(LAYOUT_RESOURCE_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/layout.xui"
     "${CMAKE_CURRENT_SOURCE_DIR}/layout.xss"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Roboto.ttf"
 )
 
 # A custom command per resource: copies only when the source is newer.

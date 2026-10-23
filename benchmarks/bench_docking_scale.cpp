@@ -3,6 +3,7 @@
 #include <xui/text/text_layout.hpp>
 #include <xui/ui/runtime.hpp>
 #include <xui/render/painter.hpp>
+#include <cmath>
 #include <chrono>
 #include <cstdio>
 #include <string>
@@ -32,20 +33,10 @@ namespace {
 			"    DockPanel(title: \"Root\")[id: \"p0\", region: \"Center\", minSize: 40x40] { Text(\"Root\") }\n";
 		for (u32 i = 1; i < panels; ++i)
 			source += "    DockPanel(title: \"Panel\")[id: \"p" + std::to_string(i) +
-				"\", region: \"Left\", target: \"p" + std::to_string(i - 1) + ", minSize: 8x8] { Text(\"P" +
+				"\", region: \"Left\", target: \"p" + std::to_string(i - 1) + "\", minSize: 8x8] { Text(\"P" +
 				std::to_string(i) + "\") }\n";
 		source += "  }\n}\n";
 		return source;
-	}
-
-	void buildFor(UiRuntime& ui, const std::string& source, StringInterner& strings, TextSystem& text) {
-		auto document = parseXui(source, "bench-docking-scale.xui", strings);
-		auto styles = compileXss("", "bench-docking-scale.xss", strings);
-		std::string error;
-		if (!document || !styles || !ui.build(*document, *styles, strings, text, {}, error)) {
-			std::fprintf(stderr, "fixture build failed: %s\n", error.c_str());
-			std::exit(1);
-		}
 	}
 
 	template <typename Fn>
@@ -56,11 +47,21 @@ namespace {
 		return std::chrono::duration<f64, std::micro>(end - begin).count() / iterations;
 	}
 
-	void runScenario(const char* name, const std::string& source, u32 panels, u32 iterations) {
+	bool runScenario(const char* name, const std::string& source, u32 panels, u32 iterations) {
 		StringInterner strings;
 		TextSystem text;
 		UiRuntime ui;
-		buildFor(ui, source, strings, text);
+		auto document = parseXui(source, "bench-docking-scale.xui", strings);
+		auto styles = compileXss("DockHost { resting: { pad: 0px } }", "bench-docking-scale.xss", strings);
+		std::string error;
+		if (!document || !styles) {
+			std::fprintf(stderr, "%s: fixture parse failed\n", name);
+			std::exit(1);
+		}
+		if (!ui.build(*document, *styles, strings, text, {}, error)) {
+			std::fprintf(stderr, "%s: fixture runtime build failed: %s\n", name, error.c_str());
+			std::exit(1);
+		}
 		ui.layout(1600.f, 900.f);
 
 		const f64 idle = micros([&](u32) { ui.layout(1600.f, 900.f); }, iterations);
@@ -81,10 +82,17 @@ namespace {
 		const auto panelValue = [&](u32 index) {
 			const std::string id = "p" + std::to_string(index);
 			const std::optional<UiValue> value = ui.value(id);
+			if (!value || !std::holds_alternative<DockPanelValue>(*value)) {
+				std::fprintf(stderr, "%s: DockPanel value unavailable for %s\n", name, id.c_str());
+				std::exit(1);
+			}
 			return std::get<DockPanelValue>(*value);
 		};
 		const DockPanelValue root = panelValue(0);
 		const DockPanelValue grab = panelValue(panels - 1);
+		std::vector<DockPanelValue> dockPanels;
+		dockPanels.reserve(panels);
+		for (u32 index = 0; index < panels; ++index) dockPanels.push_back(panelValue(index));
 		Vec2 grabPoint{ grab.bounds.x + 20.f, grab.bounds.y + 12.f };
 		ui.pointerDown(grabPoint);
 		const f64 drag = micros([&](u32 i) {
@@ -94,12 +102,37 @@ namespace {
 		ui.keyDown(Key::Escape);
 
 		// Splitter resize: hold the gutter between the root and the panel docked into it.
-		const DockPanelValue first = panelValue(1);
-		const bool horizontalSplit = first.bounds.w < root.bounds.w - 1.f; // side-by-side children
-		Vec2 gutterPoint = horizontalSplit
-			? Vec2{ first.bounds.right() + 3.5f, first.bounds.y + 60.f }
-			: Vec2{ first.bounds.x + 60.f, first.bounds.bottom() + 3.5f };
-		if (!ui.pointerDown(gutterPoint)) { std::fprintf(stderr, "%s: splitter hit test failed\n", name); return; }
+		Vec2 gutterPoint{};
+		bool horizontalSplit = true;
+		bool splitterFound = false;
+		for (u32 a = 0; a < dockPanels.size() && !splitterFound; ++a) {
+			for (u32 b = a + 1; b < dockPanels.size() && !splitterFound; ++b) {
+				const Rect first = dockPanels[a].bounds;
+				const Rect second = dockPanels[b].bounds;
+				const f32 overlapY = std::min(first.bottom(), second.bottom()) - std::max(first.y, second.y);
+				const f32 overlapX = std::min(first.right(), second.right()) - std::max(first.x, second.x);
+				Vec2 candidate{};
+				if (overlapY > 40.f && std::abs(first.right() - second.x) <= 8.f) {
+					horizontalSplit = true;
+					candidate = { (first.right() + second.x) * 0.5f, (std::max(first.y, second.y) + std::min(first.bottom(), second.bottom())) * 0.5f };
+				}
+				else if (overlapY > 40.f && std::abs(second.right() - first.x) <= 8.f) {
+					horizontalSplit = true;
+					candidate = { (second.right() + first.x) * 0.5f, (std::max(first.y, second.y) + std::min(first.bottom(), second.bottom())) * 0.5f };
+				}
+				else if (overlapX > 40.f && std::abs(first.bottom() - second.y) <= 8.f) {
+					horizontalSplit = false;
+					candidate = { (std::max(first.x, second.x) + std::min(first.right(), second.right())) * 0.5f, (first.bottom() + second.y) * 0.5f };
+				}
+				else if (overlapX > 40.f && std::abs(second.bottom() - first.y) <= 8.f) {
+					horizontalSplit = false;
+					candidate = { (std::max(first.x, second.x) + std::min(first.right(), second.right())) * 0.5f, (second.bottom() + first.y) * 0.5f };
+				}
+				else continue;
+				if (ui.pointerDown(candidate)) { gutterPoint = candidate; splitterFound = true; }
+			}
+		}
+		if (!splitterFound) { std::fprintf(stderr, "%s: no splitter found between measured panel bounds\n", name); return false; }
 		const f64 split = micros([&](u32 i) {
 			const f32 delta = (i & 1u) ? 6.f : -6.f;
 			ui.pointerMove({ gutterPoint.x + (horizontalSplit ? delta : 0.f),
@@ -109,17 +142,19 @@ namespace {
 
 		std::printf("%-14s panels=%-3u idle layout %7.3f us/frame | drag preview %7.3f us/move | splitter %7.3f us/move | paint %8.3f us/frame\n",
 			name, panels, idle, drag, split, paint);
+		return true;
 	}
 
 } // namespace
 
 int main() {
 	constexpr u32 iterations = 20000;
-	runScenario("wide", wideSource(8), 8, iterations);
-	runScenario("wide", wideSource(16), 16, iterations);
-	runScenario("wide", wideSource(32), 32, iterations);
-	runScenario("deep", deepSource(8), 8, iterations);
-	runScenario("deep", deepSource(16), 16, iterations);
-	runScenario("deep", deepSource(24), 24, iterations);
-	return 0;
+	bool ok = true;
+	ok = runScenario("wide", wideSource(8), 8, iterations) && ok;
+	ok = runScenario("wide", wideSource(16), 16, iterations) && ok;
+	ok = runScenario("wide", wideSource(32), 32, iterations) && ok;
+	ok = runScenario("deep", deepSource(8), 8, iterations) && ok;
+	ok = runScenario("deep", deepSource(16), 16, iterations) && ok;
+	ok = runScenario("deep", deepSource(24), 24, iterations) && ok;
+	return ok ? 0 : 1;
 }

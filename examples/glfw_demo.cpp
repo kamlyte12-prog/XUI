@@ -28,11 +28,8 @@ namespace {
 	}
 
 	std::string checklistSummary(xui::Xui& app) {
-		xui::u32 checked = 0, total = 0;
-		for (const std::string_view id : { "task-layout", "task-styles", "task-backend", "task-resize" }) {
-			if (const auto value = valueAs<bool>(app, id)) { ++total; checked += *value ? 1u : 0u; }
-		}
-		return "Tasks checked: " + std::to_string(checked) + " / " + std::to_string(total);
+		const auto selected = valueAs<xui::CheckListValue>(app, "setup-tasks");
+		return "Tasks checked: " + std::to_string(selected ? selected->size() : 0u) + " / 4";
 	}
 
 	void onUiEvent(void* context, std::string_view name) {
@@ -77,7 +74,7 @@ namespace {
 				app.setWindowTitle("Showcase section " + std::to_string(*value + 1));
 			}
 		}
-		else if (name == "onTaskLayout" || name == "onTaskStyles" || name == "onTaskBackend" || name == "onTaskResize") {
+		else if (name == "onTasksChange") {
 			setText(app, "tasks-readout", checklistSummary(app));
 		}
 		else if (name == "onSearchChange") {
@@ -313,7 +310,6 @@ int main(int argc, char** argv) {
 		// Keep the normal top-level page selected; the client-area menu is always visible.
 		app.runtime().layout(1080.f, 760.f);
 	}
-
 	const bool continuousProfile = profile && profileCase != "animation-timer";
 	const int result = profile ? app.run({ 5.0, continuousProfile }) : app.run();
 	if (profile) {

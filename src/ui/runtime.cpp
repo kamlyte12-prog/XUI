@@ -697,6 +697,7 @@ namespace xui {
 		node.type = source.type;
 		node.parentIndex = parentIndex;
 		node.button = typeIs(source.type, *m_strings, "Button");
+		node.checkList = typeIs(source.type, *m_strings, "CheckList");
 		node.checkItem = typeIs(source.type, *m_strings, "CheckItem");
 		node.checkBox = typeIs(source.type, *m_strings, "CheckBox");
 		node.split = typeIs(source.type, *m_strings, "Split");
@@ -2539,6 +2540,26 @@ namespace xui {
 				}
 			}
 			if (bg.a > 0 || shape.gradientStopCount >= 2 || (shape.borderWidth > 0 && shape.border.a > 0)) painter.roundRect(rect, shape);
+			if (node.style.has(PropId::Outline)) {
+				const StyleValue& value = node.style.get(PropId::Outline);
+				const f32 width = std::max(0.f, number(value, 0));
+				const f32 offset = node.style.has(PropId::OutlineOffset)
+					? std::max(0.f, number(node.style.get(PropId::OutlineOffset), 0)) : 0.f;
+				const std::size_t colorIndex = value.count == 2 ? 1u : 2u;
+				const Color outlineColor = value.atoms[colorIndex].kind == AtomKind::Color
+					? Color::fromRGBA8(value.atoms[colorIndex].bits) : Color{};
+				const f32 expansion = width + offset;
+				Rect bounds{ rect.x - expansion, rect.y - expansion, rect.w + expansion * 2.f, rect.h + expansion * 2.f };
+				if (width > 0.f && bounds.w > 0.f && bounds.h > 0.f && outlineColor.a > 0.f) {
+					RectStyle outline;
+					outline.border = outlineColor;
+					outline.borderWidth = width;
+					outline.dashed = value.count == 3 && value.atoms[1].kind == AtomKind::Ident &&
+						m_strings->view(value.atoms[1].str()) == "dashed";
+					outline.radius = CornerRadii::all(std::max(0.f, number(node.style.get(PropId::Radius), 0)) + expansion);
+					painter.roundRect(bounds, outline);
+				}
+			}
 			if (node.checkItem || node.checkBox) {
 				const f32 boxSize = std::min(18.f, std::max(12.f, rect.h - 8.f));
 				const Rect box{ rect.x + 2.f, rect.y + (rect.h - boxSize) * 0.5f, boxSize, boxSize };
@@ -4041,6 +4062,11 @@ namespace xui {
 		if (activated && (activated->button || activated->checkItem || activated->checkBox || activated->switchToggle || activated->toggleButton) &&
 			activated->pressHandler.v && m_eventFn)
 			m_eventFn(m_eventContext, m_strings->view(activated->pressHandler));
+		if (activated && activated->checkItem && activated->parentIndex < m_nodes.size()) {
+			Node& parent = m_nodes[activated->parentIndex];
+			if (parent.checkList && parent.pressHandler.v && m_eventFn)
+				m_eventFn(m_eventContext, m_strings->view(parent.pressHandler));
+		}
 		m_splitDrag = {};
 		m_dragSplit = {};
 		return changed || activated != nullptr;
@@ -4343,6 +4369,11 @@ namespace xui {
 			if (node.dropdown || node.colorPicker) node.popupOpen = !node.popupOpen;
 			addDamage(m_layout.absRect(node.layout));
 			if (!node.dropdown && !node.colorPicker && node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
+			if (node.checkItem && node.parentIndex < m_nodes.size()) {
+				Node& parent = m_nodes[node.parentIndex];
+				if (parent.checkList && parent.pressHandler.v && m_eventFn)
+					m_eventFn(m_eventContext, m_strings->view(parent.pressHandler));
+			}
 			return true;
 		}
 		return false;
@@ -4943,6 +4974,14 @@ namespace xui {
 			}
 			if (node.menu) return UiValue{ node.menuSelectedItem };
 			if (node.menuItem) return UiValue{ node.text };
+			if (node.checkList) {
+				CheckListValue selected;
+				const u32 listIndex = static_cast<u32>(&node - m_nodes.data());
+				for (const Node& child : m_nodes)
+					if (child.parentIndex == listIndex && child.checkItem && child.checked && child.id.v)
+						selected.emplace_back(m_strings->view(child.id));
+				return UiValue{ std::move(selected) };
+			}
 			if (node.checkItem || node.checkBox || node.switchToggle || node.toggleButton) return UiValue{ node.checked };
 			if (node.slider || node.rating || node.progressBar) return UiValue{ static_cast<f64>(node.value) };
 			if (node.numberField || node.stepper) return UiValue{ static_cast<f64>(node.value) };
@@ -5018,6 +5057,31 @@ namespace xui {
 					fireDockHandler(panelIndex, requested->floating ? node.undockHandler : node.dockHandler);
 					if (node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
 				}
+				return true;
+			}
+			if (node.checkList) {
+				const CheckListValue* selected = std::get_if<CheckListValue>(&valueToSet);
+				if (!selected) return false;
+				const u32 listIndex = static_cast<u32>(&node - m_nodes.data());
+				for (const std::string& requestedId : *selected) {
+					const bool found = std::any_of(m_nodes.begin(), m_nodes.end(), [&](const Node& child) {
+						return child.parentIndex == listIndex && child.checkItem && child.id.v &&
+							m_strings->view(child.id) == requestedId;
+					});
+					if (!found) return false;
+				}
+				for (u32 i = 0; i < m_nodes.size(); ++i) {
+					Node& child = m_nodes[i];
+					if (child.parentIndex != listIndex || !child.checkItem || !child.id.v) continue;
+					const std::string_view childId = m_strings->view(child.id);
+					const bool checked = std::find(selected->begin(), selected->end(), childId) != selected->end();
+					if (child.checked == checked) continue;
+					child.checked = checked;
+					changed = true;
+					addDamage(m_layout.absRect(child.layout));
+				}
+				if (changed && notify && node.pressHandler.v && m_eventFn)
+					m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
 				return true;
 			}
 			if (node.checkItem || node.checkBox) {

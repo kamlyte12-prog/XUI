@@ -15,11 +15,62 @@ namespace xui {
 		// Built-in defaults so the reference snippet works verbatim; user tokens override them (later definitions win).
 		constexpr std::string_view kBaseTokens = R"(tokens {
   color.on-primary = #ffffff
+  color.primary = #3b82f6
+  color.primary.hover = #2563eb
   color.primary.active = #1d4ed8
   color.muted = #52525b
   color.border = #27272a
   color.shadow = #00000066
 })";
+		// Default Fluent 2 light controls are expressed in the same stylesheet language as user styles.
+		// These rules are compiled before the caller's source, so authored selectors always override them.
+		constexpr std::string_view kFluent2Defaults = R"(
+Window { resting: { bg: #f5f5f5, fg: #242424, font-size: 14px } }
+Text, Label { resting: { fg: #242424, font-size: 14px } }
+Column, Row, Split, CheckList { resting: { fg: #242424 } }
+Panel { resting: { bg: #ffffff, fg: #242424, border: 1px solid #e1e1e1, radius: 8px, pad: 12px } }
+Button, ToggleButton, MenuItem { resting: { bg: #f5f5f5, fg: #242424, border: 1px solid #d1d1d1, radius: 4px, pad: 6px 12px }
+  hover: { bg: #ebebeb } pressed: { bg: #e1e1e1 } disabled: { opacity: 0.45 } }
+TextBox, TextArea, NumberField, SearchField, KeybindField, Dropdown, DatePicker, ColorPicker {
+  resting: { bg: #ffffff, fg: #242424, border: 1px solid #8a8886, radius: 4px, pad: 6px 8px }
+  hover: { border: 1px solid #605e5c } focus: { border: 1px solid #0f6cbd }
+  placeholder: { fg: #616161 } disabled: { opacity: 0.45 }
+}
+CheckItem, CheckBox, Switch { resting: { fg: #242424, radius: 4px }
+  hover: { bg: #f0f0f0 } checked: { fg: #0f6cbd } disabled: { opacity: 0.45 } }
+RadioGroup, SegmentedControl, Rating { resting: { bg: #ffffff, fg: #242424, border: 1px solid #d1d1d1, radius: 4px, pad: 6px }
+  hover: { fg: #0f6cbd } checked: { fg: #0f6cbd } disabled: { opacity: 0.45 } }
+Slider, ProgressBar { resting: { bg: #d1d1d1, fg: #0f6cbd, radius: 4px } disabled: { opacity: 0.45 } }
+Badge { resting: { bg: #f0f0f0, fg: #424242, border: 1px solid #e1e1e1, radius: 4px, pad: 4px 8px, font-size: 12px } }
+Toolbar, StatusBar { resting: { bg: #f0f0f0, fg: #424242, border: 1px solid #e1e1e1, radius: 4px, pad: 8px, gap: 8px } }
+FpsCounter { resting: { bg: #ffffff, fg: #616161, border: 1px solid #e1e1e1, radius: 4px, pad: 4px 8px, font-size: 12px } }
+Image { resting: { bg: #f0f0f0, fg: #616161, border: 1px solid #d1d1d1, radius: 4px } }
+Spinner { resting: { fg: #0f6cbd } disabled: { opacity: 0.45 } }
+Separator, Divider { resting: { fg: #d1d1d1 } }
+Breadcrumb { resting: { fg: #424242 } hover: { fg: #0f6cbd } selected: { fg: #0f6cbd } disabled: { opacity: 0.45 } }
+Stepper { resting: { bg: #ffffff, fg: #242424, border: 1px solid #8a8886, radius: 4px, pad: 6px 8px } hover: { border: 1px solid #605e5c } focus: { border: 1px solid #0f6cbd } error: { border: 1px solid #c42b1c } disabled: { opacity: 0.45 } }
+NumberButton { resting: { bg: #f5f5f5, fg: #424242, radius: 4px } hover: { bg: #ebebeb } pressed: { bg: #e1e1e1 } disabled: { opacity: 0.45 } }
+Tabs { resting: { bg: #ffffff, fg: #242424, border: 1px solid #d1d1d1, radius: 6px } }
+Tab { resting: { bg: #f5f5f5, fg: #616161, pad: 8px }
+  hover: { bg: #ebebeb, fg: #242424 } selected: { fg: #0f6cbd } }
+ScrollView { resting: { bg: #ffffff, fg: #242424, border: 1px solid #d1d1d1, radius: 4px, scrollbar-size: 10px,
+  scroll-track: #f5f5f5, scroll-thumb: #a19f9d } hover: { scroll-thumb: #797775 } }
+Menu { resting: { bg: #ffffff, fg: #242424, border: 1px solid #d1d1d1, radius: 6px, shadow: 0px 4px 14px 0px #00000024 } }
+Tooltip { resting: { bg: #292929, fg: #ffffff, border: 1px solid #292929, radius: 4px, pad: 6px 8px, font-size: 12px } }
+TitleBar { resting: { bg: #f5f5f5, fg: #242424, pad: 4px, gap: 4px } }
+TitleButton { resting: { fg: #424242, radius: 4px } hover: { bg: #e5e5e5 } pressed: { bg: #d6d6d6 } }
+DockHost { resting: { bg: #f5f5f5, fg: #242424, radius: 6px, pad: 4px } }
+DockPanel { resting: { bg: #ffffff, fg: #242424, pad: 8px } }
+DockHeader { resting: { bg: #f0f0f0, fg: #424242, pad: 8px, radius: 4px } hover: { bg: #e5e5e5 } }
+DockTab { resting: { bg: #f5f5f5, fg: #616161, pad: 6px } hover: { bg: #ebebeb } selected: { bg: #ffffff, fg: #0f6cbd } }
+DockCloseButton { resting: { fg: #616161 } hover: { bg: #c42b1c, fg: #ffffff } }
+DockSplitter { resting: { bg: #d1d1d1 } hover: { bg: #0f6cbd } pressed: { bg: #115ea3 } }
+DockPreview { resting: { bg: #0f6cbd44, border: 1px solid #0f6cbd, radius: 4px } }
+Button, ToggleButton, CheckBox, CheckItem, Switch, RadioGroup, TextBox, TextArea, NumberField, SearchField,
+Dropdown, DatePicker, ColorPicker, Slider, Tabs, Tab, Menu, MenuItem, KeybindField, SegmentedControl, Stepper, Rating, Breadcrumb {
+  focus-visible: { outline: 2px solid #0f6cbd, outline-offset: 2px }
+}
+)";
 	}
 
 	class XssCompiler {
@@ -305,6 +356,34 @@ namespace xui {
 					return false;
 				}
 			}
+			if (d.prop == PropId::Outline) {
+				if (kinds.empty() || kinds[0] != AtomKind::Number ||
+					(shown[0].unit != Unit::None && shown[0].unit != Unit::Px && shown[0].unit != Unit::Dp)) {
+					err(d.off, d.len, "outline starts with a width in px or dp");
+					return false;
+				}
+				const std::size_t colorIndex = shown.size() == 2 ? 1u : 2u;
+				if (kinds[colorIndex] != AtomKind::Color) {
+					err(d.off, d.len, "outline needs a color, optionally preceded by a style");
+					return false;
+				}
+				if (shown.size() == 3) {
+					if (kinds[1] != AtomKind::Ident) {
+						err(d.off, d.len, "outline style must be solid or dashed");
+						return false;
+					}
+					const std::string_view style = m_in.view(shown[1].str());
+					if (style != "solid" && style != "dashed") {
+						err(d.off, d.len, "outline style must be solid or dashed");
+						return false;
+					}
+				}
+			}
+			if (d.prop == PropId::OutlineOffset && (kinds.empty() || kinds[0] != AtomKind::Number ||
+				(shown[0].unit != Unit::None && shown[0].unit != Unit::Px && shown[0].unit != Unit::Dp) || shown[0].num < 0.f)) {
+				err(d.off, d.len, "outline-offset must be a non-negative px or dp length");
+				return false;
+			}
 			for (std::size_t i = 0; i < kinds.size(); ++i)
 				if (!(pi.kindMask & (1u << static_cast<int>(kinds[i])))) {
 					err(ex(d.values[std::min(i, d.values.size() - 1)]).off, ex(d.values[std::min(i, d.values.size() - 1)]).len,
@@ -377,6 +456,7 @@ namespace xui {
 		DiagnosticList diags{ std::string(fileName), std::string(source) };
 		xss::Ast ast;
 		{ DiagnosticList base{ "<xss-base>", std::string(kBaseTokens) }; xss::parse(kBaseTokens, in, base, ast); }
+		{ DiagnosticList base{ "<fluent2-defaults>", std::string(kFluent2Defaults) }; xss::parse(kFluent2Defaults, in, base, ast); }
 		xss::parse(source, in, diags, ast);
 		if (diags.hasErrors()) return fail(std::move(diags));   // don't cascade compile errors from a broken parse
 		StyleSheet sheet;

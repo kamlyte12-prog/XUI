@@ -26,6 +26,14 @@ namespace {
 		if (name == "onChange") ++static_cast<u32*>(context)[1];
 	}
 	void recordDock(void* context, std::string_view) { ++*static_cast<u32*>(context); }
+	struct CheckListProbe { UiRuntime* runtime = nullptr; u32 calls = 0; CheckListValue selected; };
+	void recordCheckList(void* context, std::string_view name) {
+		auto& probe = *static_cast<CheckListProbe*>(context);
+		if (name != "onListChange") return;
+		++probe.calls;
+		if (const auto value = probe.runtime->value("tasks"))
+			if (const auto* selected = std::get_if<CheckListValue>(&*value)) probe.selected = *selected;
+	}
 
 	std::string readTestFont() {
 		std::vector<std::filesystem::path> candidates;
@@ -161,6 +169,60 @@ Split { resting: { fg: #52627b } }
 		ui.pointerUp({ gutterCenter.x + 24.f, gutterCenter.y });
 	}
 
+	TEST(ui_runtime_checklist_exposes_and_sets_selected_child_ids) {
+		constexpr std::string_view xuiSource = R"(
+Window(size: 240x120) {
+  CheckList[id: "tasks", change: onListChange] {
+    CheckItem(label: "First", checked: true)[id: "first"]
+    CheckItem(label: "Second")[id: "second"]
+  }
+}
+)";
+		constexpr std::string_view xssSource = R"(
+CheckItem { resting: { size: 200px 36px, bg: #f3f3f3, fg: #242424 }
+  focus: { outline: 2px solid #0f6cbd, outline-offset: 2px } }
+)";
+		StringInterner strings;
+		auto document = parseXui(xuiSource, "checklist-values.xui", strings);
+		auto styles = compileXss(xssSource, "checklist-values.xss", strings);
+		CHECK(document.has_value()); CHECK(styles.has_value());
+		if (!document || !styles) return;
+		TextSystem text; UiRuntime ui; std::string error;
+		CHECK(ui.build(*document, *styles, strings, text, {}, error));
+		if (!error.empty()) return;
+		ui.layout(240.f, 120.f);
+		CheckListProbe probe{ &ui, 0, {} };
+		ui.setEventHandler(recordCheckList, &probe);
+		auto selected = ui.value("tasks");
+		CHECK(selected.has_value());
+		if (selected) {
+			const auto* ids = std::get_if<CheckListValue>(&*selected);
+			CHECK(ids != nullptr);
+			if (ids) { CHECK_EQ(ids->size(), 1u); CHECK_EQ(ids->front(), std::string("first")); }
+		}
+		CHECK(ui.setValue("tasks", CheckListValue{ "second" }, true));
+		CHECK_EQ(probe.calls, 1u); CHECK_EQ(probe.selected.size(), 1u);
+		CHECK_EQ(probe.selected.front(), std::string("second"));
+		CHECK(!ui.setValue("tasks", CheckListValue{ "missing" }));
+		selected = ui.value("tasks");
+		CHECK(selected && std::get<CheckListValue>(*selected) == CheckListValue{ "second" });
+
+		const Rect first = ui.bounds({ 2, 1 });
+		const Vec2 center{ first.x + first.w * 0.5f, first.y + first.h * 0.5f };
+		Painter painter; painter.begin(240, 120, 1.f); ui.paint(painter); const u32 restingPrims = painter.finish().nVerts;
+		CHECK(ui.pointerDown(center));
+		Painter focusedPainter; focusedPainter.begin(240, 120, 1.f); ui.paint(focusedPainter); const u32 focusedPrims = focusedPainter.finish().nVerts;
+		CHECK(focusedPrims > restingPrims);
+		CHECK(ui.pointerUp(center));
+		selected = ui.value("tasks");
+		CHECK(selected && std::get<CheckListValue>(*selected) == CheckListValue({ "first", "second" }));
+		CHECK_EQ(probe.calls, 2u);
+		CHECK(ui.keyDown(Key::Space));
+		selected = ui.value("tasks");
+		CHECK(selected && std::get<CheckListValue>(*selected) == CheckListValue{ "second" });
+		CHECK_EQ(probe.calls, 3u);
+	}
+
 	TEST(ui_runtime_dock_host_tabs_split_resize_float_and_restore) {
 		constexpr std::string_view xuiSource = R"(
 Window(title: "Dock test", size: 640x420) {
@@ -268,7 +330,7 @@ Window(size: 400x220) {
 )";
 	constexpr std::string_view xssSource = R"(
 Dropdown { resting: { bg: #223344, fg: #ffffff } }
-Tabs.overlap-tabs { resting: { margin: -38px, bg: #101820 } }
+Tabs.overlap-tabs { resting: { margin: -50px, bg: #101820 } }
 Button { resting: { bg: #446688, fg: #ffffff } }
 )";
 	StringInterner strings; UiAssetBundle assets; std::string error;
@@ -348,7 +410,7 @@ Button { resting: { bg: #000000ff } hover: { bg: #ffffffff } transition: resting
 	ui.layout(240.f, 120.f); Painter painter;
 	auto paintColor = [&]() {
 		painter.begin(240, 120, 1.f); ui.paint(painter, 1.f);
-		const DrawList list = painter.finish(); return list.nVerts ? list.verts[0].c0 : 0u;
+		const DrawList list = painter.finish(); return list.nVerts ? list.verts[list.nVerts - 1].c0 : 0u;
 	};
 	const u32 resting = paintColor();
 	const Rect rect = ui.bounds({ 1, 1 });
@@ -379,7 +441,7 @@ Button { resting: { bg: #000000ff } hover: { bg: #ffffffff }
 	ui.layout(240.f, 120.f); Painter painter;
 	auto paintColor = [&]() {
 		painter.begin(240, 120, 1.f); ui.paint(painter, 1.f);
-		const DrawList list = painter.finish(); return list.nVerts ? list.verts[0].c0 : 0u;
+		const DrawList list = painter.finish(); return list.nVerts ? list.verts[list.nVerts - 1].c0 : 0u;
 	};
 	(void)paintColor(); // establish the resting style before triggering a state transition
 	const Rect rect = ui.bounds({ 1, 1 });
@@ -423,7 +485,7 @@ Button { resting: { bg: #000000ff, animation-cancel: finish } hover: { bg: #ffff
 	ui.layout(240.f, 120.f); Painter painter;
 	auto paintColor = [&]() {
 		painter.begin(240, 120, 1.f); ui.paint(painter, 1.f);
-		const DrawList list = painter.finish(); return list.nVerts ? list.verts[0].c0 : 0u;
+		const DrawList list = painter.finish(); return list.nVerts ? list.verts[list.nVerts - 1].c0 : 0u;
 	};
 	(void)paintColor();
 	const Rect rect = ui.bounds({ 1, 1 });
@@ -486,7 +548,7 @@ keyframes pulse { from { bg: #000000ff } to { bg: #ffffffff } }
 	ui.layout(240.f, 120.f); Painter painter;
 	auto paintColor = [&]() {
 		painter.begin(240, 120, 1.f); ui.paint(painter, 1.f);
-		const DrawList list = painter.finish(); return list.nVerts ? list.verts[0].c0 : 0u;
+		const DrawList list = painter.finish(); return list.nVerts ? list.verts[list.nVerts - 1].c0 : 0u;
 	};
 	(void)paintColor();
 	const Rect rect = ui.bounds({ 1, 1 });
@@ -528,7 +590,7 @@ keyframes fade-in { from { opacity: 0, bg: #000000ff } to { opacity: 1, bg: #fff
 	ui.layout(240.f, 120.f); Painter painter;
 	auto paintColor = [&]() {
 		painter.begin(240, 120, 1.f); ui.paint(painter, 1.f);
-		const DrawList list = painter.finish(); return list.nVerts ? list.verts[0].c0 : 0u;
+		const DrawList list = painter.finish(); return list.nVerts ? list.verts[list.nVerts - 1].c0 : 0u;
 	};
 	const u32 initial = paintColor();
 	const f64 firstFrameDelay = ui.nextTimerDelay();
@@ -842,8 +904,8 @@ Button.primary {
 	renderer.submit(rendered);
 	renderer.endFrame();
 	const Image image = renderer.snapshot();
-	const u32 px = static_cast<u32>(buttonRect.x + buttonRect.w / 2);
-	const u32 py = static_cast<u32>(buttonRect.y + buttonRect.h / 2);
+	const u32 px = static_cast<u32>(buttonRect.x + 10.f);
+	const u32 py = static_cast<u32>(buttonRect.y + 10.f);
 	const u8* center = image.px(px, py);
 	CHECK_EQ(center[0], 0x3Bu);
 	CHECK_EQ(center[1], 0x82u);
@@ -939,6 +1001,7 @@ Window(title: "Xui Button", size: 760x480) {
 }
 )";
 	constexpr std::string_view xssSource = R"(
+Text { resting: { font-size: 16px } }
 Row.bar { resting: { bg: #cbd5e1 } }
 )";
 	StringInterner strings; UiAssetBundle assets; std::string error;
@@ -1001,6 +1064,7 @@ Window(size: 760x480) {
 }
 )";
 	constexpr std::string_view xssSource = R"(
+Text { resting: { font-size: 16px } }
 Row.bar { resting: { bg: #cbd5e1, fg: #111827 } }
 )";
 	StringInterner strings; UiAssetBundle assets; std::string error;
@@ -1507,7 +1571,7 @@ TEST(showcase_example_assets_parse_validate_and_build) {
 	const Vec2 taskPoint{ task.x + 50.f, task.y + task.h * 0.5f };
 	CHECK(ui.pointerDown(taskPoint)); CHECK(ui.pointerUp(taskPoint));
 	CHECK(std::get<bool>(*ui.value("task-backend")));
-	CHECK(std::find(events.begin(), events.end(), "onTaskBackend") != events.end());
+	CHECK(std::find(events.begin(), events.end(), "onTasksChange") != events.end());
 	const Rect split = rectFor("main-split"), leftPaneBefore = rectFor("tasks-panel");
 	const Vec2 gutterPoint{ leftPaneBefore.right() + 4.f, split.y + split.h * 0.5f };
 	CHECK(ui.pointerDown(gutterPoint));
@@ -1759,7 +1823,7 @@ Button { resting: { bg: #222222FF } pressed: { bg: #EE4422FF } transition: resti
 		Painter painter; painter.begin(200, 120, 1.f);
 		ui.paint(painter);
 		const DrawList draw = painter.finish();
-		if (draw.nVerts > 0) final = Color::fromRGBA8(draw.verts[0].c0);
+		if (draw.nVerts > 0) final = Color::fromRGBA8(draw.verts[draw.nVerts - 1].c0);
 		std::this_thread::sleep_for(std::chrono::milliseconds(8));
 		if (!ui.updateTimers(std::chrono::steady_clock::now())) break;   // idle again = tween done
 	}

@@ -9,6 +9,8 @@ namespace xui {
 			{"bg", Expand::None, 1, 1, COL | ID},
 			{"fg", Expand::None, 1, 1, COL},
 			{"border", Expand::None, 1, 3, NUM | ID | COL},
+			{"outline", Expand::None, 2, 3, NUM | ID | COL},
+			{"outline-offset", Expand::None, 1, 1, NUM},
 			{"radius", Expand::Sides4, 1, 4, NUM},
 			{"pad", Expand::Sides4, 1, 4, NUM | ID},
 			{"margin", Expand::Sides4, 1, 4, NUM | ID},
@@ -50,7 +52,7 @@ namespace xui {
 			{"value", Expand::None, 1, 1, NUM},
 		};
 		constexpr std::string_view kPropNames[kPropCount] = {
-			"bg", "fg", "border", "radius", "pad", "margin", "gap", "size", "min-size", "max-size", "min-width", "max-width", "min-height", "max-height", "opacity", "shadow", "glow", "gradient", "blur",
+			"bg", "fg", "border", "outline", "outline-offset", "radius", "pad", "margin", "gap", "size", "min-size", "max-size", "min-width", "max-width", "min-height", "max-height", "opacity", "shadow", "glow", "gradient", "blur",
 			"transform", "font", "font-size", "font-weight", "letter-spacing", "align", "justify", "grow", "shrink", "cursor",
 			"z-index", "clip", "overflow", "animation", "animation-keep", "animation-cancel", "scroll-track", "scroll-thumb", "scrollbar-size",
 			"scrollbar-visibility", "scroll-behavior", "scroll-speed", "value" };

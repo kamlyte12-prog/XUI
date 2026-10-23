@@ -348,11 +348,11 @@ Window(title: "Xui widget and layout showcase", size: 1080x760)[platformTopMenu:
             Split(direction: Horizontal)[id: "main-split", class: "split", ratio: 0.38, gutter: 8, width: 100%, height: 340px, minSize: 420x340] {
               Panel[id: "tasks-panel", class: "demo-panel pane pane-left", minSize: 190x140] {
                 Text("CheckList")[class: "panel-title"]
-                CheckList[gap: 5px, width: 100%] {
-                  CheckItem(label: "Explore each tab", checked: true)[id: "task-layout", change: onTaskLayout, class: "check-item", width: 100%, height: 32px]
-                  CheckItem(label: "Change a control value", checked: true)[id: "task-styles", change: onTaskStyles, class: "check-item", width: 100%, height: 32px]
-                  CheckItem(label: "Keep rendering backend-neutral")[id: "task-backend", change: onTaskBackend, class: "check-item", width: 100%, height: 32px]
-                  CheckItem(label: "Resize this split")[id: "task-resize", change: onTaskResize, class: "check-item", width: 100%, height: 32px]
+                CheckList[id: "setup-tasks", gap: 5px, width: 100%, change: onTasksChange] {
+                  CheckItem(label: "Explore each tab", checked: true)[id: "task-layout", class: "check-item", width: 100%, height: 32px]
+                  CheckItem(label: "Change a control value", checked: true)[id: "task-styles", class: "check-item", width: 100%, height: 32px]
+                  CheckItem(label: "Keep rendering backend-neutral")[id: "task-backend", class: "check-item", width: 100%, height: 32px]
+                  CheckItem(label: "Resize this split")[id: "task-resize", class: "check-item", width: 100%, height: 32px]
                 }
               }
               Panel[id: "content-panel", class: "demo-panel pane pane-right", minSize: 190x140] {

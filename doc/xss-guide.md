@@ -40,6 +40,8 @@ Supported state names are `resting`, `hover`, `focus`, `focus-visible`, `selecte
 
 Text defaults `font`, `font-size`, `fg`, `align`, and `letter-spacing` cascade from a parent when a child has no matching explicit value. An explicit child style wins. Layout values and backgrounds do not inherit.
 
+The compiler starts with a Fluent 2-inspired light baseline for standard runtime widgets, then applies authored rules through the normal cascade. Define your own colors and control rules to replace it. `outline` and `outline-offset` add a paint-only focus ring outside the border box; they do not consume layout space.
+
 ## Palette tokens and themes
 
 Declare reusable values with `tokens` and refer to them by name:

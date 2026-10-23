@@ -42,7 +42,9 @@ namespace xui {
 		bool active = false;
 	};
 
-	using UiValue = std::variant<bool, f64, std::string, Color, u32, Vec2, DockPanelValue>;
+	/// IDs of checked CheckItem children, returned by a CheckList's authored id.
+	using CheckListValue = std::vector<std::string>;
+	using UiValue = std::variant<bool, f64, std::string, Color, u32, Vec2, DockPanelValue, CheckListValue>;
 
 	/// Layout snapshot of one TitleBar widget. The bar paints through the normal widget path;
 	/// `minimize`/`maximize`/`close` are the framework-drawn caption zones (valid when `buttons`).
@@ -188,7 +190,7 @@ namespace xui {
 			StateMask resolvedStates = 0;
 			bool styleResolved = false;
 			u8 inheritedTextMask = 0;
-			bool button = false, checkItem = false, checkBox = false, split = false, scrollView = false, slider = false, progressBar = false;
+			bool button = false, checkList = false, checkItem = false, checkBox = false, split = false, scrollView = false, slider = false, progressBar = false;
 			bool dropdown = false, colorPicker = false, popupOpen = false, pickerAlpha = true;
 			bool pickerEditor = false;
 			bool pickerShowAlpha = true, pickerShowInputs = true, pickerShowFormatSwitcher = true;

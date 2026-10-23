@@ -68,7 +68,7 @@ TEST(xss_spec_snippet_compiles_verbatim) {
 	auto r = compileXss(kSpec, "spec.xss", in);
 	if (!r) std::printf("%s", r.error().format().c_str());
 	CHECK(r.has_value());
-	if (r) { CHECK_EQ(r->ruleCount(), 4u); }
+	if (r) { CHECK(r->ruleCount() >= 4u); }
 }
 TEST(xss_spec_button_resolution_and_states) {
 	StringInterner in; StyleSheet sh = mustCompile(in, kSpec);
@@ -98,9 +98,9 @@ TEST(xss_filter_mismatch_does_not_match) {
 	VariantLookup vl{ in.intern("variant"), in.intern("Secondary") };
 	MatchInput mi; mi.type = in.intern("Button"); mi.lookup = lookupVariant; mi.ctx = &vl;
 	PropTable t; sh.resolve(sh.match(mi), 0, 0, t);
-	CHECK(!t.has(PropId::Bg));
+	CHECK(t.has(PropId::Radius)); CHECK_NEAR(t.get(PropId::Radius).atoms[0].num, 4.f, 1e-4f);
 	mi.lookup = nullptr; sh.resolve(sh.match(mi), 0, 0, t);   // no lookup at all -> no match either
-	CHECK(!t.has(PropId::Bg));
+	CHECK(t.has(PropId::Radius)); CHECK_NEAR(t.get(PropId::Radius).atoms[0].num, 4.f, 1e-4f);
 }
 TEST(xss_transitions_parsed) {
 	StringInterner in; StyleSheet sh = mustCompile(in, kSpec);
@@ -257,6 +257,45 @@ Panel.conic { resting: { gradient: conic-gradient(45deg, #ff0000, #00ff00, #0000
 	CHECK(table.has(PropId::Opacity) && table.has(PropId::FontSize) && table.has(PropId::FontWeight));
 	CHECK(!errorsOf("Panel { resting: { gradient: radial-gradient(#fff) } }").empty());
 }
+TEST(xss_focus_outline_compiles_and_validates_values) {
+	StringInterner strings;
+	auto styles = mustCompile(strings, R"(
+Button.action { focus: { outline: 2px solid #0f6cbd, outline-offset: 2px } }
+TextBox.field { focus-visible: { outline: 1px #115ea3 } }
+)");
+	const StrId actionClass[] = { strings.intern("action") };
+	MatchInput match; match.type = strings.intern("Button"); match.classes = actionClass;
+	PropTable table; styles.resolve(styles.match(match), stateBit(State::Focus), 0, table);
+	CHECK(table.has(PropId::Outline)); CHECK_EQ(table.get(PropId::Outline).count, 3);
+	CHECK(table.has(PropId::OutlineOffset)); CHECK_NEAR(table.get(PropId::OutlineOffset).atoms[0].num, 2.f, 1e-4f);
+	CHECK(!errorsOf("Button { focus: { outline: dashed 2px #ffffff } }").empty());
+	CHECK(!errorsOf("Button { focus: { outline-offset: -1px } }").empty());
+}
+TEST(xss_fluent2_defaults_apply_and_authored_rules_override) {
+	StringInterner strings;
+	auto defaults = mustCompile(strings, "");
+	MatchInput match; match.type = strings.intern("Button");
+	PropTable table; defaults.resolve(defaults.match(match), stateBit(State::Resting), 0, table);
+	CHECK(table.has(PropId::Bg) && table.get(PropId::Bg).atoms[0].bits == 0xf5f5f5ffu);
+	CHECK(table.has(PropId::Fg) && table.get(PropId::Fg).atoms[0].bits == 0x242424ffu);
+	CHECK(table.has(PropId::Radius) && table.get(PropId::Radius).atoms[0].num == 4.f);
+
+	auto overridden = mustCompile(strings, "Button { resting: { bg: #123456 } }");
+	PropTable overrideTable; overridden.resolve(overridden.match(match), stateBit(State::Resting), 0, overrideTable);
+	CHECK(overrideTable.has(PropId::Bg) && overrideTable.get(PropId::Bg).atoms[0].bits == 0x123456ffu);
+
+	const std::string_view themedTypes[] = { "Text", "Label", "Button", "TextBox", "TextArea", "CheckBox", "CheckItem",
+		"RadioGroup", "Switch", "ToggleButton", "Slider", "Dropdown", "ColorPicker", "Tabs", "Tab", "ScrollView",
+		"ProgressBar", "Panel", "Split", "CheckList", "FpsCounter", "Image", "Spinner", "Separator", "Divider",
+		"Toolbar", "StatusBar", "NumberField", "SearchField", "DatePicker", "SegmentedControl", "Stepper", "Rating",
+		"Breadcrumb", "KeybindField", "Badge", "NumberButton", "DockHost", "DockPanel", "DockHeader", "DockTab",
+		"DockCloseButton", "DockSplitter", "DockPreview", "Menu", "MenuItem", "TitleBar", "TitleButton", "Tooltip" };
+	for (std::string_view type : themedTypes) {
+		MatchInput control; control.type = strings.intern(type);
+		PropTable style; defaults.resolve(defaults.match(control), stateBit(State::Resting), 0, style);
+		CHECK(style.mask != 0);
+	}
+}
 TEST(xss_transform_functions_flatten) {
 	StringInterner in;
 	StyleSheet sh = mustCompile(in, "Card { hover: { transform: translate(0px, -2px) scale(1.02) } }");
@@ -268,7 +307,7 @@ TEST(xss_transform_functions_flatten) {
 TEST(xss_comments_and_multiple_selectors) {
 	StringInterner in;
 	StyleSheet sh = mustCompile(in, "/* block */ Row, Column { // line\n resting: { gap: 4px } }");
-	CHECK_EQ(sh.ruleCount(), 2u);
+	CHECK(sh.ruleCount() >= 2u);
 }
 TEST(xss_error_unknown_property_has_caret_and_suggestion) {
 	std::string e = errorsOf("Button {\n  resting: { bgg: #fff }\n}\n");

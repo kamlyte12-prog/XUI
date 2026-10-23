@@ -39,7 +39,7 @@ namespace xui {
 	///  Border: [width, style-ident, color] or [none]. Shadow: [x y blur spread? color inset?].
 	///  Gradient: [function-ident, angle, 2-4 evenly spaced colors]. Glow: [blur, spread, color].
 	enum class PropId : u8 {
-		Bg, Fg, Border, Radius, Pad, Margin, Gap, Size, MinSize, MaxSize, MinWidth, MaxWidth, MinHeight, MaxHeight, Opacity, Shadow, Glow, Gradient, Blur, Transform,
+		Bg, Fg, Border, Outline, OutlineOffset, Radius, Pad, Margin, Gap, Size, MinSize, MaxSize, MinWidth, MaxWidth, MinHeight, MaxHeight, Opacity, Shadow, Glow, Gradient, Blur, Transform,
 		Font, FontSize, FontWeight, LetterSpacing, Align, Justify, Grow, Shrink, Cursor, ZIndex, Clip, Overflow,
 		Animation, AnimationKeep, AnimationCancel, ScrollTrack, ScrollThumb, ScrollbarSize, ScrollbarVisibility, ScrollBehavior, ScrollSpeed, Value, Count
 	};

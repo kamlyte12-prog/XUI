@@ -14,9 +14,11 @@ Side shorthands use one to four values: one applies to all sides; two means vert
 
 | Property | Accepted values | Runtime behavior / fallback |
 | --- | --- | --- |
-| `bg` (`background`) | One color or color token | Paints background; default transparent. |
-| `fg` (`color`) | One color or color token | Text, splitter, slider/progress fill tint; default `#f5f5f5`. |
+| `bg` (`background`) | One color or color token | Paints background; transparent when no rule supplies a value. Built-in Fluent 2 defaults provide surfaces to standard widgets. |
+| `fg` (`color`) | One color or color token | Text, splitter, slider/progress fill tint; the low-level fallback is `#f5f5f5`, while built-in Fluent 2 rules provide per-widget colors. |
 | `border` | 1–3 values: width, optional style identifier, optional color | Paints when a background is painted; default none. Runtime recognizes `dashed`; other style names currently render as solid. |
+| `outline` | `width [solid|dashed] color` or `width color` | Paints an outer ring while the declaring state is active (typically `focus`/`focus-visible`); it does not change layout size. Default none. |
+| `outline-offset` | One nonnegative logical length | Gap between the widget border box and `outline`; default 0. |
 | `radius` | 1–4 numbers | Rounded background corners; default 0. |
 | `pad` (`padding`) | 1–4 numbers/identifiers | Content inset and text clip inset; default 0. |
 | `margin` | 1–4 numbers/identifiers | Outer layout spacing; default 0. |
@@ -33,7 +35,7 @@ Side shorthands use one to four values: one applies to all sides; two means vert
 | `blur` | One number | Accepted and compiled; standard runtime does not apply a blur effect. |
 | `transform` | Up to 6 values using `translate(x, y)`, `scale(x[, y])`, and `rotate(angle)` | Applies a paint transform to the widget and its descendants; hit testing uses the inverse transform. Translation values use logical pixels or percentages of the widget size; rotation uses degrees. |
 | `font` (`font-family`) | One string or identifier | Selects a loaded family; default is the first `loadFont()` face, or no glyph rendering if none was loaded. |
-| `font-size` | One number | Logical font size, default 16; actual rasterization scales with DPI. |
+| `font-size` | One number | Logical font size, runtime fallback 16; the Fluent 2 baseline sets 14 for common text and 12 for compact labels. Rasterization scales with DPI. |
 | `font-weight` | One number or identifier | Numeric 100–900 selects nearest registered face weight; default 400. Identifier keywords compile but do not map to weights in the runtime. |
 | `letter-spacing` | One number | Extra spacing between glyph positions; default 0. |
 | `align` | 1–2 identifiers | `Start`, `Center`, `End`, or `Stretch`; affects container child alignment and text alignment on text-bearing leaves. Default is layout stretch for containers and start for text. The second accepted value is currently unused. |
@@ -55,6 +57,10 @@ Side shorthands use one to four values: one applies to all sides; two means vert
 | `scroll-speed` | One number | Wheel pixels per notch, clamped to 1–400; default 42. `.xui` `scrollSpeed` can override it. |
 
 Aliases normalize to canonical names: `background` → `bg`, `color` → `fg`, `padding` → `pad`, and `font-family` → `font`.
+
+## Built-in visual baseline
+
+`compileXss()` seeds the stylesheet with Fluent 2-inspired light defaults for the standard runtime widgets, then compiles the user's rules afterward. Authored selectors therefore override the baseline using the normal selector specificity and source order. The defaults supply surfaces, text colors, borders, spacing, and common interaction states; they do not replace `.xui` structure or explicit layout values. The base palette tokens retain their existing values for compatibility; the Fluent controls use their own named colors. Add an explicit theme stylesheet when the built-in light appearance is not desired.
 
 Tooltip timing and activation are `.xui` behavior properties rather than `.xss` visual properties: use `tooltipShowDelay` / `tooltipHideDelay` (milliseconds), `tooltipTrigger` (`hover`, `focus`, `both`, or `none`), `tooltipHideOnClick`, and `tooltipDisabled`. Style the shared tooltip bubble with a `Tooltip` selector and the properties in this table. `FpsCounter[showFrameTime: false]` selects its compact FPS-only label; the default also displays average milliseconds per frame.
 

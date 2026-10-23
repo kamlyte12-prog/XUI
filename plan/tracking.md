@@ -2,6 +2,56 @@
 
 This file records project changes, design decisions, trade-offs, current status, and next steps. It is updated as implementation work lands.
 
+## Fluent 2 defaults, focus outlines, and checklist values — 2026-10-21
+
+### Audit and scope
+
+- The framework already had a broad `.xss` property set, declarative keyframes/transitions, transforms, gradients, glow/shadow, and nearest-registered font-weight selection. I kept those APIs intact instead of adding overlapping styling features.
+- Missing items in the selected first slice were a coherent default visual baseline, paint-only focus outline properties, and an aggregate value API for `CheckList`. Grid/Stack runtime materialization and additional keyframe semantics remain deferred on the roadmap.
+
+### Changes and decisions
+
+- Added Fluent 2-inspired light defaults to the built-in `.xss` compilation path, covering the supported controls and auxiliary chrome: text, inputs, selection/range widgets, panels and splitters, scroll views, menus, docking parts, badges, toolbars/status bars, image placeholders, spinner, and FPS counter. They are ordinary compiled rules placed before user-authored rules, so normal specificity/order lets project styles override them. Existing base color tokens were preserved for compatibility; the Fluent defaults use their own palette values.
+- Added `outline` and `outline-offset` to the style property table/compiler and paint path. The ring is painted beyond the widget box, so it does not affect layout. The built-in focus-visible baseline uses the brand color.
+- Added `CheckListValue` (`std::vector<std::string>`) to `UiValue`. An identified list reads checked IDs of its directly nested identified `CheckItem`s in document order. `setValue` validates all IDs before applying changes and fires the parent's `change` callback once when requested. Item-level boolean values and events remain supported.
+- Updated the demo callback to read the aggregate list value. Updated `.xss`/widget references and strengthened regression tests. Existing animation tests now sample the last painted control vertex instead of the newly themed window background; the old sample was not measuring the animated control after a default window surface was introduced.
+- Alternatives considered: make Fluent defaults opt-in (less disruptive, but no coherent default styling), bake colors into widget paint code (breaks `.xss` ownership), or add a separate aggregate binding subsystem (more API than the selected value-retriever pattern). The compiled-rule baseline and typed value reuse the existing architecture.
+
+### Verification and remaining gaps
+
+- Windows MSVC Release build completed for `xui_tests` and `xui_glfw_demo`; direct test run: **191 tests, 0 failures**. This includes outline compilation/paint, Fluent defaults across the widget catalog, checklist aggregation/set validation/callbacks, and prior regressions.
+- Visible GLFW uncapped profiles with the final baseline compiled measured **392.572 FPS** for the general showcase and **340.911 FPS** for the animation section over approximately five seconds. These are visible-window render-loop throughput, not manual refresh-rate, interaction-latency, or resize measurements.
+- Before the follow-up fix below, the timer-driven profile produced **84 frames / 5.62184 s / 14.94 FPS**; a later pre-fix run took **19.55 s** for its five-second bound. This pointed to a due-timer wait problem. A temporary looped-meter profile also failed to return within its bound and was stopped; that profile-only change was removed.
+- The desktop run verified renderer initialization and process exit, but not visual inspection of every control, pointer/keyboard interaction, live resize, or normal user close. Linux/macOS remain untested.
+- Next: visually inspect theme and focus rings, manually exercise interactions/resize, and decide whether runtime Grid/Stack support becomes the next feature slice. The bounded active animation timer profile is now recorded below.
+
+## Timer loop oversleep with due animation frames — 2026-10-21
+
+### Root cause
+
+- `UiRuntime::nextTimerDelay()` clamps an elapsed deadline to `0`. The platform contract defines `waitEvents(0)` as an indefinite block. If rendering passed the next animation deadline, `Xui::run()` could forward that zero and sleep until unrelated input arrived. The visible `--profile-animation-timer` reproduced it: a nominal five-second run lasted **19.55 seconds** and rendered only 61 frames (**3.12 FPS**). This was a real wait-path freeze/oversleep, not an intentional idle measurement.
+
+### Fix and verification
+
+- The run loop now calls `waitEvents()` only for positive timeouts. When a timer is already due, it immediately starts the next loop iteration so `updateTimers()` can process it. An actually untimed run still uses `waitEvents(0)` to sleep indefinitely, preserving low idle CPU.
+- Rebuilt the Windows Release tests/demo and reran `xui_tests`: **191 tests, 0 failures**.
+- Reran the visible timer profile after the final rebuild: **306 frames / 5.00862 seconds / 61.09 FPS**. The bounded run exits on time and clears the 60 FPS threshold on this machine. An earlier post-fix sample was 308 frames / 5.00139 seconds / 61.58 FPS. These are short Release profiles, not guarantees for every scene or device; manual resize/input pacing remains to be checked.
+- The general visible uncapped profile remains **392.572 FPS**, and the animation uncapped profile **340.911 FPS**. These are throughput ceilings, distinct from the timer-driven result.
+
+## Benchmark failures after Fluent defaults — 2026-10-21
+
+### Root causes
+
+- `bench_docking` used a hard-coded splitter point based on a zero-origin DockHost. The built-in Fluent baseline adds DockHost padding, shifting the local splitter hit area relative to that probe. The measured operation was valid; its fixture no longer specified the geometry it assumed.
+- `bench_docking_scale` compiled its stylesheet inside `buildFor()` and returned while `UiRuntime` retained a pointer to that stylesheet. With the larger built-in default rules, the dangling pointer was exposed as an access violation during paint. The scale fixture also generated a missing quote in deep-tree target IDs and assumed panels 0 and 1 always shared an outer splitter, which is false for the wide tree.
+
+### Fixes and verification
+
+- Both docking microbenchmarks now explicitly set `DockHost` padding to zero so their geometry is deterministic and independent of visual defaults. The scale benchmark keeps the parsed document, stylesheet, string interner, and text system alive for the runtime's full use. Its deep-tree source now quotes targets correctly, it searches measured panel bounds for a real adjacent splitter, and it exits nonzero if a scenario cannot find one. The simple benchmark prints the measured bounds/probe if its hit test regresses.
+- All Release benchmark targets built. `bench_style` compiled 575 rules in **7.10 ms** (30 ms budget); `bench_xui` parsed 2,001 nodes in **4.05 ms** (30 ms budget); `bench_layout` relaid out 938 nodes in **136.8 µs** (500 µs budget); `bench_paint` completed in **359.0 µs** (1,000 µs budget, 16 draw batches). `bench_docking` measured **0.77 µs** drag preview and **2.07 µs** splitter move. All six wide/deep scale scenarios completed; the largest reported paint case was **132.158 µs/frame** (32-panel wide tree).
+- Smoke fuzz runs also passed: parser 10 iterations/30 mutations with no crash, layout 100 seeds × 10 steps, and paint 100 seeds × 70 primitives pixel-identical to naive order. These are bounded smoke runs, not the full long-running fuzzer defaults.
+- The prior benchmark failure was a fixture failure, not a measured slowdown in those scenarios. The full suite is rerun after these edits; current benchmark and test evidence is Windows MSVC Release only.
+
 ## Animation timer cadence, cursor exit, cancellation policy, and F4 draw batches — 2026-10-21
 
 ### Audit and root causes
@@ -24,10 +74,10 @@ This file records project changes, design decisions, trade-offs, current status,
 ### Verification and remaining gaps
 
 - Windows MSVC/Ninja build completed for all default targets after the parser/runtime/API changes. CTest passed **1/1**; the test binary reports **188 tests, 0 failures**. Coverage includes no-input animation ticks, cursor leave, finish-current transition, finish-current infinite keyframe iteration, hidden-clock pause/resume, and F4 independence from FPS mode.
-- The first visible `--profile-animation-timer` run, before changing the timer wait from a full interval to the remaining deadline, measured **210 frames / 6.70965 s / 31.30 FPS**. The user did not approve the post-fix visible rerun, so the new cadence has not been measured in a live window and the >60 FPS visible target is **not verified**. The earlier **382.77 FPS** uncapped profile is a different mode and does not prove normal timer-loop cadence.
+- The first visible `--profile-animation-timer` run, before changing the timer wait from a full interval to the remaining deadline, measured **210 frames / 6.70965 s / 31.30 FPS**. At the time, no post-change visible run had been completed; the follow-up zero-timeout fix and current timing are recorded in the next entry. The earlier **382.77 FPS** uncapped profile is a different mode and does not prove normal timer-loop cadence.
 - No manual mouse, minimize/restore, or unfocused-window session was completed. Automated runtime tests verify state and clock behavior; the GLFW callback compiles, but desktop interaction should still be confirmed.
 - Trade-off: custom `Platform` implementations default to always visible to preserve compatibility. They must override `windowVisible()` to pause clocks on their own hidden/minimized state.
-- Next: rerun `xui_glfw_demo --profile-animation-timer` visibly after the deadline change; confirm >60 FPS with the pointer still and after leaving the window; minimize/restore and verify animation time pauses; press F4 with FPS off and confirm it does not keep the loop active.
+- Follow-up: the bounded profile and zero-timeout wait issue are addressed in the later entry. Manual mouse, minimize/restore, pointer-exit and F4 checks remain.
 
 ## Custom titlebar duplication on maximize — 2026-10-21
 

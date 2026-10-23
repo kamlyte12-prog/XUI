@@ -21,7 +21,10 @@ Window(size: 1200x800) {
 )";
 	StringInterner strings;
 	auto document = parseXui(source, "bench-docking.xui", strings);
-	auto styles = compileXss("", "bench-docking.xss", strings);
+	// Keep the pointer fixture's host origin at (0, 0). The built-in Fluent baseline
+	// intentionally pads DockHost, so this benchmark overrides that visual default to
+	// keep its hand-calculated splitter probe deterministic.
+	auto styles = compileXss("DockHost { resting: { pad: 0px } }", "bench-docking.xss", strings);
 	if (!document || !styles) { std::fprintf(stderr, "fixture parse failed\n"); return 1; }
 	TextSystem text;
 	UiRuntime ui;
@@ -45,7 +48,11 @@ Window(size: 1200x800) {
 
 	const Rect resizedLeft = ui.bounds({ 4, 1 });
 	const Vec2 gutter{ resizedLeft.right() + 3.5f, resizedLeft.y + 100.f };
-	if (!ui.pointerDown(gutter)) { std::fprintf(stderr, "splitter hit test failed\n"); return 2; }
+	if (!ui.pointerDown(gutter)) {
+		std::fprintf(stderr, "splitter hit test failed: left=(%.1f, %.1f, %.1f, %.1f), root=(%.1f, %.1f, %.1f, %.1f), probe=(%.1f, %.1f)\n",
+			resizedLeft.x, resizedLeft.y, resizedLeft.w, resizedLeft.h, root.x, root.y, root.w, root.h, gutter.x, gutter.y);
+		return 2;
+	}
 	const auto splitBegin = std::chrono::steady_clock::now();
 	for (u32 i = 0; i < iterations; ++i) {
 		const f32 delta = (i & 1u) ? 8.f : -8.f;

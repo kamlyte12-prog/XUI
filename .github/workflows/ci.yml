@@ -22,6 +22,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Cache bundled dependency builds
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/_deps/freetype
+            build/_deps/harfbuzz
+            build/_deps/lunasvg
+          key: xui-deps-${{ runner.os }}-${{ matrix.name }}-${{ hashFiles('CMakeLists.txt', 'lib/freetype-2.15.0/**', 'lib/harfbuzz-15.0.0/**', 'lib/lunasvg-3.5.0/**') }}
+
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
@@ -55,8 +64,8 @@ jobs:
             $EXTRA
 
       - name: Build
-        # Building the demo also compiles both optional adapters from backends/.
-        run: cmake --build build --config Debug --parallel --target xui_tests xui_glfw_demo
+        # Exercise the public app, optional adapters, and the authored Tetris sample.
+        run: cmake --build build --config Debug --parallel --target xui_tests xui_glfw_demo xui_game_demo
 
       - name: Test
         env:

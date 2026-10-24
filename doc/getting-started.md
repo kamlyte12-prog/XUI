@@ -55,16 +55,18 @@ add_subdirectory(path/to/xui)
 target_link_libraries(my_app PRIVATE xui_widgets)
 ```
 
-`xui_widgets` publicly links the core, asset parser, layout, rendering, and text libraries used by the facade.
+`xui_widgets` publicly links the core, asset parser, layout, rendering, and text libraries used by the facade. FreeType and HarfBuzz are required implementation dependencies of the text library; their headers stay private to the implementation and are not included by the public API.
 
 The cross-platform demo target is `xui_glfw_demo`. It uses the bundled GLFW source and requires system OpenGL development files. The GLFW platform adapter and OpenGL renderer are separate optional targets in `backends/glfw/` and `backends/opengl/`; the demo links both without adding either implementation to the core libraries. The default launch loads `showcase.xui` and `showcase.xss`. Press F3 to toggle FPS and F4 to show draw batches without enabling continuous rendering.
 
 To build the GLFW demo explicitly:
 
 ```sh
-cmake -S . -B build/glfw -DXUI_BUILD_GLFW_EXAMPLE=ON -DXUI_BUILD_TESTS=OFF -DXUI_BUILD_BENCHMARKS=OFF
+cmake -S . -B build/glfw -DXUI_BUILD_EXAMPLES=ON -DXUI_BUILD_GLFW_EXAMPLE=ON -DXUI_BUILD_TESTS=OFF -DXUI_BUILD_BENCHMARKS=OFF
 cmake --build build/glfw --target xui_glfw_demo
 ```
+
+To build only the adapters for another application, set `-DXUI_BUILD_GLFW_BACKEND=ON -DXUI_BUILD_EXAMPLES=OFF`. The existing `XUI_BUILD_GLFW_EXAMPLE` option still builds the adapters when examples are enabled, preserving the prior default build behavior.
 
 The executable loads the copied showcase pair beside itself, independent of the working directory. Set `XUI_DEMO_FONT` to a TrueType font path if the demo's font search paths do not find one. A screenshot and the full example assets are linked from the [documentation index](README.md#examples-and-implementation-scope).
 
@@ -208,7 +210,9 @@ Applications that need timed updates can call `ui.setTickHandler(callback, conte
 | `XUI_BUILD_TESTS` | Build `xui_tests` | ON |
 | `XUI_BUILD_BENCHMARKS` | Build benchmarks and fuzz harnesses | ON |
 | `XUI_BUILD_EXAMPLES` | Build runnable examples | ON |
-| `XUI_BUILD_GLFW_EXAMPLE` | Build GLFW/OpenGL demo (`xui_glfw_demo`, and `xui_hello` on Windows) | ON |
+| `XUI_BUILD_GLFW_EXAMPLE` | Build GLFW/OpenGL examples | ON |
+| `XUI_BUILD_GLFW_BACKEND` | Build GLFW/OpenGL adapters independently of examples | OFF |
+| `XUI_ENABLE_IMAGE_SUPPORT` | Build PNG/JPEG/BMP/TGA and SVG image loading | ON |
 | `XUI_WERROR` | Treat warnings as errors | ON |
 | `XUI_SANITIZE` | Enable ASan/UBSan on GCC/Clang | OFF |
 

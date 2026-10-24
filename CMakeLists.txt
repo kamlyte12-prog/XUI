@@ -10,6 +10,7 @@ option(XUI_BUILD_TESTS       "Build unit tests"        ON)
 option(XUI_BUILD_BENCHMARKS  "Build benchmarks"        ON)
 option(XUI_BUILD_EXAMPLES    "Build runnable examples" ON)
 option(XUI_BUILD_GLFW_EXAMPLE "Build the GLFW + OpenGL example (uses bundled GLFW and system OpenGL)" ON)
+option(XUI_BUILD_GLFW_BACKEND "Build the optional GLFW/OpenGL backend adapters" OFF)
 option(XUI_ENABLE_IMAGE_SUPPORT "Enable bundled PNG/JPEG/BMP/TGA and SVG image loading" ON)
 option(XUI_WERROR            "Treat warnings as errors" ON)
 option(XUI_SANITIZE          "Enable ASan+UBSan (GCC/Clang)" OFF)
@@ -175,7 +176,10 @@ target_link_libraries(xui_platform PUBLIC xui_core PRIVATE xui_warnings)
 add_library(xui_text STATIC
   src/text/font.cpp src/text/rasterizer.cpp src/text/atlas.cpp src/text/text_layout.cpp)
 target_link_libraries(xui_text PUBLIC xui_core xui_renderer PRIVATE xui_warnings)
-target_link_libraries(xui_text PUBLIC xui::freetype xui::harfbuzz)
+# The text implementation needs these static libraries, but public Xui headers
+# do not expose either dependency. PRIVATE keeps their include paths out of
+# consumer compile usage requirements while CMake still links static symbols.
+target_link_libraries(xui_text PRIVATE xui::freetype xui::harfbuzz)
 
 # --- xui_widgets: first retained runtime bridge from .xui/.xss to layout, text and paint. ---
 add_library(xui_widgets STATIC src/ui/runtime.cpp src/ui/xui.cpp)
@@ -188,6 +192,27 @@ if(XUI_BUILD_TESTS)
 endif()
 if(XUI_BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)
+endif()
+
+# The legacy example option continues to build its required backend by default.
+# Advanced builds can also select the backend directly without building examples.
+if(XUI_BUILD_GLFW_BACKEND OR (XUI_BUILD_EXAMPLES AND XUI_BUILD_GLFW_EXAMPLE))
+  set(GLFW_BUILD_DOCS     OFF CACHE BOOL "" FORCE)
+  set(GLFW_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
+  set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+  set(GLFW_INSTALL        OFF CACHE BOOL "" FORCE)
+  add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/examples/lib/glfw-3.5.1"
+                   "${CMAKE_CURRENT_BINARY_DIR}/glfw" EXCLUDE_FROM_ALL)
+
+  find_package(OpenGL REQUIRED)
+  if(TARGET glfw)
+    set(XUI_GLFW_TARGET glfw)
+  elseif(TARGET glfw3::glfw)
+    set(XUI_GLFW_TARGET glfw3::glfw)
+  else()
+    message(FATAL_ERROR "The GLFW source did not provide a supported CMake target")
+  endif()
+  add_subdirectory("${PROJECT_SOURCE_DIR}/backends" "${PROJECT_BINARY_DIR}/backends")
 endif()
 
 if(XUI_BUILD_EXAMPLES)

@@ -19,11 +19,11 @@ Side shorthands use one to four values: one applies to all sides; two means vert
 | `border` | 1–3 values: width, optional style identifier, optional color | Paints when a background is painted; default none. Runtime recognizes `dashed`; other style names currently render as solid. |
 | `outline` | `width [solid|dashed] color` or `width color` | Paints an outer ring while the declaring state is active (typically `focus`/`focus-visible`); it does not change layout size. Default none. |
 | `outline-offset` | One nonnegative logical length | Gap between the widget border box and `outline`; default 0. |
-| `radius` | 1–4 numbers | Rounded background corners; default 0. |
+| `radius` | 1–4 numbers | Rounded background corners; default 0. On the root `Window`, the first radius also requests preferred native custom-chrome rounding on supported backends; GLFW/Windows uses DWM's system rounded shape, which may not match arbitrary authored values exactly. |
 | `pad` (`padding`) | 1–4 numbers/identifiers | Content inset and text clip inset; default 0. |
 | `margin` | 1–4 numbers/identifiers | Outer layout spacing; default 0. |
 | `gap` | 1–2 numbers | Row/column spacing; default 0. |
-| `size` | 1–2 numbers or identifiers | Fixed width/height; one value applies to both; default auto/intrinsic. `%` is resolved against available layout size. |
+| `size` | 1–2 numbers or identifiers | Fixed width/height; one value applies to both; default auto/intrinsic. `%` is resolved against available layout size. On the root `Window`, px/unitless dimensions also provide the initial native window size. |
 | `min-size` | 1–2 lengths | Minimum width/height; default 0. Supports px and percentages. |
 | `max-size` | 1–2 lengths | Maximum width/height; default unbounded. Supports px and percentages. |
 | `min-width`, `max-width` | One length | Width constraints; use px or `%`; applied after width resolution. |
@@ -49,6 +49,7 @@ Side shorthands use one to four values: one applies to all sides; two means vert
 | `animation` | `name duration [iterations|infinite|paused] [easing] [cancel(stop|finish)]` | Named keyframes start automatically unless `paused` is present. `cancel(...)` overrides the widget's `animation-cancel` rule for this animation. Duration accepts `ms` or `s`; default is one iteration. |
 | `animation-cancel` | `stop` or `finish` | Per-widget cancellation policy. `stop` is the default and applies the newest state immediately. `finish` completes the current transition target or current keyframe iteration before applying the newest state. |
 | `value` | One number, inside keyframes | Animates the normalized value of `ProgressBar` and other runtime controls that expose a numeric value; the ordinary visual style rule does not set control state. |
+| `window-title` | One string or identifier | Initial native window title default on the root `Window`; explicit `XuiOptions` or `.xui Window(title: ...)` takes precedence. |
 | `scroll-track` | One color or color token | Scrollbar track tint for `ScrollView`; default translucent dark track. |
 | `scroll-thumb` | One color or color token | Scrollbar thumb tint; participates in `hover` and `pressed` state resolution. |
 | `scrollbar-size` | One number | Scrollbar thickness in logical pixels, clamped to 4–24; default 10. |

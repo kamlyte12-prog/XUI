@@ -238,8 +238,8 @@ int main(int argc, char** argv) {
 	const bool profile = !profileCase.empty();
 	xui::XuiOptions options;
 	options.appName = "xui-glfw-demo";
-	options.windowTitle = "Xui GLFW/OpenGL widget showcase";
-	options.width = 1080; options.height = 760;
+	//options.windowTitle = "Xui GLFW/OpenGL widget showcase";
+	//options.width = 1080; options.height = 760;
 	options.minWidth = 900; options.minHeight = 640;   // keeps the three-field input row unclipped
 	// Profiles need a visible window so the runtime's minimize/hidden animation policy does not
 	// suppress rendering and report a misleading zero-frame result.

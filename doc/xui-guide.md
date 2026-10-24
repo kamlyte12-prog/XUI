@@ -111,9 +111,21 @@ Panel[class: "card", width: 360px, height: 96px, pad: 10px] {
 
 The showcase's Layout tab also demonstrates fixed and percentage sizes, clamped constraints, both XUI and XSS minimum floors, row/column flow, alignment, justification, padding, margins, nesting, and horizontal/vertical `Split` behavior where applicable.
 
-The native window's title and starting size are configured with `XuiOptions`. `Window(title: ..., size: ...)` is parsed and retained as document metadata, but the `Xui` facade currently creates the native window from `XuiOptions`; set both explicitly if you want matching metadata and window configuration.
+The initial native window title and size use this precedence: explicitly selected `XuiOptions` fields, then `Window(title: ..., size: ...)` in `.xui`, then the root `Window` `.xss` rule's `window-title` and `size`, then `XuiOptions` defaults (`Xui`, 720×440). `window-title` and `size` in `.xss` provide defaults only; the `.xui` values take precedence. `XuiOptions` fields override independently. If you explicitly want a legacy default value to override authored files, set its `windowTitleOverride`, `windowWidthOverride`, or `windowHeightOverride` flag.
+
+On Windows 11, a root `Window` `.xss` `radius` is also passed to the GLFW platform as a preferred corner radius when client-drawn chrome is enabled. DWM may ignore that hint on older Windows versions. Other platforms keep their native rectangular window shape; the radius still styles the client content.
 
 The Window property `platformTopMenu` is the exception: `Window(...) [platformTopMenu: false]` is read from the document itself, before the native window exists. With `false` the facade creates a borderless window and a [`TitleBar`](widgets.md#titlebar) widget must provide the draggable top menu (see the [widget reference](widgets.md#titlebar) for the behavior matrix and per-platform fallbacks).
+
+### Window defaults and precedence
+
+The `.xss` root-window defaults can be authored as:
+
+```xss
+Window { resting: { window-title: "My application", size: 1000px 700px } }
+```
+
+Each `XuiOptions` field takes precedence independently. Since the defaults are `Xui`, 720, and 440, assigning a non-default value is recognized as explicit. To explicitly choose one of those exact defaults while overriding `.xui` or `.xss`, set the corresponding `windowTitleOverride`, `windowWidthOverride`, or `windowHeightOverride` boolean.
 
 ## Nesting patterns
 

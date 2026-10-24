@@ -47,7 +47,8 @@ public:
 	/// on records without exposing windows.h types in this header.
 	struct Window { GLFWwindow* native = nullptr; xui::WindowHandle handle; GlfwPlatform* owner = nullptr;
 	                void (*liveResizeFn)(void*) = nullptr; void* liveResizeContext = nullptr;
-	                bool customChrome = false; void* chromeState = nullptr; xui::f32 resizeInset = 0.f; };
+	                bool customChrome = false; bool roundedCornersApplied = false; void* chromeState = nullptr; xui::f32 resizeInset = 0.f;
+	                xui::f32 cornerRadius = 0.f; };
 
 private:
 	static Window* record(GLFWwindow* window);

@@ -8,6 +8,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <dwmapi.h>
 #endif
 #include <glfw/glfw_platform.hpp>
 #ifdef _WIN32
@@ -52,6 +53,7 @@ WindowHandle GlfwPlatform::createWindow(const WindowDesc& d) {
 	if (!native) return {};
 	const WindowHandle handle{ static_cast<u32>(m_windows.size()), 1 };
 	m_windows.push_back({ native, handle, this });
+	m_windows.back().cornerRadius = d.cornerRadius;
 	glfwSetWindowUserPointer(native, &m_windows.back());
 	glfwSetWindowSizeCallback(native, onSize);
 	glfwSetCursorPosCallback(native, onCursor);
@@ -366,6 +368,29 @@ namespace {
 			break;
 		case WM_NCHITTEST:
 			if (window && window->customChrome) {
+				// Exclude the square pixels outside the requested rounded client shape. DWM owns
+				// the actual Windows 11 clipping; this keeps corner clicks from hitting UI content.
+				if (window->roundedCornersApplied && !IsZoomed(hwnd)) {
+					RECT rc{};
+					if (GetWindowRect(hwnd, &rc)) {
+						const LONG x = static_cast<LONG>(static_cast<short>(LOWORD(lp))) - rc.left;
+						const LONG y = static_cast<LONG>(static_cast<short>(HIWORD(lp))) - rc.top;
+						const LONG width = rc.right - rc.left, height = rc.bottom - rc.top;
+						float scaleX = 1.f, scaleY = 1.f;
+						if (window->native) glfwGetWindowContentScale(window->native, &scaleX, &scaleY);
+						const LONG radius = static_cast<LONG>(window->cornerRadius * std::max(scaleX, scaleY) + 0.5f);
+						auto outsideCorner = [radius](LONG px, LONG py, LONG cx, LONG cy) {
+							if (radius <= 0) return false;
+							const LONG dx = px - cx, dy = py - cy;
+							return dx * dx + dy * dy > radius * radius;
+						};
+						if ((x < radius && y < radius && outsideCorner(x, y, radius, radius)) ||
+							(x >= width - radius && y < radius && outsideCorner(x, y, width - radius - 1, radius)) ||
+							(x < radius && y >= height - radius && outsideCorner(x, y, radius, height - radius - 1)) ||
+							(x >= width - radius && y >= height - radius && outsideCorner(x, y, width - radius - 1, height - radius - 1)))
+							return HTNOWHERE;
+					}
+				}
 				// Resize borders behave like a native frame; the rest stays client area so the
 				// runtime keeps receiving mouse input for the custom TitleBar.
 				if (!IsZoomed(hwnd) && window->native && glfwGetWindowAttrib(window->native, GLFW_RESIZABLE) == GLFW_TRUE) {
@@ -402,6 +427,13 @@ void GlfwPlatform::installChrome(Window& window) {
 	window.chromeState = state;
 	window.customChrome = true;
 	applySnapStyles(hwnd);
+	if (window.cornerRadius > 0.f) {
+		// DWMWA_WINDOW_CORNER_PREFERENCE is supported on Windows 11. Older Windows versions
+		// reject it; native rectangular corners remain the safe fallback.
+		const DWM_WINDOW_CORNER_PREFERENCE preference = DWMWCP_ROUND;
+		window.roundedCornersApplied = SUCCEEDED(DwmSetWindowAttribute(
+			hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &preference, sizeof(preference)));
+	}
 }
 
 void GlfwPlatform::removeChrome(Window& window) {
@@ -415,5 +447,6 @@ void GlfwPlatform::removeChrome(Window& window) {
 	}
 	window.chromeState = nullptr;
 	window.customChrome = false;
+	window.roundedCornersApplied = false;
 }
 #endif

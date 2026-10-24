@@ -10,7 +10,7 @@ Start with the actual error string from `Xui::lastError()`, then confirm the run
 4. Set `XuiOptions::visible = true`; check `glContext` matches the backend needs.
 5. Verify the renderer's required system graphics libraries/context are present.
 
-`Xui` creates the native title/size from `XuiOptions`. The `Window(title, size)` values in `.xui` are runtime document metadata and currently do not override those native window settings.
+Initial native window title and size resolve from explicit `XuiOptions`, then `.xui Window(title, size)`, then root `.xss` `window-title`/`size`, then facade defaults. `XuiOptions` fields override independently. To force a default-valued option such as `720x440`, set the corresponding `windowWidthOverride`/`windowHeightOverride` flag.
 
 ## Text is blank, missing, or shows boxes
 

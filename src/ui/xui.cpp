@@ -6,6 +6,8 @@
 #include <fstream>
 #include <iterator>
 #include <filesystem>
+#include <cmath>
+#include <cctype>
 
 namespace xui {
 	namespace {
@@ -22,6 +24,85 @@ namespace xui {
 			std::string contents;
 			if (!readPath(path, contents)) return std::nullopt;
 			return contents;
+		}
+
+		struct InitialWindowConfig { std::string title = "Xui"; u32 width = 720, height = 440; f32 cornerRadius = 0.f; };
+
+		std::string_view expressionString(const Document& document, const StringInterner& strings, u32 expression) {
+			if (expression >= document.exprs.size()) return {};
+			const XExpr& value = document.exprs[expression];
+			if (value.kind == XExprKind::String || value.kind == XExprKind::Name) return strings.view(value.name);
+			return {};
+		}
+
+		bool initialDimension(const Atom& atom, u32& out) {
+			if (atom.kind != AtomKind::Number || (atom.unit != Unit::None && atom.unit != Unit::Px) ||
+				!std::isfinite(atom.num) || atom.num <= 0.f || atom.num > 32768.f) return false;
+			out = static_cast<u32>(std::lround(atom.num));
+			return out > 0;
+		}
+
+		InitialWindowConfig authoredWindowConfig(const Document& document, StyleSheet& styles,
+			StringInterner& strings, u32 theme) {
+			InitialWindowConfig config;
+			if (document.roots.empty()) return config;
+			const XNode& root = document.nodes[document.roots.front()];
+			std::optional<std::string> documentTitle;
+			std::optional<std::pair<u32, u32>> documentSize;
+			for (const XArg& arg : document.argsOf(root)) {
+				const std::string_view name = strings.view(arg.name);
+				if (name == "title") {
+					const std::string_view value = expressionString(document, strings, arg.expr);
+					if (!value.empty()) documentTitle = std::string(value);
+				}
+				else if (name == "size" && arg.expr < document.exprs.size()) {
+					const XExpr& value = document.exprs[arg.expr];
+					if (value.kind == XExprKind::Size && value.num > 0.f && value.num2 > 0.f && value.num <= 32768.f && value.num2 <= 32768.f)
+						documentSize = std::pair{ static_cast<u32>(std::lround(value.num)), static_cast<u32>(std::lround(value.num2)) };
+				}
+			}
+
+			std::vector<StrId> classes;
+			StrId id{};
+			for (const XProp& prop : document.propsOf(root)) {
+				const std::string_view name = strings.view(prop.name);
+				const std::string_view value = expressionString(document, strings, prop.expr);
+				if (name == "id" && !value.empty()) id = strings.intern(value);
+				else if (name == "class") {
+					std::size_t start = 0;
+					while (start < value.size()) {
+						while (start < value.size() && std::isspace(static_cast<unsigned char>(value[start]))) ++start;
+						std::size_t end = start;
+						while (end < value.size() && !std::isspace(static_cast<unsigned char>(value[end]))) ++end;
+						if (end > start) classes.push_back(strings.intern(value.substr(start, end - start)));
+						start = end;
+					}
+				}
+			}
+			MatchInput input; input.type = root.type; input.id = id; input.classes = classes;
+			const StyleSetId set = styles.match(input);
+			PropTable resolved{};
+			styles.resolve(set, stateBit(State::Resting), theme, resolved);
+			if (resolved.has(PropId::WindowTitle)) {
+				const StyleValue& title = resolved.get(PropId::WindowTitle);
+				if (title.count && (title.atoms[0].kind == AtomKind::String || title.atoms[0].kind == AtomKind::Ident))
+					config.title.assign(strings.view(title.atoms[0].str()));
+			}
+			if (resolved.has(PropId::Size)) {
+				const StyleValue& size = resolved.get(PropId::Size);
+				u32 width = 0, height = 0;
+				if (size.count >= 2 && initialDimension(size.atoms[0], width) && initialDimension(size.atoms[1], height))
+					{ config.width = width; config.height = height; }
+			}
+			if (resolved.has(PropId::Radius)) {
+				const StyleValue& radius = resolved.get(PropId::Radius);
+				if (radius.count && radius.atoms[0].kind == AtomKind::Number &&
+					(radius.atoms[0].unit == Unit::None || radius.atoms[0].unit == Unit::Px))
+					config.cornerRadius = std::clamp(radius.atoms[0].num, 0.f, 64.f);
+			}
+			if (documentTitle) config.title = std::move(*documentTitle);
+			if (documentSize) { config.width = documentSize->first; config.height = documentSize->second; }
+			return config;
 		}
 	}
 
@@ -96,9 +177,14 @@ namespace xui {
 		}
 		m_platformReady = true;
 
+		const u32 activeTheme = m_themeName.empty() ? 0u : m_assets.styles.themeIndex(m_strings.intern(m_themeName)).value_or(0u);
+		InitialWindowConfig initial = authoredWindowConfig(m_assets.document, m_assets.styles, m_strings, activeTheme);
+		if (m_options.windowTitleOverride || m_options.windowTitle != "Xui") initial.title = m_options.windowTitle;
+		if (m_options.windowWidthOverride || m_options.width != 720) initial.width = m_options.width;
+		if (m_options.windowHeightOverride || m_options.height != 440) initial.height = m_options.height;
 		WindowDesc windowDesc;
-		windowDesc.title = m_options.windowTitle;
-		windowDesc.width = m_options.width; windowDesc.height = m_options.height;
+		windowDesc.title = initial.title;
+		windowDesc.width = initial.width; windowDesc.height = initial.height;
 		windowDesc.minWidth = m_options.minWidth; windowDesc.minHeight = m_options.minHeight;
 		windowDesc.resizable = m_options.resizable; windowDesc.visible = m_options.visible;
 		windowDesc.glContext = m_options.glContext;
@@ -106,6 +192,7 @@ namespace xui {
 		// it (borderless + native drag/snap on Windows) or keeps native decorations and reports
 		// the fallback through Platform::setDecorated.
 		windowDesc.decorations = !documentUsesClientChrome(m_assets.document, m_strings);
+		windowDesc.cornerRadius = initial.cornerRadius;
 		m_window = m_platform->createWindow(windowDesc);
 		if (!m_window.valid()) { setError("Could not create the application window."); shutdown(); return false; }
 		m_platform->makeGlCurrent(m_window);
@@ -133,6 +220,7 @@ namespace xui {
 		if (!m_runtime.build(m_assets.document, m_assets.styles, m_strings, m_text, defaultFont, m_error)) {
 			shutdown(); return false;
 		}
+		m_runtime.setWindowMetadata(initial.title, initial.width, initial.height);
 		if (defaultFont.valid()) {
 			for (const FontFace& font : m_fonts) {
 				if (!m_runtime.registerFont(font.family, font.weight, font.handle, m_error)) {
@@ -293,6 +381,7 @@ namespace xui {
 
 	void Xui::setWindowTitle(std::string_view title) {
 		if (m_platform && m_window.valid()) m_platform->setWindowTitle(m_window, title);
+		m_runtime.updateWindowTitle(title);
 	}
 
 	void Xui::shutdown() {

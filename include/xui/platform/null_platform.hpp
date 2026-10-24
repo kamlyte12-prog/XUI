@@ -19,6 +19,7 @@ namespace xui {
 		WindowHandle createWindow(const WindowDesc&) override;
 		void destroyWindow(WindowHandle) override;
 		void setWindowTitle(WindowHandle, std::string_view) override;
+		std::string_view windowTitle(WindowHandle h) const;
 		Vec2 windowSizeLogical(WindowHandle h) const override { return sizeLogical(h); }
 		Vec2i windowSizePixels(WindowHandle h) const override { return sizePixels(h); }
 		f32 dpiScale(WindowHandle) const override;
@@ -59,6 +60,7 @@ namespace xui {
 		void setResizeInset(WindowHandle, f32 pixels) override { m_resizeInset = pixels; }
 
 		f32 lastResizeInset() const { return m_resizeInset; }
+		f32 lastCornerRadius() const { return m_cornerRadius; }
 
 		bool lastDecorated() const { return m_lastDecorated; }
 		u32 setDecoratedCount() const { return m_setDecoratedCount; }
@@ -97,6 +99,7 @@ namespace xui {
 		WindowEdge m_lastResizeEdge = WindowEdge::Left;
 		bool m_maximized = false;
 		f32 m_resizeInset = 0.f;
+		f32 m_cornerRadius = 0.f;
 		u32 m_setDecoratedCount = 0, m_systemMoveCount = 0, m_systemResizeCount = 0;
 		u32 m_minimizeCount = 0, m_maximizeToggleCount = 0, m_closeCount = 0;
 	};

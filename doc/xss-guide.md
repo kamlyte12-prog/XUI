@@ -84,6 +84,16 @@ Button.primary { resting: { size: 200px 42px, bg: #2563eb, fg: #ffffff, radius: 
 
 Use `.xui align` when setting item alignment in the structure. `.xss align` also controls text alignment on text-bearing leaves and container child alignment; prefer `.xui align` for structural alignment to make intent obvious.
 
+### Initial window defaults
+
+The root `Window` selector may set `window-title` and `size` for the initial native window:
+
+```xss
+Window { resting: { window-title: "My application", size: 1000px 700px, radius: 12px } }
+```
+
+These are defaults. Explicit `XuiOptions` values override `.xui Window(title, size)`, which override these `.xss` values. `.xss radius` also styles the client surface; on Windows 11 the GLFW backend requests matching DWM window corners for a custom title bar. The backend excludes the outside corner pixels from hit testing. Other platforms retain their rectangular native window shape. See the [`.xui` guide](xui-guide.md#window-defaults-and-precedence) for exact precedence and how to override a default-valued `XuiOptions` field.
+
 ## Transitions and keyframes
 
 The compiler accepts `transition` declarations and named `keyframes`:

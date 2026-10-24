@@ -21,6 +21,9 @@ namespace xui {
 		bool glContext = true;
 		bool vsync = false;
 		u32 atlasSize = GlyphAtlas::kMinSize;
+		/// Set these when explicitly choosing the legacy defaults (`Xui`, 720x440); non-default direct
+		/// assignments are detected automatically. XuiOptions overrides document and stylesheet values.
+		bool windowTitleOverride = false, windowWidthOverride = false, windowHeightOverride = false;
 	};
 
 	struct XuiRunOptions {

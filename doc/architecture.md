@@ -53,7 +53,7 @@ Input travels in the opposite direction: `Platform::pumpEvents()` yields normali
 
 ## Backend-neutral coordinate and event contract
 
-The `Platform` contract documents pointer coordinates and logical client dimensions in logical pixels with a top-left origin. `windowSizePixels()` reports physical framebuffer dimensions. `dpiScale()` maps logical size to physical pixels. Concrete platforms must normalize native coordinates before returning events.
+The `Platform` contract documents pointer coordinates and logical client dimensions in logical pixels with a top-left origin. `windowSizePixels()` reports physical framebuffer dimensions. `dpiScale()` maps logical size to physical pixels. `WindowDesc` carries the resolved initial title, size, decorations choice, and optional preferred custom-chrome corner radius. The GLFW Windows backend applies the radius through the DWM corner-preference API when accepted and excludes the outside corner pixels from restored-window hit testing; other platforms retain rectangular native corners. Concrete platforms must normalize native coordinates before returning events.
 
 The runtime does not handle native messages. The platform queues and returns `xui::Event` values, including `MouseMove`, `MouseDown`, `MouseUp`, `Wheel`, `KeyDown`, `TextInput`, `Resize`, `DpiChange`, `CloseRequest`, and `Quit`. File/IME event data is platform-owned according to the interface comments and must stay valid for the documented period.
 

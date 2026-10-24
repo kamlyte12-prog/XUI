@@ -124,6 +124,8 @@ xui::Xui ui(options);
 
 The renderer and platform objects stay application-owned and must outlive the attached `Xui` object. The facade shuts down their initialized resources when `shutdown()` is called or when `Xui` is destroyed. The facade currently manages one window and one run lifecycle.
 
+At startup, explicit `XuiOptions` values override `.xui Window(title, size)`, which override root-window `.xss` defaults (`window-title` and `size`), then facade defaults. The option fields override independently. To explicitly use a default-valued option such as `Xui` or 720×440 as an override, set `windowTitleOverride`, `windowWidthOverride`, or `windowHeightOverride`.
+
 ## First `.xui` and `.xss` files
 
 `ui/main.xui`:

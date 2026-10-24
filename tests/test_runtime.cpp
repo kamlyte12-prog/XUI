@@ -1058,6 +1058,54 @@ TEST(xui_facade_loads_assets_attaches_backends_and_runs_frames) {
 	CHECK(!app.window().valid());
 }
 
+TEST(xui_facade_resolves_window_defaults_with_fieldwise_precedence) {
+	auto runCase = [](std::string_view xuiSource, std::string_view xssSource, XuiOptions options,
+		std::string_view expectedTitle, u32 expectedWidth, u32 expectedHeight) {
+		const auto base = std::filesystem::temp_directory_path() / "xui-window-precedence-tests";
+		std::filesystem::create_directories(base);
+		const auto xuiPath = base / "window.xui";
+		const auto xssPath = base / "window.xss";
+		{ std::ofstream file(xuiPath, std::ios::binary); file << xuiSource; }
+		{ std::ofstream file(xssPath, std::ios::binary); file << xssSource; }
+		Xui app(options);
+		CHECK(app.loadXui(xuiPath.string()));
+		CHECK(app.loadXss(xssPath.string()));
+		if (!app.lastError().empty()) return;
+		NullRenderer renderer;
+		NullPlatform platform;
+		CHECK(app.attach(renderer, platform));
+		CHECK_EQ(platform.windowTitle(app.window()), expectedTitle);
+		const Vec2 size = platform.windowSizeLogical(app.window());
+		CHECK_EQ(size.x, static_cast<f32>(expectedWidth));
+		CHECK_EQ(size.y, static_cast<f32>(expectedHeight));
+		CHECK_EQ(platform.lastCornerRadius(), 12.f);
+		CHECK_EQ(app.runtime().windowTitle(), std::string(expectedTitle));
+		app.shutdown();
+	};
+
+	constexpr std::string_view xssSource = R"(
+Window.surface { resting: { window-title: "Style title", size: 800px 600px, radius: 12px } }
+)";
+	runCase(R"(Window[class: "surface"] { Text("x") })", xssSource, {}, "Style title", 800, 600);
+	runCase(R"(Window(title: "Document title", size: 900x650)[class: "surface"] { Text("x") })",
+		xssSource, {}, "Document title", 900, 650);
+	XuiOptions explicitOptions;
+	explicitOptions.windowTitle = "Option title";
+	explicitOptions.width = 1000;
+	explicitOptions.height = 700;
+	runCase(R"(Window(title: "Document title", size: 900x650)[class: "surface"] { Text("x") })",
+		xssSource, explicitOptions, "Option title", 1000, 700);
+	XuiOptions widthOnly;
+	widthOnly.width = 1024;
+	runCase(R"(Window[class: "surface"] { Text("x") })", xssSource, widthOnly, "Style title", 1024, 600);
+	XuiOptions explicitDefaults;
+	explicitDefaults.windowTitleOverride = true;
+	explicitDefaults.windowWidthOverride = true;
+	explicitDefaults.windowHeightOverride = true;
+	runCase(R"(Window(title: "Document title", size: 900x650)[class: "surface"] { Text("x") })",
+		xssSource, explicitDefaults, "Xui", 720, 440);
+}
+
 TEST(ui_runtime_loads_structure_style_lays_out_and_routes_button_events) {
 	constexpr std::string_view xuiSource = R"(
 Window(title: "Runtime test", size: 320x180) {

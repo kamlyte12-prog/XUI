@@ -83,6 +83,9 @@ namespace xui {
 		/// window so the application can draw its own chrome (see the TitleBar widget). A backend
 		/// that cannot host custom chrome keeps decorations and reports it through setDecorated().
 		bool decorations = true;
+		/// Preferred client-chrome corner radius in logical pixels. Backends may apply a native
+		/// rounded-window hint when supported; it does not alter the backend-neutral layout.
+		f32 cornerRadius = 0.f;
 	};
 
 	struct PlatformDesc {

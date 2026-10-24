@@ -84,6 +84,11 @@ namespace xui {
 		/// resolve palette slots against this theme on the next draw.
 		bool setTheme(std::string_view name);
 		u32 theme() const { return m_theme; }
+		/// Synchronize the resolved native-window defaults selected by the Xui facade.
+		void setWindowMetadata(std::string_view title, u32 width, u32 height) {
+			m_windowTitle.assign(title); m_windowWidth = width; m_windowHeight = height;
+		}
+		void updateWindowTitle(std::string_view title) { m_windowTitle.assign(title); }
 
 		/// Lay out the retained tree in logical pixels, retaining the last DPI scale.
 		void layout(f32 width, f32 height);

@@ -13,6 +13,7 @@ namespace xui {
 	}
 
 	WindowHandle NullPlatform::createWindow(const WindowDesc& d) {
+		m_cornerRadius = d.cornerRadius;
 		for (u32 i = 0; i < m_wins.size(); ++i)
 			if (!m_wins[i].alive) {
 				m_wins[i] = { std::string(d.title), d.width, d.height, true, m_wins[i].gen };
@@ -31,6 +32,10 @@ namespace xui {
 	}
 
 	f32 NullPlatform::dpiScale(WindowHandle h) const { return find(h) ? m_dpi : 0.f; }
+	std::string_view NullPlatform::windowTitle(WindowHandle h) const {
+		const Win* w = find(h);
+		return w ? std::string_view(w->title) : std::string_view{};
+	}
 
 	Vec2 NullPlatform::sizeLogical(WindowHandle h) const {
 		const Win* w = find(h);

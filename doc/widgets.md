@@ -4,6 +4,21 @@ This catalog describes objects that `UiRuntime` currently materializes and paint
 
 Common bracket properties available through the schema include `id`, `class`, `disabled`, and event names. Styling comes from `.xss` selectors matching the type, class, or id.
 
+## Runtime widget catalog
+
+Use this table to find the detailed behavior and limitations below. Names in the first column are runtime-backed in this build; parser/schema-only names are listed separately at the end.
+
+| Group | Runtime objects |
+| --- | --- |
+| Window and layout | [`Window`](#window), [`TitleBar`](#titlebar), [`Column`](#column-and-row), [`Row`](#column-and-row), [`Panel`](#panel), [`Split`](#split), [`DockHost`](#dockhost-and-dockpanel), [`DockPanel`](#dockhost-and-dockpanel), [`DockSpace`](#dockhost-and-dockpanel) (alias), [`ScrollView`](#scrollview), [`Toolbar`](#toolbar-and-statusbar), [`StatusBar`](#toolbar-and-statusbar), [`MenuBar`](#toolbar-and-statusbar) (horizontal container) |
+| Text and display | [`Text`](#text), [`Label`](#label), [`Badge`](#badge), [`Image`](#image), [`FpsCounter`](#fpscounter), [`ProgressBar`](#progressbar), [`Spinner`](#spinner), [`Separator`](#separator-and-divider), [`Divider`](#separator-and-divider) (alias) |
+| Buttons and input | [`Button`](#button), [`CheckBox`](#checkbox), [`CheckList`](#checklist), [`CheckItem`](#checkitem), [`Switch`](#switch), [`ToggleButton`](#togglebutton), [`RadioGroup`](#radiogroup), [`TextBox`](#textbox), [`TextArea`](#textarea), [`NumberField`](#numberfield), [`SearchField`](#searchfield), [`Slider`](#slider) |
+| Selection and popup controls | [`Tabs`](#tabs-and-tab), [`Tab`](#tabs-and-tab), [`Dropdown`](#dropdown), [`Menu`](#menu-and-menuitem), [`MenuItem`](#menu-and-menuitem), [`ColorPicker`](#colorpicker), [`SegmentedControl`](#segmentedcontrol), [`Stepper`](#stepper), [`Rating`](#rating), [`Breadcrumb`](#breadcrumb), [`KeybindField`](#keybindfield), [`DatePicker`](#datepicker) |
+
+Tooltip is attached to another widget with its `tooltip` property; it is an overlay behavior, not a standalone node in the runtime catalog. See [Tooltips](#tooltips).
+
+For constructor arguments and bracket properties, see the [`.xui` grammar guide](xui-guide.md#what-the-delimiters-mean). For the complete accepted style property list and scope, see the [styling reference](styling-reference.md).
+
 ## Containers and layout
 
 ### `Window`
@@ -16,7 +31,7 @@ Window(title: "Tasks", size: 900x600) {
 }
 ```
 
-`title` and `size` are retained by the runtime document, but `XuiOptions` configures the native window created by the facade. The schema accepts `resizable`; native resize behavior also comes from `XuiOptions`. Style `Window` for background and text defaults.
+The facade uses `title` and `size` to configure the initial native window. Per field, explicitly selected `XuiOptions` values take precedence, followed by `.xui` `Window(title, size)`, root `Window` `.xss` defaults (`window-title`, `size`), and then facade defaults. `resizable` is accepted by the schema, but native resize behavior comes from `XuiOptions`. Root `Window` styles also set client-surface paint; `radius` requests preferred native corner rounding where supported. See [window defaults and precedence](xui-guide.md#window-defaults-and-precedence).
 
 The Window property `platformTopMenu: false` hides the platform's native title bar and opts into client-drawn chrome: the document must then contain a [`TitleBar`](#titlebar) widget, which becomes the draggable top menu with optional framework-drawn caption buttons. On backends that cannot host custom chrome (GLFW on macOS/Linux today), the native title bar is kept and the `TitleBar` renders as an ordinary bar without window dragging; see [platform caveats](#titlebar).
 
@@ -574,7 +589,7 @@ Limitations: inertial/momentum scrolling, touch/gesture input, scrollbar corner 
 
 ## Schema-recognized, runtime-unsupported objects
 
-The current core schema also recognizes names that are not materialized by `UiRuntime::build()`: `Grid`, `Stack`, `Popover`, `Modal`, `ContextMenu`, `IconButton`, `RangeSlider`, `ComboBox`, `Icon`, `TreeView`, `ListView`, `Table`, `Canvas`, `HUD`, `Crosshair`, `RadialMenu`, `HealthBar`, and `DamageNumber`. (`DockSpace` aliases the runtime `DockHost`; `Toolbar`, `StatusBar`, and `MenuBar` are horizontal containers; `Menu`/`MenuItem` are the runtime [popup menu](#menu-and-menuitem).) `MenuBar` remains a plain client-area row of ordinary controls; the custom draggable top menu is the [`TitleBar`](#titlebar) widget together with `Window[platformTopMenu: false]`. A dedicated command-menu model and menu keyboard navigation are not implemented.
+The current core schema also recognizes names that are not materialized by `UiRuntime::build()`: `Grid`, `Stack`, `Popover`, `Modal`, `ContextMenu`, `Tooltip`, `IconButton`, `RangeSlider`, `ComboBox`, `Icon`, `TreeView`, `ListView`, `Table`, `Canvas`, `HUD`, `Crosshair`, `RadialMenu`, `HealthBar`, and `DamageNumber`. (`DockSpace` aliases the runtime `DockHost`; `Toolbar`, `StatusBar`, and `MenuBar` are horizontal containers; `Menu`/`MenuItem` are the runtime [popup menu](#menu-and-menuitem).) `MenuBar` remains a plain client-area row of ordinary controls; the custom draggable top menu is the [`TitleBar`](#titlebar) widget together with `Window[platformTopMenu: false]`. A dedicated command-menu model and menu keyboard navigation are not implemented.
 
 ```xui
 MenuBar[class: "client-menu"] {

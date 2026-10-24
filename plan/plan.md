@@ -31,6 +31,7 @@ This is the canonical readiness plan. The detailed chronology and rationale for 
 - The bundled GLFW/OpenGL example is the only runnable graphics backend in this checkout. Current CMake defines `xui_glfw_demo`; there is no `xui_hello` target or distinct native Win32 backend.
 - Optional GLFW and OpenGL backend implementations now live under root `backends/` as separate CMake targets; test-only sample assets are under `tests/fixtures/` while the demo's shared showcase pair remains in `examples/`.
 - The root and `doc/` documentation entry points describe the current API and supported runtime scope. Agent context is indexed in this `plan/` folder.
+- Phase D documentation now has a grouped runtime-widget catalog, property-by-property `.xss` applicability notes, a delimiter-accurate `.xui` grammar section, and public API comments. The stale Window title/size claim was corrected; parser-only `Tooltip` is no longer presented as a runtime widget. This pass changed no runtime behavior; details are in [`tracking.md`](tracking.md).
 
 ### What does not work
 

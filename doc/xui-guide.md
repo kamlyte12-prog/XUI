@@ -14,6 +14,29 @@ WidgetName(positionalValue, named: value)[property: value, event: handler] {
 
 Whitespace and newlines separate sibling widgets. Commas separate constructor arguments and bracket properties. Constructor arguments may be positional or named. Use quoted strings for text and paths; identifiers such as `Horizontal`, `Center`, and `onClick` are bare names.
 
+## What the delimiters mean
+
+The same punctuation can also appear inside expressions. The table below describes its role when it directly follows a widget name versus when it appears inside an expression.
+
+| Form | After a widget name | Inside an expression |
+| --- | --- | --- |
+| `(...)` | Optional constructor argument list. Positional values map to declared fields in order; named values use `name: expression` and must be accepted constructor/property names for that widget. | Groups an expression, or calls a function/member such as `format(value)` or `object.method(value)`. |
+| `[...]` | Optional node property list. Each entry is `name: expression`; this is where `id`, `class`, layout properties, event handler names, and behavior properties are authored. | Index access, such as `items[index]`. |
+| `{...}` | Optional child-widget block. Its contents are child widget declarations, not arbitrary statements. | In a quoted string, `{expression}` is interpolation syntax. A component declaration also uses braces for its component body. |
+
+These are distinct fields in the parsed document: constructor entries become arguments; bracket entries become properties; child declarations become tree edges. For example:
+
+```xui
+Window(title: "Editor", size: 800x500) {                  // named constructor arguments
+  Row(gap: 8)[id: "toolbar", class: "toolbar"] {         // gap is an argument; id/class are properties
+    Button("Save")[press: onSave, disabled: false]         // positional label; properties describe the node
+    Text("Items: {items.length}")                          // interpolation parses; runtime does not evaluate it
+  }
+}
+```
+
+The parser accepts expression syntax in these positions, but the standard runtime currently materializes literal widget trees. It does not evaluate arbitrary expressions, string interpolation, `bind`, `if`, or `for`. Parsing and schema validation therefore do not imply that a dynamic expression will produce a rendered value or repeated/conditional nodes. Component declarations and imports are also parser/loader features; component expansion is not implemented by `UiRuntime::build()`.
+
 ```xui
 Window(title: "Tasks", size: 900x620) {
   Column[class: "page"] {
@@ -117,15 +140,13 @@ On Windows 11, a root `Window` `.xss` `radius` is also passed to the GLFW platfo
 
 The Window property `platformTopMenu` is the exception: `Window(...) [platformTopMenu: false]` is read from the document itself, before the native window exists. With `false` the facade creates a borderless window and a [`TitleBar`](widgets.md#titlebar) widget must provide the draggable top menu (see the [widget reference](widgets.md#titlebar) for the behavior matrix and per-platform fallbacks).
 
-### Window defaults and precedence
-
-The `.xss` root-window defaults can be authored as:
+Root-window defaults can be authored in `.xss`:
 
 ```xss
 Window { resting: { window-title: "My application", size: 1000px 700px } }
 ```
 
-Each `XuiOptions` field takes precedence independently. Since the defaults are `Xui`, 720, and 440, assigning a non-default value is recognized as explicit. To explicitly choose one of those exact defaults while overriding `.xui` or `.xss`, set the corresponding `windowTitleOverride`, `windowWidthOverride`, or `windowHeightOverride` boolean.
+Each `XuiOptions` field takes precedence independently. Since the facade defaults are `Xui`, 720, and 440, assigning a non-default value is recognized as explicit. To explicitly choose one of those exact defaults while overriding `.xui` or `.xss`, set the corresponding `windowTitleOverride`, `windowWidthOverride`, or `windowHeightOverride` boolean.
 
 ## Nesting patterns
 

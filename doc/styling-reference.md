@@ -12,50 +12,51 @@ Side shorthands use one to four values: one applies to all sides; two means vert
 
 ## Canonical properties
 
-| Property | Accepted values | Runtime behavior / fallback |
-| --- | --- | --- |
-| `bg` (`background`) | One color or color token | Paints background; transparent when no rule supplies a value. Built-in Fluent 2 defaults provide surfaces to standard widgets. |
-| `fg` (`color`) | One color or color token | Text, splitter, slider/progress fill tint; the low-level fallback is `#f5f5f5`, while built-in Fluent 2 rules provide per-widget colors. |
-| `border` | 1–3 values: width, optional style identifier, optional color | Paints when a background is painted; default none. Runtime recognizes `dashed`; other style names currently render as solid. |
-| `outline` | `width [solid|dashed] color` or `width color` | Paints an outer ring while the declaring state is active (typically `focus`/`focus-visible`); it does not change layout size. Default none. |
-| `outline-offset` | One nonnegative logical length | Gap between the widget border box and `outline`; default 0. |
-| `radius` | 1–4 numbers | Rounded background corners; default 0. On the root `Window`, the first radius also requests preferred native custom-chrome rounding on supported backends; GLFW/Windows uses DWM's system rounded shape, which may not match arbitrary authored values exactly. |
-| `pad` (`padding`) | 1–4 numbers/identifiers | Content inset and text clip inset; default 0. |
-| `margin` | 1–4 numbers/identifiers | Outer layout spacing; default 0. |
-| `gap` | 1–2 numbers | Row/column spacing; default 0. |
-| `size` | 1–2 numbers or identifiers | Fixed width/height; one value applies to both; default auto/intrinsic. `%` is resolved against available layout size. On the root `Window`, px/unitless dimensions also provide the initial native window size. |
-| `min-size` | 1–2 lengths | Minimum width/height; default 0. Supports px and percentages. |
-| `max-size` | 1–2 lengths | Maximum width/height; default unbounded. Supports px and percentages. |
-| `min-width`, `max-width` | One length | Width constraints; use px or `%`; applied after width resolution. |
-| `min-height`, `max-height` | One length | Height constraints; use px or `%`; applied after height resolution. |
-| `opacity` | One number | Multiplies paint alpha, clamped to 0–1; default 1. |
-| `shadow` | 1–6 numeric/color/identifier values | Runtime reads x, y, blur, spread, and color; default no shadow. The optional sixth value is currently unused. |
-| `glow` | `blur spread color` | Draws a separate outer halo using the SDF shadow primitive; e.g. `glow: 10px 1px #5b8cff80`. It does not replace or modify `shadow`. |
-| `gradient` | `linear-gradient(angle, stops...)`, `radial-gradient(stops...)`, or `conic-gradient(angle, stops...)` | Fills a widget background with 2–4 evenly spaced colors. Angles use degrees; custom stop positions and gradient borders/text are not supported. |
-| `blur` | One number | Accepted and compiled; standard runtime does not apply a blur effect. |
-| `transform` | Up to 6 values using `translate(x, y)`, `scale(x[, y])`, and `rotate(angle)` | Applies a paint transform to the widget and its descendants; hit testing uses the inverse transform. Translation values use logical pixels or percentages of the widget size; rotation uses degrees. |
-| `font` (`font-family`) | One string or identifier | Selects a loaded family; default is the first `loadFont()` face, or no glyph rendering if none was loaded. |
-| `font-size` | One number | Logical font size, runtime fallback 16; the Fluent 2 baseline sets 14 for common text and 12 for compact labels. Rasterization scales with DPI. |
-| `font-weight` | One number or identifier | Numeric values create/select a `wght` axis instance when the selected font exposes that axis (clamped to its range). Otherwise they select the nearest registered face; no synthetic bold. Inherits through descendants unless overridden. Default 400. Identifier keywords compile but do not map to weights in the runtime. |
-| `letter-spacing` | One number | Extra spacing between glyph positions; default 0. |
-| `align` | 1–2 identifiers | `Start`, `Center`, `End`, or `Stretch`; affects container child alignment and text alignment on text-bearing leaves. Default is layout stretch for containers and start for text. The second accepted value is currently unused. |
-| `justify` | One identifier | `Start`, `Center`, `End`, `SpaceBetween`, `SpaceAround`, `SpaceEvenly`; main-axis distribution for flex containers. Default `Start`. |
-| `grow` | One number | Flex grow factor; default 0. |
-| `shrink` | One number | Flex shrink factor; default 1. |
-| `cursor` | `default`, `pointer`, `text`, `crosshair`, `resize-ew`, `resize-ns`, `resize-nwse`, `resize-nesw`, `move`, `not-allowed`, `grab`, `grabbing`, `hidden` | Explicit `.xss` value overrides widget cursor defaults. Backends may map unsupported shapes to a nearby cursor. |
-| `z-index` | One number | Accepted and compiled but not applied. Runtime stacking follows tree order; tab headers and popups use fixed overlay layers. |
-| `clip` | One identifier or number | Accepted and compiled; runtime clips text to widget bounds and popups to their boxes, but does not apply this property. |
-| `overflow` | 1–2 identifiers | Accepted and compiled; not interpreted by the standard runtime. |
-| `animation` | `name duration [iterations|infinite|paused] [easing] [cancel(stop|finish)]` | Named keyframes start automatically unless `paused` is present. `cancel(...)` overrides the widget's `animation-cancel` rule for this animation. Duration accepts `ms` or `s`; default is one iteration. |
-| `animation-cancel` | `stop` or `finish` | Per-widget cancellation policy. `stop` is the default and applies the newest state immediately. `finish` completes the current transition target or current keyframe iteration before applying the newest state. |
-| `value` | One number, inside keyframes | Animates the normalized value of `ProgressBar` and other runtime controls that expose a numeric value; the ordinary visual style rule does not set control state. |
-| `window-title` | One string or identifier | Initial native window title default on the root `Window`; explicit `XuiOptions` or `.xui Window(title: ...)` takes precedence. |
-| `scroll-track` | One color or color token | Scrollbar track tint for `ScrollView`; default translucent dark track. |
-| `scroll-thumb` | One color or color token | Scrollbar thumb tint; participates in `hover` and `pressed` state resolution. |
-| `scrollbar-size` | One number | Scrollbar thickness in logical pixels, clamped to 4–24; default 10. |
-| `scrollbar-visibility` | `auto`, `always`, or `never` | `auto` shows while the view is hovered/focused; default `auto`. |
-| `scroll-behavior` | `instant` or `smooth` | Wheel/programmatic animation default for a view; default `instant`. `.xui` `scrollBehavior` can override it. |
-| `scroll-speed` | One number | Wheel pixels per notch, clamped to 1–400; default 42. `.xui` `scrollSpeed` can override it. |
+| Property | Accepted values | Runtime behavior / fallback | Applies to |
+| --- | --- | --- | --- |
+| `bg` (`background`) | One color or color token | Paints background; transparent when no rule supplies a value. Built-in Fluent 2 defaults provide surfaces to standard widgets. | All runtime-painted nodes; synthetic subparts use their owner's resolved values where noted below. |
+| `fg` (`color`) | One color or color token | Text, splitter, slider/progress fill tint; the low-level fallback is `#f5f5f5`, while built-in Fluent 2 rules provide per-widget colors. | Text-bearing controls and controls that use an accent/fill (e.g. Slider, ProgressBar, Split); see composite audit below. |
+| `border` | 1–3 values: width, optional style identifier, optional color | Paints when a background is painted; default none. Runtime recognizes `dashed`; other style names currently render as solid. | Runtime-painted widget surfaces and popup frames. |
+| `outline` | `width`, optional `solid` or `dashed`, then color; or `width color` | Paints an outer ring while the declaring state is active (typically `focus`/`focus-visible`); it does not change layout size. Default none. | Any runtime node while its matched style state is active; only state actually activated by that widget is visible. |
+| `outline-offset` | One nonnegative logical length | Gap between the widget border box and `outline`; default 0. | Same targets as `outline`. |
+| `radius` | 1–4 numbers | Rounded background corners; default 0. On the root `Window`, the first radius also requests preferred native custom-chrome rounding on supported backends; GLFW/Windows uses DWM's system rounded shape, which may not match arbitrary authored values exactly. | Runtime-painted surfaces; root `Window` also requests native corner preference on supported platforms. |
+| `pad` (`padding`) | 1–4 numbers/identifiers | Content inset and text clip inset; default 0. | Layout nodes and text-bearing leaves; popup internals use widget-specific insets. |
+| `margin` | 1–4 numbers/identifiers | Outer layout spacing; default 0. | Runtime layout nodes. |
+| `gap` | 1–2 numbers | Row/column spacing; default 0. | `Row`, `Column`, `CheckList` and other flow containers that read gap. |
+| `size` | 1–2 numbers or identifiers | Fixed width/height; one value applies to both; default auto/intrinsic. `%` is resolved against available layout size. On the root `Window`, px/unitless dimensions also provide the initial native window size. | Runtime layout nodes; root `Window` additionally uses px/logical size for initial native dimensions. |
+| `min-size` | 1–2 lengths | Minimum width/height; default 0. Supports px and percentages. | Runtime layout nodes, including nested containers and leaves. |
+| `max-size` | 1–2 lengths | Maximum width/height; default unbounded. Supports px and percentages. | Runtime layout nodes, including nested containers and leaves. |
+| `min-width`, `max-width` | One length | Width constraints; use px or `%`; applied after width resolution. | Runtime layout nodes. |
+| `min-height`, `max-height` | One length | Height constraints; use px or `%`; applied after height resolution. | Runtime layout nodes. |
+| `opacity` | One number | Multiplies paint alpha, clamped to 0–1; default 1. | Runtime-painted nodes and their own composite marks; child opacity resolves independently. |
+| `shadow` | 1–6 numeric/color/identifier values | Runtime reads x, y, blur, spread, and color; default no shadow. The optional sixth value is currently unused. | Background-bearing runtime surfaces. |
+| `glow` | `blur spread color` | Draws a separate outer halo using the SDF shadow primitive; e.g. `glow: 10px 1px #5b8cff80`. It does not replace or modify `shadow`. | Background-bearing runtime surfaces. |
+| `gradient` | `linear-gradient(angle, stops...)`, `radial-gradient(stops...)`, or `conic-gradient(angle, stops...)` | Fills a widget background with 2–4 evenly spaced colors. Angles use degrees; custom stop positions and gradient borders/text are not supported. | Background-bearing runtime surfaces. |
+| `blur` | One number | Accepted and compiled; standard runtime does not apply a blur effect. | No standard runtime target currently applies it. |
+| `transform` | Up to 6 values using `translate(x, y)`, `scale(x[, y])`, and `rotate(angle)` | Applies a paint transform to the widget and its descendants; hit testing uses the inverse transform. Translation values use logical pixels or percentages of the widget size; rotation uses degrees. | Authored runtime widget subtree; virtual popup rows and some overlay subparts have documented limits. |
+| `font` (`font-family`) | One string or identifier | Selects a loaded family; default is the first `loadFont()` face, or no glyph rendering if none was loaded. | Text-bearing runtime nodes; inherited by descendant text unless overridden. |
+| `font-size` | One number | Logical font size, runtime fallback 16; the Fluent 2 baseline sets 14 for common text and 12 for compact labels. Rasterization scales with DPI. | Text-bearing runtime nodes. |
+| `font-weight` | One number or identifier | Numeric values create/select a `wght` axis instance when the selected font exposes that axis (clamped to its range). Otherwise they select the nearest registered face; no synthetic bold. Inherits through descendants unless overridden. Default 400. Identifier keywords compile but do not map to weights in the runtime. | Text-bearing runtime nodes; numeric weights only. |
+| `letter-spacing` | One number | Extra spacing between glyph positions; default 0. | Text-bearing runtime nodes. |
+| `align` | 1–2 identifiers | `Start`, `Center`, `End`, or `Stretch`; affects container child alignment and text alignment on text-bearing leaves. Default is layout stretch for containers and start for text. The second accepted value is currently unused. | Flow containers and text-bearing leaves. |
+| `justify` | One identifier | `Start`, `Center`, `End`, `SpaceBetween`, `SpaceAround`, `SpaceEvenly`; main-axis distribution for flex containers. Default `Start`. | `Row`/`Column`-style flow containers. |
+| `grow` | One number | Flex grow factor; default 0. | Flow-layout children. |
+| `shrink` | One number | Flex shrink factor; default 1. | Flow-layout children. |
+| `cursor` | `default`, `pointer`, `text`, `crosshair`, `resize-ew`, `resize-ns`, `resize-nwse`, `resize-nesw`, `move`, `not-allowed`, `grab`, `grabbing`, `hidden` | Explicit `.xss` value overrides widget cursor defaults. Backends may map unsupported shapes to a nearby cursor. | Pointer hit targets; window-edge cursors remain platform-owned. |
+| `z-index` | One number | Accepted and compiled but not applied. Runtime stacking follows tree order; tab headers and popups use fixed overlay layers. | No authored node currently uses this property. |
+| `clip` | One identifier or number | Accepted and compiled; runtime clips text to widget bounds and popups to their boxes, but does not apply this property. | No authored node currently uses this property; built-in clipping is separate. |
+| `overflow` | 1–2 identifiers | Accepted and compiled; not interpreted by the standard runtime. | No standard runtime target currently applies it. |
+| `animation` | Name, duration, optional iteration count or `infinite` or `paused`, optional easing, optional `cancel(stop)` or `cancel(finish)` | Named keyframes start automatically unless `paused` is present. `cancel(...)` overrides the widget's `animation-cancel` rule for this animation. Duration accepts `ms` or `s`; default is one iteration. | Runtime nodes with a declared keyframe; only implemented paint properties animate. |
+| `animation-keep` | `until-done` | Legacy transition policy: retarget an in-flight transition when its state changes instead of stopping it immediately. | Runtime nodes with active state transitions. |
+| `animation-cancel` | `stop` or `finish` | Per-widget cancellation policy. `stop` is the default and applies the newest state immediately. `finish` completes the current transition target or current keyframe iteration before applying the newest state. | Runtime nodes with transitions/keyframes. |
+| `value` | One number, inside keyframes | Animates the normalized value of `ProgressBar` and other runtime controls that expose a numeric value; the ordinary visual style rule does not set control state. | Numeric value-bearing controls in keyframes; does not set the control's application value. |
+| `window-title` | One string or identifier | Initial native window title default on the root `Window`; explicit `XuiOptions` or `.xui Window(title: ...)` takes precedence. | Root `Window` only. |
+| `scroll-track` | One color or color token | Scrollbar track tint for `ScrollView`; default translucent dark track. | `ScrollView`. |
+| `scroll-thumb` | One color or color token | Scrollbar thumb tint; participates in `hover` and `pressed` state resolution. | `ScrollView`. |
+| `scrollbar-size` | One number | Scrollbar thickness in logical pixels, clamped to 4–24; default 10. | `ScrollView`. |
+| `scrollbar-visibility` | `auto`, `always`, or `never` | `auto` shows while the view is hovered/focused; default `auto`. | `ScrollView`. |
+| `scroll-behavior` | `instant` or `smooth` | Wheel/programmatic animation default for a view; default `instant`. `.xui` `scrollBehavior` can override it. | `ScrollView`. |
+| `scroll-speed` | One number | Wheel pixels per notch, clamped to 1–400; default 42. `.xui` `scrollSpeed` can override it. | `ScrollView`. |
 
 Aliases normalize to canonical names: `background` → `bg`, `color` → `fg`, `padding` → `pad`, and `font-family` → `font`.
 

@@ -102,6 +102,7 @@ namespace xui {
 		bool pointerMove(Vec2 point);
 		/// Cursor feedback for the frontmost widget under the pointer.
 		CursorShape cursorAt(Vec2 point) const;
+		/// Route a primary-button press at a logical client-space position.
 		bool pointerDown(Vec2 point);
 		/// Button-aware press routing. Right presses only reach context menus; ordinary widgets
 		/// keep left-only activation.
@@ -109,24 +110,35 @@ namespace xui {
 		/// Clears pointer hover state when the platform reports that the cursor left the client area.
 		/// Active drags continue; only hover-dependent state is updated.
 		bool pointerLeave();
+		/// Route release of the active pointer press at a logical client-space position.
 		bool pointerUp(Vec2 point);
+		/// Route wheel delta in logical pixels, starting at the deepest scrollable hit target.
 		bool scrollWheel(Vec2 point, Vec2 delta);
+		/// Route a key using default modifiers and without a platform clipboard adapter.
 		bool keyDown(Key key);
+		/// Route a key with modifier flags and optional platform clipboard access.
 		bool keyDown(Key key, u8 mods, Platform* platform);
+		/// Insert a Unicode code point or UTF-8 text into the focused editable control.
 		bool textInput(u32 codepoint);
 		bool textInput(std::string_view utf8);
+		/// Advance timers and animations. Returns true when a redraw is needed.
 		bool updateTimers(std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
+		/// Delay until the next timer-driven visual update, or infinity when no timer is pending.
 		f64 nextTimerDelay(std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now()) const;
 		/// Pause visual animation clocks while the host window is hidden/minimized.
 		void setAnimationsPaused(bool paused, std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
+		/// Whether the runtime FPS overlay is enabled.
 		bool fpsCounterEnabled() const { return m_fpsEnabled; }
+		/// Whether the optional Painter draw-batch count is displayed.
 		bool drawBatchCounterEnabled() const { return m_drawBatchCounterEnabled; }
 		void setDrawBatchCount(u32 batches) { m_drawBatchCount = batches; }
 		/// Resolve relative Image sources from the directory containing the loaded entry document.
 		void setAssetDirectory(std::string_view directory) { m_assetDirectory.assign(directory); }
+		/// Take and clear the current logical-pixel damage rectangle. Returns false if none is pending.
 		bool takeDamage(Rect& out) { if (!m_hasDamage) return false; out = m_damage; m_hasDamage = false; return true; }
 		bool takeImageLayoutInvalidation() { const bool invalidated = m_imageLayoutInvalidated; m_imageLayoutInvalidated = false; return invalidated; }
 
+		/// Set the callback invoked with authored handler names when runtime events fire.
 		void setEventHandler(UiEventFn fn, void* context) { m_eventFn = fn; m_eventContext = context; }
 		/// Wire the platform so TitleBar caption buttons and window dragging act on the window.
 		/// Without it a TitleBar still renders, but window controls degrade gracefully.
@@ -142,21 +154,30 @@ namespace xui {
 		/// Supplies the renderer used to create Image widget textures (lazily, at paint time).
 		/// May be nullptr for headless clients; Image widgets then paint their placeholder frame.
 		void setRenderer(Renderer* renderer);
+		/// Root retained-layout node, or invalid when build has not succeeded.
 		NodeId root() const { return m_root; }
+		/// Current arranged logical-pixel bounds of a layout node.
 		Rect bounds(NodeId node) const { return m_layout.absRect(node); }
+		/// Numeric control value by retained node handle; use value(id) for authored-ID access.
 		f32 controlValue(NodeId node) const { const Node* n = findNode(node); return n ? n->value : 0.f; }
 		/// Read a ColorPicker's current color by its authored .xui id from a change callback.
 		Color controlColor(std::string_view id) const;
+		/// Read the displayed/edited text of a control by its authored ID; empty when unsupported or absent.
 		std::string_view controlText(std::string_view id) const;
+		/// Read a stateful value (bool, number, string, color, selection, scroll offset, checklist, or dock state).
 		std::optional<UiValue> value(std::string_view id) const;
+		/// Set a supported control value. If notify is true, dispatches its change handler when applicable.
 		bool setValue(std::string_view id, const UiValue& value, bool notify = false);
 		/// Restart the XSS animation declared for an authored node. Once completes at its final frame;
 		/// Loop repeats until cancelAnimation(). A new play request overrides and restarts current playback.
 		bool playAnimation(std::string_view id, AnimationMode mode = AnimationMode::Once);
 		/// Stop an authored animation at its current sampled values. The next playAnimation() starts over.
 		bool cancelAnimation(std::string_view id);
+		/// Return a ScrollView's current logical-pixel offset, or zero for an unknown/non-scroll ID.
 		Vec2 scrollOffset(std::string_view id) const;
+		/// Set a ScrollView offset, optionally animating the change.
 		bool scrollTo(std::string_view id, Vec2 offset, bool smooth = false);
+		/// Scroll the nearest ancestor ScrollView so the authored target is visible.
 		bool scrollIntoView(std::string_view id, bool smooth = false);
 		u32 windowWidth() const { return m_windowWidth; }
 		u32 windowHeight() const { return m_windowHeight; }

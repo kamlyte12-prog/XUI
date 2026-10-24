@@ -2,6 +2,30 @@
 
 This file records project changes, design decisions, trade-offs, current status, and next steps. It is updated as implementation work lands.
 
+## Phase D documentation reference pass — 2026-10-24
+
+### Audit and corrections
+
+- Audited the `.xui` parser, schema, `UiRuntime::buildNode()`, style-property reference, current widget guide, and Phase A–C text/image/window documentation before editing.
+- Found the Window widget guide still claimed that `Window(title, size)` were only runtime metadata and that `XuiOptions` alone configured the native window. This contradicted the implemented field-by-field precedence (explicit `XuiOptions` > `.xui` > root `.xss` defaults > facade defaults). Corrected it and linked the canonical precedence section.
+- Found `Tooltip` was linked from the runtime widget catalog even though it is implemented as an attached property and overlay behavior; the `Tooltip` schema node itself is not materialized. Reclassified the behavior and added the schema node to the runtime-unsupported list.
+- The `.xui` guide described the node form but did not distinguish node suffixes from the same punctuation inside expressions. Added delimiter semantics and clarified that parse/schema support for expressions, `bind`, `if`, `for`, interpolation, imports, and components does not imply runtime evaluation/expansion.
+
+### Changes and decisions
+
+- Expanded the widget guide's opening index into a grouped catalog with anchors to the per-object reference entries. Kept detailed attributes, states, value/event access, examples, and limitations in those existing entries rather than copying that content into a second file.
+- Added an `Applies to` column for each accepted canonical `.xss` property. It identifies broad runtime targets, widget-specific properties, synthetic-subpart caveats, and parser-accepted properties without standard runtime behavior. Existing state and composite-widget audits remain the detail source for special cases.
+- Added API comments to `xui::Xui`, `XuiOptions`, `XuiRunOptions`, and the public lower-level `UiRuntime` entry points. Font comments state the actual TrueType-outline support instead of implying all OTF outline formats work.
+- No architecture or runtime behavior changed. Code edits are documentation comments only; user-facing changes are in `doc/widgets.md`, `doc/xui-guide.md`, and `doc/styling-reference.md`.
+- Trade-off: the styling support column groups common paint/text/layout targets to keep the full property table readable. Virtual subparts and exceptions remain in the existing composite-widget audit immediately below.
+
+### Verification and status
+
+- Compared documented runtime widget names against `UiRuntime::buildNode()` and checked parser behavior directly in `src/lang/xui_parser.cpp` and the core schema. The catalog distinguishes runtime aliases from schema-only entries.
+- Phase A–C references for TrueType `glyf` fonts, HarfBuzz shaping, static raster/SVG images, root window defaults, and Windows DWM corner behavior were checked for stale claims; their detailed feature docs remain linked from the index.
+- No executable behavior changed, so no build or runtime claim is made from this documentation pass. Project-owned Markdown link targets resolve, all canonical XSS property names are present in the table, its four-column rows are consistent, and `git diff --check` passes.
+- Next: keep the docs synchronized with runtime changes; visible product behavior and platform limits remain as recorded in `plan.md`.
+
 ## Variable-font OpenType shaping and GPOS — 2026-10-24
 
 ### Audit and root cause

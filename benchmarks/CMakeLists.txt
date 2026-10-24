@@ -12,6 +12,12 @@ add_executable(bench_docking bench_docking.cpp)
 target_link_libraries(bench_docking PRIVATE xui_widgets xui_warnings)
 add_executable(bench_paint bench_paint.cpp)
 target_link_libraries(bench_paint PRIVATE xui_layout xui_renderer xui_warnings)
+add_executable(bench_text bench_text.cpp)
+target_link_libraries(bench_text PRIVATE xui_text xui_renderer xui_warnings)
+add_custom_command(TARGET bench_text POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${PROJECT_SOURCE_DIR}/examples/layout/Roboto.ttf"
+    "$<TARGET_FILE_DIR:bench_text>/Roboto.ttf")
 add_executable(fuzz_paint fuzz_paint.cpp)
 target_link_libraries(fuzz_paint PRIVATE xui_renderer xui_warnings)
 add_executable(bench_docking_scale bench_docking_scale.cpp)

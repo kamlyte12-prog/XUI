@@ -10,6 +10,7 @@ option(XUI_BUILD_TESTS       "Build unit tests"        ON)
 option(XUI_BUILD_BENCHMARKS  "Build benchmarks"        ON)
 option(XUI_BUILD_EXAMPLES    "Build runnable examples" ON)
 option(XUI_BUILD_GLFW_EXAMPLE "Build the GLFW + OpenGL example (uses bundled GLFW and system OpenGL)" ON)
+option(XUI_ENABLE_IMAGE_SUPPORT "Enable bundled PNG/JPEG/BMP/TGA and SVG image loading" ON)
 option(XUI_WERROR            "Treat warnings as errors" ON)
 option(XUI_SANITIZE          "Enable ASan+UBSan (GCC/Clang)" OFF)
 
@@ -86,6 +87,38 @@ add_library(xui_harfbuzz INTERFACE)
 add_library(xui::harfbuzz ALIAS xui_harfbuzz)
 target_link_libraries(xui_harfbuzz INTERFACE harfbuzz)
 
+# Image decoding is optional. stb_image is a single-header decoder; LunaSVG
+# includes its plutovg rasterizer as a source subdirectory.
+if(XUI_ENABLE_IMAGE_SUPPORT)
+  set(XUI_LUNASVG_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib/lunasvg-3.5.0")
+  if(NOT EXISTS "${XUI_LUNASVG_SOURCE_DIR}/CMakeLists.txt" OR
+     NOT EXISTS "${XUI_LUNASVG_SOURCE_DIR}/include/lunasvg.h" OR
+     NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/std_image/stb_image.h")
+    message(FATAL_ERROR
+      "Image support was enabled, but bundled stb_image or LunaSVG sources are missing. "
+      "Expected lib/std_image/stb_image.h and lib/lunasvg-3.5.0/CMakeLists.txt.")
+  endif()
+  set(LUNASVG_BUILD_EXAMPLES OFF CACHE BOOL "Do not build LunaSVG examples" FORCE)
+  set(PLUTOVG_BUILD_EXAMPLES OFF CACHE BOOL "Do not build plutovg examples" FORCE)
+  set(LUNASVG_DISABLE_LOAD_SYSTEM_FONTS ON CACHE BOOL "Avoid host font discovery in LunaSVG" FORCE)
+  if(DEFINED BUILD_SHARED_LIBS)
+    set(_xui_had_build_shared_libs TRUE)
+    set(_xui_saved_build_shared_libs "${BUILD_SHARED_LIBS}")
+  else()
+    set(_xui_had_build_shared_libs FALSE)
+  endif()
+  set(BUILD_SHARED_LIBS OFF)
+  add_subdirectory("${XUI_LUNASVG_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/_deps/lunasvg")
+  if(_xui_had_build_shared_libs)
+    set(BUILD_SHARED_LIBS "${_xui_saved_build_shared_libs}")
+  else()
+    unset(BUILD_SHARED_LIBS)
+  endif()
+  add_library(xui_lunasvg INTERFACE)
+  add_library(xui::lunasvg ALIAS xui_lunasvg)
+  target_link_libraries(xui_lunasvg INTERFACE lunasvg::lunasvg)
+endif()
+
 # One place for warning policy; every Xui target links xui_warnings.
 add_library(xui_warnings INTERFACE)
 if(MSVC)
@@ -124,6 +157,16 @@ target_link_libraries(xui_layout PUBLIC xui_core PRIVATE xui_warnings)
 add_library(xui_renderer STATIC src/render/painter.cpp src/render/null_renderer.cpp src/render/soft_renderer.cpp src/render/image_io.cpp)
 target_link_libraries(xui_renderer PUBLIC xui_core PRIVATE xui_warnings)
 
+# Keep file decoding/rasterization separate from Renderer implementations. The
+# shared runtime still uploads ordinary RGBA textures through Renderer.
+add_library(xui_image STATIC src/render/image_decode.cpp)
+target_include_directories(xui_image PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/lib/std_image")
+target_compile_definitions(xui_image PRIVATE XUI_ENABLE_IMAGE_SUPPORT=$<BOOL:${XUI_ENABLE_IMAGE_SUPPORT}>)
+target_link_libraries(xui_image PUBLIC xui_renderer PRIVATE xui_warnings)
+if(XUI_ENABLE_IMAGE_SUPPORT)
+  target_link_libraries(xui_image PRIVATE xui::lunasvg)
+endif()
+
 # --- xui_platform: Platform interface + headless null backend. ---
 add_library(xui_platform STATIC src/platform/null_platform.cpp)
 target_link_libraries(xui_platform PUBLIC xui_core PRIVATE xui_warnings)
@@ -137,7 +180,7 @@ target_link_libraries(xui_text PUBLIC xui::freetype xui::harfbuzz)
 # --- xui_widgets: first retained runtime bridge from .xui/.xss to layout, text and paint. ---
 add_library(xui_widgets STATIC src/ui/runtime.cpp src/ui/xui.cpp)
 target_include_directories(xui_widgets PUBLIC include)
-target_link_libraries(xui_widgets PUBLIC xui_assets xui_layout xui_renderer xui_text PRIVATE xui_warnings)
+target_link_libraries(xui_widgets PUBLIC xui_assets xui_layout xui_renderer xui_image xui_text PRIVATE xui_warnings)
 
 if(XUI_BUILD_TESTS)
   enable_testing()

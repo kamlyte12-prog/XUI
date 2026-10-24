@@ -44,6 +44,11 @@ namespace xui {
 	class GlyphAtlas {
 	public:
 		static constexpr u32 kMinSize = 256, kMaxSize = 4096;
+		struct FrameStats {
+			u32 rasterizations = 0;
+			u32 uploads = 0;
+			u32 rebuilds = 0;
+		};
 
 		GlyphAtlas() = default;
 		GlyphAtlas(const GlyphAtlas&) = delete;
@@ -64,6 +69,7 @@ namespace xui {
 		u32 glyphCount() const { return u32(m_entries.size()); }
 		u64 rasterCount() const { return m_rasters; }   ///< test/telemetry: how many actual rasterisations
 		void beginFrame();
+		const FrameStats& frameStats() const { return m_frameStats; }
 
 	private:
 		static constexpr u32 kNone = 0xFFFFFFFFu;
@@ -87,6 +93,7 @@ namespace xui {
 		std::vector<TextureHandle> m_retiredTextures;  // kept alive until prior-frame draw commands are gone
 		u32 m_used = 0;
 		u64 m_frame = 1, m_rasters = 0;
+		FrameStats m_frameStats;
 		std::vector<u8> m_bitmap;                      // rasterisation scratch
 	};
 } // namespace xui

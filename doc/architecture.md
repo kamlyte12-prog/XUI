@@ -15,6 +15,7 @@ Xui separates authored document data, style resolution, retained layout, drawing
 | `Painter` / `DrawList` | Converts logical paint operations into clipped, DPI-scaled, batched backend-neutral geometry and glyph quads. |
 | `Renderer` | Owns drawing device/surface/textures and executes `DrawList` frames. |
 | `Platform` | Owns native window(s), normalizes input events, reports logical/pixel dimensions and DPI, waits while idle, and provides context/presentation hooks. |
+| `xui_image` (optional) | Decodes static raster formats with stb_image and rasterizes parsed SVG documents with LunaSVG; output is ordinary RGBA8 texture data uploaded by `UiRuntime` through `Renderer`. |
 
 For the agent-facing module/source map and change boundaries, see [`plan/architecture.md`](../plan/architecture.md). Project invariants and anti-regression checks are in [`plan/agents.md`](../plan/agents.md).
 
@@ -45,6 +46,8 @@ main.cpp
                     |
           Platform swap/presentation hook
 ```
+
+Image resources follow the same backend boundary: `Image` source paths are resolved relative to the entry `.xui`, `xui_image` returns CPU RGBA8 data (or a size-bucketed SVG raster), and the runtime asks the active `Renderer` to create the texture. Neither decoder library is called by a concrete backend. Image loading can be disabled with `XUI_ENABLE_IMAGE_SUPPORT=OFF`; see [Getting Started](getting-started.md#image-support).
 
 Input travels in the opposite direction: `Platform::pumpEvents()` yields normalized pointer/key/text/wheel/window events; `Xui::run()` dispatches supported input to `UiRuntime`; a changed interaction requests another frame. Scroll offsets are updated without remeasuring the subtree. ScrollView clips are applied to each visible descendant's draw and hit rectangles. Docking pointer events update only the DockTree and the affected host subtree; panel headers, tab groups, splitters, and previews are painted by the normal overlay path with XSS-resolved styles. Floating dock panes are ordered by their retained z-order, and pointer activation raises the pane before routing subsequent input. Smooth scroll, delayed tooltip deadlines, and active visible animation deadlines are passed into the platform wait timeout, so static and paused apps do not need a polling loop. Resizes update renderer framebuffer dimensions/DPI and rerun layout using logical client dimensions; the DPI scale is supplied before layout so intrinsic text measurement uses the same physical font size as glyph painting. Backends whose native resize enters a modal loop can use the optional `Platform::setLiveResizeHook`; the GLFW example invokes the facade's full render-frame path from each size callback.
 

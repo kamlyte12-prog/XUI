@@ -49,6 +49,7 @@ namespace xui {
 	}
 
 	void GlyphAtlas::beginFrame() {
+		m_frameStats = {};
 		++m_frame;
 		// A rebuild can happen while a draw list is being assembled. Retired atlas handles remain
 		// valid through that submit and are safe to release at the start of the following frame.
@@ -105,6 +106,7 @@ namespace xui {
 
 	/// Larger atlas: recreate the texture, re-pack and re-rasterise every cached glyph.
 	void GlyphAtlas::rebuild(u32 newSize) {
+		++m_frameStats.rebuilds;
 		std::vector<Entry> old;
 		old.swap(m_entries);
 		TextureHandle oldTex = m_tex;
@@ -169,6 +171,7 @@ namespace xui {
 
 	const AtlasGlyph& GlyphAtlas::rasterise(const Font& font, GlyphKey key) {
 		++m_rasters;
+		++m_frameStats.rasterizations;
 		f32 s = font.scaleFor(f32(key.sizePx));
 		Rect b = font.bounds(key.glyph);             // font units, y up
 		// pixel-space ink box, padded 1px for AA bleed; y measured UP from the baseline
@@ -229,6 +232,7 @@ namespace xui {
 				m_bitmap.data(), w, h, scratch);
 			Recti region{ i32(px), i32(py), i32(w), i32(h) };
 			m_renderer->updateTexture(m_tex, m_bitmap.data(), region);
+			++m_frameStats.uploads;
 		}
 		m_entries.push_back(std::move(e));
 		indexEntry(u32(m_entries.size() - 1));

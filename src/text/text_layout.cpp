@@ -1,5 +1,6 @@
 #include <xui/text/text_layout.hpp>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 
 namespace xui {
@@ -64,6 +65,7 @@ namespace xui {
 	} // namespace
 
 	const TextLayout& TextSystem::layout(FontHandle fh, std::string_view text, f32 sizePx, f32 wrapWidth) {
+		++m_frameStats.layoutRequests;
 		// Match GlyphAtlas::glyph(), which rounds its raster size. Shaping and raster bounds must
 		// use the same pixel size or tight Row children can be measured narrower than their glyphs.
 		u16 size = u16(std::clamp(std::lround(sizePx), 1l, 65535l));
@@ -75,9 +77,13 @@ namespace xui {
 		u32 slot = key.hash & mask;
 		while (m_index[slot]) {
 			CacheEntry& e = m_cache[m_index[slot] - 1];
-			if (e.key == key && std::string_view(e.text) == text) return e.layout;
+			if (e.key == key && std::string_view(e.text) == text) {
+				++m_frameStats.layoutCacheHits;
+				return e.layout;
+			}
 			slot = (slot + 1) & mask;
 		}
+		++m_frameStats.layoutCacheMisses;
 		return shape(fh, text, key);
 	}
 
@@ -125,7 +131,14 @@ namespace xui {
             w.glyphFirst = u32(tg.size());
             std::vector<Font::ShapedGlyph> shaped;
             const std::string_view run = text.substr(runStart, i - runStart);
-            if (f->shapeText(run, shaped)) {
+			const auto shapingStart = std::chrono::steady_clock::now();
+			const bool shapingSucceeded = f->shapeText(run, shaped);
+			const auto shapingEnd = std::chrono::steady_clock::now();
+			const auto shapingNanoseconds = std::chrono::duration_cast<std::chrono::nanoseconds>(shapingEnd - shapingStart).count();
+			m_frameStats.shapingTimeNanoseconds += static_cast<u64>(std::max<std::int64_t>(0, shapingNanoseconds));
+			++m_frameStats.shapingRuns;
+			if (shapingSucceeded) {
+				m_frameStats.shapedGlyphs += static_cast<u32>(shaped.size());
                 for (const Font::ShapedGlyph& glyph : shaped) {
                     const f32 advance = glyph.xAdvance * scale;
                     tg.push_back({ glyph.glyph, advance, glyph.xOffset * scale, glyph.yOffset * scale });
@@ -142,6 +155,7 @@ namespace xui {
                     const u32 glyph = f->glyphIndex(fallbackCp);
                     const f32 advance = f->advance(glyph) * scale;
                     tg.push_back({ glyph, advance, 0.f, 0.f });
+					++m_frameStats.shapedGlyphs;
                     w.width += advance;
                     ++w.glyphCount;
                 }
@@ -222,7 +236,16 @@ namespace xui {
 			m_index.assign(64, 0);
 			m_used = 0;
 		}
-		if (m_used * 2 >= m_index.size()) m_index.resize(m_index.size() * 2, 0);
+		if (m_used * 2 >= m_index.size()) {
+			m_index.assign(m_index.size() * 2, 0);
+			const u32 newMask = u32(m_index.size() - 1);
+			for (u32 entryIndex = 0; entryIndex < m_cache.size(); ++entryIndex) {
+				u32 rehashSlot = m_cache[entryIndex].key.hash & newMask;
+				while (m_index[rehashSlot]) rehashSlot = (rehashSlot + 1) & newMask;
+				m_index[rehashSlot] = entryIndex + 1;
+			}
+			++m_frameStats.layoutCacheRehashes;
+		}
 		u32 mask = u32(m_index.size() - 1);
 		u32 slot = key.hash & mask;
 		while (m_index[slot]) slot = (slot + 1) & mask;

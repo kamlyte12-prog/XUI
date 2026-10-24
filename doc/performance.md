@@ -44,9 +44,24 @@ Measure separately before changing architecture:
 
 For reproducible results, note whether the process ran alongside other GPU-heavy apps. Concurrent profiles can distort elapsed time and throughput.
 
+## Text-path profiling
+
+Build and run `bench_text` to measure the CPU text path without GPU submission:
+
+```powershell
+cmake --build build --target bench_text --config Release
+& .\build\benchmarks\Release\bench_text.exe
+```
+
+It runs four workloads: a cached short label, 400 distinct textbox edits, a cached long wrapped paragraph, and 300 wrap widths repeated twice. It reports elapsed microseconds per operation, layout-cache requests/hits/misses/rehashes, HarfBuzz shaping runs and glyph counts, time spent inside shaping, glyph rasterizations and texture uploads, atlas rebuilds, and Painter batches for the last operation. The first pass of the width sweep is deliberately cold; the second should be cache hits. This benchmark uses `NullRenderer`, so it does not measure OpenGL submission, GPU time, presentation, actual widget event handling, or visible frame rate.
+
+`TextSystem::frameStats()` and `GlyphAtlas::frameStats()` reset at `beginFrame()`. The facade starts the text frame before layout so its counts include intrinsic measurement and paint-time requests for that UI frame. Shaping time is accumulated only on layout cache misses; atlas rasterization/upload counts are zero after glyphs are warm. Consult [`plan/tracking.md`](../plan/tracking.md) for the latest measured run and machine/build details.
+
 ## Live resize and the GLFW event drain
 
 The GLFW platform drains callbacks queued by its last `glfwPollEvents()` call before polling again. Polling repeatedly inside one drain loop can starve frame submission while the OS produces a continuous stream. `GlfwPlatform::pumpEvents()` polls once per drain cycle. Some operating systems also enter a modal native resize loop, so the ordinary `Xui::run()` loop cannot run during the drag. To handle that case, the platform contract offers an optional `setLiveResizeHook`; the GLFW size callback invokes the facade's render-frame path, which resizes the backbuffer, recalculates layout, paints, and presents at each callback. Other backends can leave the hook as a no-op if their event loop remains active during resizing.
+
+Raster images are decoded once and retained as texture data. SVG source is parsed once and rasterized only when its physical display bounds or DPI cross a 64-pixel size bucket; the resulting RGBA texture is then reused. Very large images are rejected at 16,384 pixels per side or 64 million pixels total to bound allocation and upload costs. Applications that resize SVG-heavy surfaces continuously should expect a reraster only when a bucket changes.
 
 `Xui::run()` reads the latest logical client size and framebuffer pixel size every iteration. On a resize/DPI event it resizes the renderer in physical pixels, then runs retained layout with logical client dimensions before painting. During a modal resize, the GLFW live-resize hook runs the same frame path from the size callback. `ScrollView` clips descendants through the backend-neutral painter clip stack. The source path and automated suite were verified; a successful manual drag-resize could not be completed in the desktop helper session, so interactive resize remains unverified here.
 

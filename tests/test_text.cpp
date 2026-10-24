@@ -369,6 +369,71 @@ TEST(text_shaping_matches_pen_advance_sum) {
 	nr.shutdown();
 }
 
+TEST(text_frame_stats_count_cache_shaping_and_atlas_work) {
+#ifndef XUI_EXAMPLE_DIR
+	std::cout << "SKIP text frame counters: XUI_EXAMPLE_DIR is not configured\n";
+	return;
+#else
+	const std::filesystem::path path = std::filesystem::path(XUI_EXAMPLE_DIR) / "layout" / "Roboto.ttf";
+	std::ifstream file(path, std::ios::binary);
+	if (!file) { std::cout << "SKIP text frame counters: Roboto.ttf is missing\n"; return; }
+	const std::string bytes{ std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>() };
+	NullRenderer renderer;
+	CHECK(renderer.init({ 128, 128, 1.f, {}, false }));
+	TextSystem text;
+	CHECK(text.initAtlas(&renderer, 256));
+	const FontHandle font = text.loadFont(bytes);
+	CHECK(font.valid()); if (!font.valid()) return;
+
+	text.beginFrame();
+	const TextLayout& first = text.layout(font, "Cache", 16.f);
+	const TextLayout& second = text.layout(font, "Cache", 16.f);
+	CHECK(&first == &second);
+	CHECK_EQ(text.frameStats().layoutRequests, 2u);
+	CHECK_EQ(text.frameStats().layoutCacheMisses, 1u);
+	CHECK_EQ(text.frameStats().layoutCacheHits, 1u);
+	CHECK_EQ(text.frameStats().shapingRuns, 1u);
+	CHECK_EQ(text.frameStats().shapedGlyphs, 5u);
+	CHECK(text.frameStats().shapingTimeNanoseconds > 0u);
+
+	const Font* loadedFont = text.font(font);
+	for (const ShapedGlyph& glyph : first.glyphs)
+		(void)text.atlas()->glyph(*loadedFont, glyph.glyph, static_cast<u16>(first.sizePx));
+	CHECK(text.atlas()->frameStats().rasterizations > 0u);
+	CHECK(text.atlas()->frameStats().uploads > 0u);
+	text.beginFrame();
+	CHECK_EQ(text.frameStats().layoutRequests, 0u);
+	CHECK_EQ(text.atlas()->frameStats().rasterizations, 0u);
+#endif
+}
+
+TEST(text_layout_cache_rehash_preserves_all_entries) {
+#ifndef XUI_EXAMPLE_DIR
+	std::cout << "SKIP text cache rehash: XUI_EXAMPLE_DIR is not configured\n";
+	return;
+#else
+	const std::filesystem::path path = std::filesystem::path(XUI_EXAMPLE_DIR) / "layout" / "Roboto.ttf";
+	std::ifstream file(path, std::ios::binary);
+	if (!file) { std::cout << "SKIP text cache rehash: Roboto.ttf is missing\n"; return; }
+	const std::string bytes{ std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>() };
+	TextSystem text;
+	const FontHandle font = text.loadFont(bytes);
+	CHECK(font.valid()); if (!font.valid()) return;
+	std::vector<std::string> values;
+	values.reserve(256);
+	for (u32 i = 0; i < 256; ++i) values.push_back("text cache entry " + std::to_string(i));
+
+	text.beginFrame();
+	for (const std::string& value : values) (void)text.layout(font, value, 16.f);
+	CHECK_EQ(text.frameStats().layoutCacheMisses, 256u);
+	CHECK(text.frameStats().layoutCacheRehashes > 0u);
+	text.beginFrame();
+	for (const std::string& value : values) (void)text.layout(font, value, 16.f);
+	CHECK_EQ(text.frameStats().layoutCacheHits, 256u);
+	CHECK_EQ(text.frameStats().layoutCacheMisses, 0u);
+#endif
+}
+
 TEST(text_layout_width_contains_rasterized_glyph_bounds) {
 	FontFixture fx;
 	if (!fx.have()) return;

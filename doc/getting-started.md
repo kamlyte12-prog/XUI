@@ -21,6 +21,21 @@ lib/
 
 Xui disables FreeType's optional zlib, bzip2, PNG, HarfBuzz, Brotli, and HVF integrations. Its built-in inflater remains available without an external zlib library. HarfBuzz is a separate required dependency: the text layer uses it for OpenType shaping and GPOS positioning. FreeType handles variable `wght` coordinates and TrueType `glyf` outlines. Both vendored source trees are built directly, so a system HarfBuzz cannot take precedence. Platform builds still need their normal compiler and, for GLFW, graphics/window-system SDKs.
 
+### Image support
+
+Image decoding is optional at configure time and enabled by default. The expected bundled layout is:
+
+```text
+lib/
+├── std_image/stb_image.h
+└── lunasvg-3.5.0/
+    ├── CMakeLists.txt
+    ├── include/lunasvg.h
+    └── plutovg/
+```
+
+CMake compiles LunaSVG and its bundled plutovg dependency as static source targets; stb_image is compiled into `xui_image`. No vcpkg or system image package is selected. The enabled feature decodes PNG/JPEG/BMP/TGA and parses/rasterizes SVG. Configure with `-DXUI_ENABLE_IMAGE_SUPPORT=OFF` to omit both libraries; image widgets then show their placeholder. SVG support is limited to static vector artwork; text, filters, masks, clip paths, and animation are not supported. Relative `Image` sources resolve from the entry `.xui` directory.
+
 HarfBuzz identifies Meson as its primary build system and prints an advisory when configured through its community-maintained CMake files. Xui currently uses that CMake build; the Windows Release build and tests are verified, while Linux/macOS builds still need verification.
 
 Configure, build, and test from a checkout:
@@ -84,7 +99,7 @@ int main() {
 }
 ```
 
-The file paths are interpreted by the process working directory. Bundle or locate the font and UI assets as part of your app's packaging. Call all three load methods before `attach()`. The first loaded font is the default; `.xss` can select a registered family and weight using `font` and `font-weight`.
+Font, `.xui`, and `.xss` paths are interpreted from the process working directory. Relative image paths inside the loaded `.xui` resolve from that document's directory. Bundle or locate these assets as part of your app's packaging. Call all three load methods before `attach()`. The first loaded font is the default; `.xss` can select a registered family and weight using `font` and `font-weight`.
 
 ## Fonts
 

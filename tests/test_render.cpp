@@ -178,6 +178,32 @@ TEST(render_rounded_image_is_masked_by_its_corners) {
 	CHECK_EQ(int(im.px(4, 4)[3]), 0); CHECK_EQ(int(im.px(35, 35)[3]), 0); CHECK_EQ(int(im.px(20, 20)[3]), 255);
 	CHECK(near(alphaSum(im), kPi * 256, kPi * 256 * 0.01));
 }
+
+TEST(image_decoder_reads_png_and_lunasvg_rasterizes_vector_assets) {
+	const std::filesystem::path temp = std::filesystem::temp_directory_path() / "xui-stb-image-test.png";
+	Image source; source.width = 2; source.height = 1;
+	source.rgba = { 255, 0, 0, 255, 0, 32, 255, 128 };
+	CHECK(writePng(temp.string(), source));
+	Image decoded;
+	if (imageSupportAvailable()) {
+		CHECK(readImage(temp.string(), decoded));
+		CHECK_EQ(decoded.width, 2u); CHECK_EQ(decoded.height, 1u); CHECK(decoded.rgba == source.rgba);
+		const std::filesystem::path svgPath = std::filesystem::path(XUI_EXAMPLE_DIR) / "xui-demo-image.svg";
+		SvgImage svg; std::string error;
+		CHECK(svg.load(svgPath.string(), &error));
+		CHECK(svg.valid()); CHECK_NEAR(svg.intrinsicWidth(), 192.f, 0.01f); CHECK_NEAR(svg.intrinsicHeight(), 128.f, 0.01f);
+		Image raster;
+		CHECK(svg.rasterize(128, 128, false, raster, &error));
+		CHECK_EQ(raster.width, 128u); CHECK_EQ(raster.height, 86u);
+		CHECK_EQ(raster.rgba.size(), std::size_t(raster.width) * raster.height * 4u);
+		CHECK(raster.px(64, 43)[3] > 0);
+	}
+	else {
+		std::string error; CHECK(!readImage(temp.string(), decoded, &error)); CHECK(!error.empty());
+		SvgImage svg; CHECK(!svg.load("missing.svg", &error));
+	}
+	std::error_code ignored; std::filesystem::remove(temp, ignored);
+}
 TEST(render_stale_or_missing_texture_does_not_crash) {
 	Env e(20, 20); TextureHandle dead = e.r.createTexture({ 4, 4, TextureFormat::RGBA8, nullptr, true }); e.r.destroyTexture(dead);
 	Painter p; p.begin(20, 20, 1); GlyphQuad q{ {0, 0, 8, 8}, {0, 0, 1, 1} };

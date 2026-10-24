@@ -15,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <memory>
+#include <cstdint>
 #include <unordered_map>
 #include <vector>
 
@@ -45,6 +46,15 @@ namespace xui {
 	class TextSystem {
 	public:
 		static constexpr std::size_t kMaxCache = 4096;
+		struct FrameStats {
+			u32 layoutRequests = 0;
+			u32 layoutCacheHits = 0;
+			u32 layoutCacheMisses = 0;
+			u32 layoutCacheRehashes = 0;
+			u32 shapingRuns = 0;
+			u32 shapedGlyphs = 0;
+			u64 shapingTimeNanoseconds = 0;
+		};
 
 		/// Load a font from a TTF/OTF buffer; returns an invalid handle on parse failure.
 		FontHandle loadFont(std::string_view ttfData, std::string* error = nullptr);
@@ -54,7 +64,7 @@ namespace xui {
 		FontHandle fontAtWeight(FontHandle base, f32 weight, std::string* error = nullptr);
 		bool initAtlas(Renderer* r, u32 atlasSize = GlyphAtlas::kMinSize);
 		GlyphAtlas* atlas() { return &m_atlas; }
-		void beginFrame() { m_atlas.beginFrame(); }
+		void beginFrame() { m_frameStats = {}; m_atlas.beginFrame(); }
 
 		/// Measure + shape. @p wrapWidth <= 0 means a single line (no wrapping). Cached.
 		const TextLayout& layout(FontHandle font, std::string_view text, f32 sizePx, f32 wrapWidth = 0);
@@ -62,6 +72,7 @@ namespace xui {
 		/// Cache + atlas + font stats for tests/telemetry.
 		std::size_t cacheCount() const { return m_used; }
 		u64 rasterCount() const { return m_atlas.rasterCount(); }
+		const FrameStats& frameStats() const { return m_frameStats; }
 
 	private:
 		struct CacheKey {
@@ -85,6 +96,7 @@ namespace xui {
 		std::vector<std::unique_ptr<Font>> m_fonts;
 		std::vector<FontVariant> m_variants;
 		GlyphAtlas m_atlas;
+		FrameStats m_frameStats;
 		std::vector<CacheEntry> m_cache;
 		std::vector<u32> m_index;       // open addressing over m_cache: entry index + 1, 0 = empty
 		u32 m_used = 0;

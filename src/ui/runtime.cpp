@@ -1,5 +1,6 @@
 #include <xui/ui/runtime.hpp>
 #include <algorithm>
+#include <filesystem>
 #include <array>
 #include <cctype>
 #include <cmath>
@@ -8,6 +9,16 @@
 #include <unordered_set>
 
 namespace xui {
+	void UiRuntime::setRenderer(Renderer* renderer) {
+		if (m_renderer == renderer) return;
+		if (m_renderer) {
+			for (Node& node : m_nodes) {
+				if (node.imageTexture.valid()) m_renderer->destroyTexture(node.imageTexture);
+				node.imageTexture = {};
+			}
+		}
+		m_renderer = renderer;
+	}
 	namespace {
 		constexpr auto kFpsRefreshInterval = std::chrono::milliseconds(250);
 		constexpr auto kCaretBlinkInterval = std::chrono::milliseconds(530);
@@ -2663,21 +2674,58 @@ namespace xui {
 				painter.popOpacity(); continue;
 			}
 			if (node.image) {
-				if (!node.imageLoaded && !node.imageSource.empty()) {
+				if (!node.imageLoaded && !node.imageFailed && !node.imageSource.empty()) {
 					node.imageLoaded = true;
-					if (readPng(node.imageSource, node.imagePixels) && !node.imagePixels.rgba.empty()) {
-						node.imageW = node.imagePixels.width; node.imageH = node.imagePixels.height;
-						if (m_renderer) {
-							TextureDesc desc;
-							desc.width = node.imageW; desc.height = node.imageH;
-							desc.format = TextureFormat::RGBA8;
-							desc.pixels = node.imagePixels.rgba.data();
-							node.imageTexture = m_renderer->createTexture(desc);
-						}
-						m_layout.markContentChanged(node.layout);
-						addDamage(rect);
+					std::filesystem::path sourcePath(node.imageSource);
+					if (sourcePath.is_relative() && !m_assetDirectory.empty()) sourcePath = std::filesystem::path(m_assetDirectory) / sourcePath;
+					const std::string resolvedSource = sourcePath.lexically_normal().string();
+					if (isSvgImagePath(resolvedSource)) {
+						node.imageSvg = std::make_shared<SvgImage>();
+						std::string imageError;
+						if (node.imageSvg->load(resolvedSource, &imageError)) {
+							node.imageIntrinsicW = node.imageSvg->intrinsicWidth();
+							node.imageIntrinsicH = node.imageSvg->intrinsicHeight();
+							m_layout.markContentChanged(node.layout);
+							m_imageLayoutInvalidated = true;
+						} else { node.imageSvg.reset(); node.imageFailed = true; }
 					}
-					else node.imageFailed = true;
+					else {
+						std::string imageError;
+						if (readImage(resolvedSource, node.imagePixels, &imageError) && !node.imagePixels.rgba.empty()) {
+							node.imageW = node.imagePixels.width; node.imageH = node.imagePixels.height;
+							node.imageIntrinsicW = f32(node.imageW); node.imageIntrinsicH = f32(node.imageH);
+							m_layout.markContentChanged(node.layout);
+							m_imageLayoutInvalidated = true;
+						} else node.imageFailed = true;
+					}
+					addDamage(rect);
+				}
+				if (node.imageSvg && m_renderer && rect.w > 0.f && rect.h > 0.f) {
+					const auto rasterBucket = [this](f32 logical) {
+						const f32 physical = std::max(1.f, logical * std::max(0.1f, m_dpiScale));
+						const u32 requested = static_cast<u32>(std::clamp(std::ceil(physical), 1.f, 8192.f));
+						return std::min(8192u, ((requested + 63u) / 64u) * 64u);
+					};
+					const u32 bucketW = rasterBucket(rect.w), bucketH = rasterBucket(rect.h);
+					if (bucketW != node.imageRasterRequestW || bucketH != node.imageRasterRequestH || !node.imageTexture.valid()) {
+						node.imageRasterRequestW = bucketW; node.imageRasterRequestH = bucketH;
+						Image raster;
+						if (node.imageSvg->rasterize(bucketW, bucketH, node.imageFit == 2, raster) && !raster.rgba.empty()) {
+							TextureDesc desc; desc.width = raster.width; desc.height = raster.height;
+							desc.format = TextureFormat::RGBA8; desc.pixels = raster.rgba.data();
+							TextureHandle replacement = m_renderer->createTexture(desc);
+							if (replacement.valid()) {
+								if (node.imageTexture.valid()) m_renderer->destroyTexture(node.imageTexture);
+								node.imageTexture = replacement; node.imageW = raster.width; node.imageH = raster.height;
+								addDamage(rect);
+							}
+						}
+					}
+				}
+				if (!node.imageTexture.valid() && m_renderer && !node.imagePixels.rgba.empty()) {
+					TextureDesc desc; desc.width = node.imagePixels.width; desc.height = node.imagePixels.height;
+					desc.format = TextureFormat::RGBA8; desc.pixels = node.imagePixels.rgba.data();
+					node.imageTexture = m_renderer->createTexture(desc);
 				}
 				if (node.imageTexture.valid()) {
 					Rect dst = rect;
@@ -5244,7 +5292,8 @@ namespace xui {
 		if (runtimeNode->fpsCounter) return { 168.f, 26.f };
 		if (runtimeNode->separator) return { 12.f, 1.f };
 		if (runtimeNode->spinner) return { 18.f, 18.f };
-		if (runtimeNode->image) return runtimeNode->imageW ? Size{ f32(runtimeNode->imageW), f32(runtimeNode->imageH) } : Size{ 96.f, 64.f };
+		if (runtimeNode->image) return runtimeNode->imageIntrinsicW > 0.f && runtimeNode->imageIntrinsicH > 0.f
+			? Size{ runtimeNode->imageIntrinsicW, runtimeNode->imageIntrinsicH } : Size{ 96.f, 64.f };
 		// Empty controls still need a useful preferred size. Without these defaults, an auto-sized
 		// Slider/ProgressBar or an empty placeholder field measured to 0x0 until the app authored
 		// explicit dimensions. Keep these as content-box sizes; LayoutTree adds XUI/XSS padding and borders.

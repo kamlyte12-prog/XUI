@@ -277,7 +277,7 @@ Window(title: "Xui widget and layout showcase", size: 1080x760)[platformTopMenu:
           Column[class: "page", gap: 14px, pad: 18px] {
             Text("Labels, badges, images, and indicators")[class: "section-title"]
             Text("These display-oriented leaves share the same layout and theme system. Hover the image for its attached tooltip.")[class: "help"]
-            Image("xui-demo-image.png")[id: "demo-image", fit: Contain, tooltip: "Image is loaded through the renderer interface.", class: "demo-image", width: 420px, height: 220px]
+            Image("xui-demo-image.svg")[id: "demo-image", fit: Contain, tooltip: "SVG is rasterized and uploaded through the renderer interface.", class: "demo-image", width: 420px, height: 220px]
             Row(gap: 10)[width: 100%, align: Center] {
               Label("Label text")[class: "inline-label", width: 140px, height: 30px]
               Badge("NEW")[class: "badge", width: 64px, height: 26px]
@@ -322,7 +322,7 @@ Window(title: "Xui widget and layout showcase", size: 1080x760)[platformTopMenu:
                 }
               }
               Column(gap: 10px)[grow: 1] {
-                Image("xui-demo-image.png")[fit: Contain, tooltip: "Image is loaded through the renderer interface.", class: "demo-image", width: 100%, height: 108px]
+                Image("xui-demo-image.svg")[fit: Contain, tooltip: "SVG is rasterized and uploaded through the renderer interface.", class: "demo-image", width: 100%, height: 108px]
                 Toolbar[class: "chrome toolbar", width: 100%, height: 40px] {
                   Label("Toolbar")[class: "chrome-label"]
                   Button(label: "Action")[class: "small-button", width: 94px, height: 30px]

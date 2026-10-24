@@ -1,6 +1,5 @@
 #include <opengl/gl_drawlist_renderer.hpp>
 #include <glfw/glfw_platform.hpp>
-#include <xui/render/image_io.hpp>
 #include <xui/xui.hpp>
 #include <cstdio>
 #include <cstdlib>
@@ -234,6 +233,7 @@ int main(int argc, char** argv) {
 		else if (arg == "--profile-transform") profileCase = "transform";
 		else if (arg == "--profile-docking") profileCase = "docking";
 		else if (arg == "--profile-menubar") profileCase = "menubar";
+		else if (arg == "--profile-images") profileCase = "images";
 	}
 	const bool profile = !profileCase.empty();
 	xui::XuiOptions options;
@@ -250,24 +250,6 @@ int main(int argc, char** argv) {
 	xui::Xui app(std::move(options));
 	std::filesystem::path directory = argc > 0 && argv[0] ? std::filesystem::absolute(argv[0]).parent_path()
 		: std::filesystem::current_path();
-	// The Image widget resolves its source against the process working directory, so generate the
-	// demo asset there once. It uses the project's own PNG writer (see doc/widgets.md for the
-	// decoder limits).
-	if (!std::filesystem::exists("xui-demo-image.png")) {
-		xui::Image image;
-		image.width = 96;
-		image.height = 64;
-		image.rgba.assign(std::size_t(image.width) * image.height * 4, 0);
-		for (xui::u32 y = 0; y < image.height; ++y)
-			for (xui::u32 x = 0; x < image.width; ++x) {
-				xui::u8* pixel = image.px(x, y);
-				pixel[0] = static_cast<xui::u8>(40 + x * 2);
-				pixel[1] = static_cast<xui::u8>(60 + y * 3);
-				pixel[2] = static_cast<xui::u8>(160 + x);
-				pixel[3] = 255;
-			}
-		xui::writePng("xui-demo-image.png", image);
-	}
 	if (!loadFirstFont(app)) {
 		std::cerr << "No usable demo font was found. Set XUI_DEMO_FONT to a TTF file.\n";
 		return 1;
@@ -309,6 +291,10 @@ int main(int argc, char** argv) {
 	else if (profileCase == "menubar") {
 		// Keep the normal top-level page selected; the client-area menu is always visible.
 		app.runtime().layout(1080.f, 760.f);
+	}
+	else if (profileCase == "images") {
+		// Select Display so both checked-in SVG Image widgets load through the real renderer.
+		app.runtime().setValue("demo-sections", xui::u32{ 4 });
 	}
 	const bool continuousProfile = profile && profileCase != "animation-timer";
 	const int result = profile ? app.run({ 5.0, continuousProfile }) : app.run();

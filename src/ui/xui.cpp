@@ -5,6 +5,7 @@
 #include <chrono>
 #include <fstream>
 #include <iterator>
+#include <filesystem>
 
 namespace xui {
 	namespace {
@@ -54,6 +55,9 @@ namespace xui {
 		if (program->files.empty()) { setError("The .xui loader returned no documents."); return false; }
 		m_program = std::move(*program);
 		m_assets.document = m_program.files.front();
+		std::error_code pathError;
+		const std::filesystem::path absolutePath = std::filesystem::absolute(std::filesystem::path(path), pathError);
+		m_assetDirectory = (pathError ? std::filesystem::path(path) : absolutePath).parent_path().string();
 		m_hasXui = true;
 		m_error.clear();
 		return true;
@@ -117,6 +121,7 @@ namespace xui {
 		}
 		m_rendererReady = true;
 	m_runtime.setRenderer(&renderer);
+	m_runtime.setAssetDirectory(m_assetDirectory);
 	m_platform->setLiveResizeHook(m_window, renderFrameThunk, this);
 	m_runtime.setPlatformWindow(m_platform, m_window);
 		m_widthPixels = u32(pixels.x); m_heightPixels = u32(pixels.y);
@@ -264,11 +269,16 @@ namespace xui {
 			m_renderer->resize(u32(pixels.x), u32(pixels.y), dpi);
 			m_widthPixels = u32(pixels.x); m_heightPixels = u32(pixels.y);
 		}
-		m_runtime.layout(logical.x, logical.y, dpi);
 		m_text.beginFrame();
 		m_runtime.setDrawBatchCount(m_painter.stats().drawCalls);
-		m_painter.begin(u32(pixels.x), u32(pixels.y), dpi);
-		m_runtime.paint(m_painter, dpi);
+		// Image intrinsic size is discovered during its first paint. If that changes auto sizing,
+		// resolve layout once more and repaint before presenting the frame.
+		for (u8 pass = 0; pass < 2; ++pass) {
+			m_runtime.layout(logical.x, logical.y, dpi);
+			m_painter.begin(u32(pixels.x), u32(pixels.y), dpi);
+			m_runtime.paint(m_painter, dpi);
+			if (!m_runtime.takeImageLayoutInvalidation()) break;
+		}
 		const DrawList draw = m_painter.finish();
 		m_renderer->beginFrame({ u32(pixels.x), u32(pixels.y), dpi, Color{0.04f, 0.05f, 0.08f, 1}, m_stats.frames });
 		m_renderer->submit(draw);

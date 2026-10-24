@@ -12,6 +12,7 @@
 #include <vector>
 #include <chrono>
 #include <optional>
+#include <memory>
 #include <variant>
 
 namespace xui {
@@ -116,7 +117,10 @@ namespace xui {
 		bool fpsCounterEnabled() const { return m_fpsEnabled; }
 		bool drawBatchCounterEnabled() const { return m_drawBatchCounterEnabled; }
 		void setDrawBatchCount(u32 batches) { m_drawBatchCount = batches; }
+		/// Resolve relative Image sources from the directory containing the loaded entry document.
+		void setAssetDirectory(std::string_view directory) { m_assetDirectory.assign(directory); }
 		bool takeDamage(Rect& out) { if (!m_hasDamage) return false; out = m_damage; m_hasDamage = false; return true; }
+		bool takeImageLayoutInvalidation() { const bool invalidated = m_imageLayoutInvalidated; m_imageLayoutInvalidated = false; return invalidated; }
 
 		void setEventHandler(UiEventFn fn, void* context) { m_eventFn = fn; m_eventContext = context; }
 		/// Wire the platform so TitleBar caption buttons and window dragging act on the window.
@@ -132,7 +136,7 @@ namespace xui {
 		bool whitespaceVisible() const { return m_showWhitespace; }
 		/// Supplies the renderer used to create Image widget textures (lazily, at paint time).
 		/// May be nullptr for headless clients; Image widgets then paint their placeholder frame.
-		void setRenderer(Renderer* renderer) { m_renderer = renderer; }
+		void setRenderer(Renderer* renderer);
 		NodeId root() const { return m_root; }
 		Rect bounds(NodeId node) const { return m_layout.absRect(node); }
 		f32 controlValue(NodeId node) const { const Node* n = findNode(node); return n ? n->value : 0.f; }
@@ -231,6 +235,9 @@ namespace xui {
 			bool imageLoaded = false, imageFailed = false;
 			u8 imageFit = 1;   // 0 Fill, 1 Contain, 2 Cover
 			u32 imageW = 0, imageH = 0;
+			u32 imageRasterRequestW = 0, imageRasterRequestH = 0;
+			f32 imageIntrinsicW = 0, imageIntrinsicH = 0;
+			std::shared_ptr<SvgImage> imageSvg;
 			TextureHandle imageTexture;
 			Image imagePixels;
 			std::string imageSource, unit;
@@ -373,6 +380,7 @@ namespace xui {
 		UiEventFn m_eventFn = nullptr;
 		void* m_eventContext = nullptr;
 		Renderer* m_renderer = nullptr;
+		std::string m_assetDirectory;
 		std::chrono::steady_clock::time_point m_spinnerDeadline{};
 		std::chrono::steady_clock::time_point m_animationDeadline{};
 		std::chrono::steady_clock::time_point m_animationsPausedAt{};
@@ -399,6 +407,7 @@ namespace xui {
 		Vec2 m_pointerPosition{};
 		Rect m_damage{};
 		bool m_hasDamage = false;
+		bool m_imageLayoutInvalidated = false;
 		f32 m_lastLayoutWidth = -1.f, m_lastLayoutHeight = -1.f;
 		u32 m_tooltipOwner = 0xFFFFFFFFu;
 		std::chrono::steady_clock::time_point m_tooltipDeadline{};

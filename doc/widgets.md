@@ -340,11 +340,11 @@ Separator.rule { resting: { fg: #33415560, margin: 8px 0px } }
 
 ### `Image`
 
-Paints a PNG file: `Image("assets/logo.png")` or `Image[source: "assets/logo.png", fit: Cover]`. The file is read once at first paint, uploaded as an RGBA8 texture through the `Renderer` interface, drawn aspect-correct per `fit` (`Fill` stretches, `Contain` — the default — letterboxes, `Cover` fills and center-crops), and clipped to the widget with optional `radius`. Missing sources, unreadable files, or headless clients without a renderer draw an outlined placeholder box instead of failing.
+Paints a static raster or SVG asset: `Image("assets/logo.png")` or `Image[source: "assets/logo.svg", fit: Cover]`. Optional image support uses the bundled `lib/std_image/stb_image.h` decoder for PNG, JPEG, BMP, and TGA, and bundled LunaSVG 3.5 for SVG rasterization. It decodes once, uploads straight-alpha RGBA8 through the `Renderer` interface, then draws aspect-correct per `fit` (`Fill` stretches, `Contain` — the default — letterboxes, `Cover` fills and center-crops), clips to the widget, and supports optional `radius`. Relative image paths are resolved from the directory containing the entry `.xui` file. The source file remains an ordinary app asset; the `.xui` owns the reference and `.xss` owns its appearance.
 
-> **Decoder limit:** `Image` currently reads only the uncompressed PNG variant this project writes (`xui::writePng`: 8-bit RGBA, filters 0/2, stored or fixed-Huffman deflate blocks). Compressed PNGs from other tools fall back to the placeholder until a general decoder lands. Do not point `Image` at arbitrary assets yet. The showcase demo generates its own image with `writePng` at startup (see `examples/glfw_demo.cpp`) and reads it back through this path.
+SVG documents are parsed once and rasterized at the displayed physical size, rounded up to 64-pixel buckets. A changed display-size/DPI bucket replaces the cached texture. Raster decoding and SVG output are limited to 16,384 pixels per side and 64 million pixels total. SVG text, filters, masks, clip paths, and animation are not supported. Missing/unreadable files and headless clients without a renderer draw an outlined placeholder instead of failing. Without authored size, a source-less image measures 96x64; a loaded raster uses its pixel dimensions, and SVG uses its intrinsic dimensions as logical size.
 
-Without an explicit size, a source-less image measures 96x64 and a loaded image takes its natural pixel size as logical pixels.
+Image support is enabled by default with `XUI_ENABLE_IMAGE_SUPPORT=ON`; set it to `OFF` to build without stb_image/LunaSVG and keep the core image API available with a clear unsupported result. See [Getting Started](getting-started.md#image-support) for the bundled source layout and build option. `readPng()`/`writePng()` remain separate helpers for the framework's golden-image tests and are not the `Image` widget decoder.
 
 ### `Spinner`
 

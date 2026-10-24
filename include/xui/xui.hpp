@@ -92,6 +92,7 @@ namespace xui {
 		XuiRunStats m_stats;
 		std::string m_error;
 		std::string m_themeName;
+		std::string m_assetDirectory;
 		bool m_hasXui = false, m_hasXss = false;
 		bool m_platformReady = false, m_rendererReady = false, m_attached = false;
 		u32 m_widthPixels = 0, m_heightPixels = 0;

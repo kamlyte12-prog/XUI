@@ -243,6 +243,9 @@ namespace xui {
 		bool wasVisible = m_platform->windowVisible(m_window);
 		m_runtime.setAnimationsPaused(!wasVisible);
 		const auto start = Clock::now();
+		m_lastTick = start;
+		m_tickDeadline = m_tickIntervalMs && wasVisible
+			? start + std::chrono::milliseconds(m_tickIntervalMs) : Clock::time_point{};
 		m_stats = {};
 		while (running) {
 			bool resized = false;
@@ -296,10 +299,21 @@ namespace xui {
 			if (visible != wasVisible) {
 				m_runtime.setAnimationsPaused(!visible);
 				wasVisible = visible;
-				if (visible) redraw = true;
+				if (visible) {
+					redraw = true;
+					m_lastTick = Clock::now();
+					m_tickDeadline = m_tickIntervalMs ? m_lastTick + std::chrono::milliseconds(m_tickIntervalMs) : Clock::time_point{};
+				}
 				else redraw = false;
 			}
 			if (!visible) redraw = false;
+			const auto loopNow = Clock::now();
+			if (visible && m_tickHandler && m_tickIntervalMs && m_tickDeadline != Clock::time_point{} && loopNow >= m_tickDeadline) {
+				const f64 elapsed = std::chrono::duration<f64>(loopNow - m_lastTick).count();
+				m_lastTick = loopNow;
+				m_tickDeadline = loopNow + std::chrono::milliseconds(m_tickIntervalMs);
+				redraw |= m_tickHandler(m_tickContext, elapsed);
+			}
 			// Enabling the FPS overlay opts into continuous rendering so it measures actual
 			// throughput instead of counting its own 250 ms idle refresh timer as 4 FPS.
 			if (visible && (options.redrawContinuously || m_runtime.fpsCounterEnabled())) redraw = true;
@@ -324,7 +338,11 @@ namespace xui {
 			// FPS sampling schedules a bounded 250 ms refresh through nextTimerDelay().
 			// It never inserts a wait into continuous redraw/profile mode.
 			if (!redraw && (!options.redrawContinuously || !visible)) {
-				const f64 timerDelay = visible ? m_runtime.nextTimerDelay() : -1.0;
+				f64 timerDelay = visible ? m_runtime.nextTimerDelay() : -1.0;
+				if (visible && m_tickHandler && m_tickIntervalMs && m_tickDeadline != Clock::time_point{}) {
+					const f64 tickDelay = std::chrono::duration<f64>(m_tickDeadline - Clock::now()).count();
+					if (timerDelay < 0.0 || tickDelay < timerDelay) timerDelay = tickDelay;
+				}
 				if (options.maxSeconds > 0) {
 					const f64 remaining = std::max(0.0, options.maxSeconds - m_stats.elapsedSeconds);
 					const f64 wait = timerDelay < 0 ? remaining : std::min(remaining, timerDelay);
@@ -379,12 +397,25 @@ namespace xui {
 		if (m_attached) m_runtime.setEventHandler(handler, context);
 	}
 
+	void Xui::setTickHandler(XuiTickFn handler, void* context, u32 intervalMs) {
+		m_tickHandler = handler;
+		m_tickContext = context;
+		m_tickIntervalMs = handler ? intervalMs : 0;
+		const auto now = Clock::now();
+		m_lastTick = now;
+		m_tickDeadline = m_tickIntervalMs ? now + std::chrono::milliseconds(m_tickIntervalMs) : Clock::time_point{};
+	}
+
 	void Xui::setWindowTitle(std::string_view title) {
 		if (m_platform && m_window.valid()) m_platform->setWindowTitle(m_window, title);
 		m_runtime.updateWindowTitle(title);
 	}
 
 	void Xui::shutdown() {
+		m_tickHandler = nullptr;
+		m_tickContext = nullptr;
+		m_tickIntervalMs = 0;
+		m_tickDeadline = {};
 		m_runtime.setRenderer(nullptr);
 		m_runtime.setPlatformWindow(nullptr, WindowHandle{});
 		if (m_platform && m_window.valid()) m_platform->setLiveResizeHook(m_window, nullptr, nullptr);

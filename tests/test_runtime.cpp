@@ -1847,7 +1847,7 @@ TEST(showcase_example_assets_parse_validate_and_build) {
 	(void)ui.pointerUp({ gutterPoint.x + 24.f, gutterPoint.y });
 }
 
-TEST(turn_based_game_example_assets_parse_validate_and_build) {
+TEST(tetris_game_example_assets_parse_validate_and_build) {
 	const std::string xuiSource = readExample("game/game.xui");
 	const std::string xssSource = readExample("game/game.xss");
 	CHECK(!xuiSource.empty()); CHECK(!xssSource.empty());
@@ -1858,12 +1858,36 @@ TEST(turn_based_game_example_assets_parse_validate_and_build) {
 	CHECK(ui.build(assets.document, assets.styles, strings, text, {}, error));
 	if (!error.empty()) { std::cerr << error << '\n'; return; }
 	ui.layout(1000, 720);
-	for (const std::string_view id : { "game-pages", "player-health", "enemy-health", "difficulty",
-		"strike-power", "equipment", "rune-blade", "iron-shield", "combat-hints", "battle-log" }) {
+	for (const std::string_view id : { "game-pages", "menu-title", "score-readout", "lines-readout", "level-readout",
+		"piece-readout", "next-readout", "starting-level", "line-toast", "gameover-title", "gameover-score",
+		"gameover-lines" }) {
+		CHECK(ui.value(id).has_value());
+	}
+	for (int row = 0; row < 20; ++row) for (int col = 0; col < 10; ++col) {
+		const std::string id = "cell-" + std::to_string(row) + "-" + std::to_string(col);
 		CHECK(ui.value(id).has_value());
 	}
 	CHECK_EQ(std::get<u32>(*ui.value("game-pages")), 0u);
 	CHECK(ui.bounds(ui.root()).w > 0.f);
+}
+
+TEST(xui_facade_scheduled_application_tick_runs_on_ui_loop) {
+	Xui app;
+	const auto xuiPath = (std::filesystem::path(XUI_TEST_FIXTURE_DIR) / "cross_platform.xui").string();
+	const auto xssPath = (std::filesystem::path(XUI_TEST_FIXTURE_DIR) / "cross_platform.xss").string();
+	CHECK(app.loadXui(xuiPath)); CHECK(app.loadXss(xssPath));
+	if (!app.lastError().empty()) return;
+	NullRenderer renderer; NullPlatform platform;
+	CHECK(app.attach(renderer, platform));
+	struct TickProbe { u32 calls = 0; f64 elapsed = 0; } probe;
+	app.setTickHandler([](void* context, f64 elapsed) {
+		auto& state = *static_cast<TickProbe*>(context);
+		++state.calls; state.elapsed = elapsed; return true;
+	}, &probe, 2);
+	CHECK_EQ(app.run({ 0.025, false }), 0);
+	CHECK(probe.calls >= 3);
+	CHECK(probe.elapsed > 0.0);
+	app.shutdown();
 }
 
 TEST(ui_runtime_scrollview_wheel_keyboard_programmatic_and_nested_scroll) {

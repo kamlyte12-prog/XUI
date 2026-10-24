@@ -75,7 +75,7 @@ The screenshot shows the themed showcase window with a tabbed layout, checklist,
 
 ## Game UI example
 
-[`examples/game/`](examples/game/README.md) contains **The Ashen Gate**, a turn-based encounter that uses authored pages and styles, event callbacks, typed control values, tooltips, progress bars, and animations. It exercises game UI without adding platform-specific rendering code.
+[`examples/game/`](examples/game/README.md) contains a playable Tetris sample. Its board and controls use authored widgets; C++ owns game rules and updates values through the runtime API.
 
 ## Project links
 

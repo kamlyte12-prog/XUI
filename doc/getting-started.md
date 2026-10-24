@@ -201,6 +201,8 @@ Pass `XuiOptions` to the `Xui` constructor to configure the app/window and glyph
 
 `Xui::run()` accepts `XuiRunOptions`: `maxSeconds` bounds a run when nonzero, and `redrawContinuously` opts into continuous drawing (default false). The demos use continuous mode for their hidden `--profile` run; it measures loop throughput, not visible presentation or input latency.
 
+Applications that need timed updates can call `ui.setTickHandler(callback, context, intervalMs)` after attaching and before or during `run()`. The callback executes on the UI thread at the requested interval while the window is visible; its elapsed-seconds argument reports actual time since the previous callback. Return `true` when application state changed and needs a redraw. A zero interval (or a null callback) disables the timer. The event loop includes the next application tick in its wait deadline, so an idle or paused app does not need a polling loop. Hidden windows pause ticks and restart the interval when shown again.
+
 | CMake option | Purpose | Default |
 |---|---|---|
 | `XUI_BUILD_TESTS` | Build `xui_tests` | ON |

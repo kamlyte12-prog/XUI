@@ -8,6 +8,7 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include <chrono>
 
 namespace xui {
 
@@ -36,6 +37,9 @@ namespace xui {
 
 	/// Summary of the most recent `run()` call. FPS is frames divided by elapsed wall time.
 	struct XuiRunStats { u64 frames = 0; f64 elapsedSeconds = 0; f64 framesPerSecond = 0; };
+	/// Application callback invoked by the facade's event loop on a scheduled interval.
+	/// Return true when the callback changed application state that needs a redraw.
+	using XuiTickFn = bool (*)(void* context, f64 elapsedSeconds);
 
 	/// Owns framework-side application state and the standard load/attach/event/render loop.
 	/// Concrete Renderer and Platform instances remain application-owned and are passed by reference.
@@ -70,6 +74,9 @@ namespace xui {
 
 		/// Set the callback used by `.xui` event properties; callbacks receive the authored handler name.
 		void setEventHandler(UiEventFn handler, void* context);
+		/// Schedule an application update on the event loop. A zero interval disables it; hidden windows pause it.
+		/// The callback runs on the UI thread and receives actual elapsed seconds since its previous call.
+		void setTickHandler(XuiTickFn handler, void* context, u32 intervalMs);
 		/// Change the native title after attachment and synchronize the runtime's title metadata.
 		void setWindowTitle(std::string_view title);
 		/// Start or restart a named `.xss` keyframe animation on an authored node ID.
@@ -110,6 +117,10 @@ namespace xui {
 		WindowHandle m_window;
 		UiEventFn m_eventHandler = nullptr;
 		void* m_eventContext = nullptr;
+		XuiTickFn m_tickHandler = nullptr;
+		void* m_tickContext = nullptr;
+		u32 m_tickIntervalMs = 0;
+		std::chrono::steady_clock::time_point m_tickDeadline{}, m_lastTick{};
 		XuiRunStats m_stats;
 		std::string m_error;
 		std::string m_themeName;

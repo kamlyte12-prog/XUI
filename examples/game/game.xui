@@ -1,151 +1,346 @@
-// Event-driven turn-based encounter. The C++ file updates values and routes events;
-// this document owns the complete page and widget tree.
-Window(title: "The Ashen Gate", size: 1000x720) {
-  Column[class: "app", width: 100%, height: 100%, pad: 20px, gap: 14px] {
-    Row[class: "masthead", width: 100%, align: Center, justify: SpaceBetween] {
-      Column[grow: 1, gap: 3px] {
-        Text("THE ASHEN GATE")[class: "title"]
-        Text("A small turn-based encounter built with Xui widgets")[class: "subtitle"]
+// Tetris structure and controls are authored here. game.cpp only owns game rules and values.
+Window(title: "Xui Tetris", size: 980x760) {
+  Column[class: "app", width: 100%, height: 100%, pad: 16px, gap: 10px, minSize: 820x680] {
+    Row[class: "masthead", width: 100%, align: Center, justify: SpaceBetween, gap: 14px] {
+      Column[grow: 1, gap: 2px] {
+        Text("TETRIS")[class: "title"]
+        Text("A real-time game loop built on Xui widgets")[class: "subtitle"]
       }
-      FpsCounter[id: "fps", class: "fps", width: 190px, height: 30px]
+      FpsCounter[id: "fps", class: "fps", width: 240px, height: 30px]
+      Text("F3: FPS / ms   F4: batches")[class: "hint", width: 180px, height: 30px]
     }
 
     Tabs[id: "game-pages", selected: 0, change: onPageChange, class: "pages", width: 100%, height: 100%, grow: 1, minSize: 0x0] {
-      Tab(title: "Main Menu") {
-        Panel[class: "page-card menu-page", width: 100%, height: 100%, pad: 28px] {
-          Column[class: "menu-content", width: 100%, height: 100%, gap: 16px, align: Center, justify: Center] {
-            Badge("TURN-BASED DEMO")[class: "eyebrow"]
-            Text("The Ashen Gate")[class: "hero"]
-            Text("A sentinel guards the old road. Choose your actions, manage your gear, and keep your health above zero.")[class: "intro", width: 620px]
-            Row[class: "menu-actions", gap: 10px, align: Center] {
-              Button(label: "Begin encounter")[press: onStart, tooltip: "Start a fresh encounter.", class: "primary", width: 190px, height: 44px]
-              Button(label: "Settings")[press: onOpenSettings, class: "secondary", width: 130px, height: 44px]
-              Button(label: "Inventory")[press: onOpenInventory, class: "secondary", width: 130px, height: 44px]
-              Button(label: "Quit")[press: onQuit, class: "secondary", width: 92px, height: 44px]
+      Tab(title: "Menu") {
+        Panel[class: "page-card", width: 100%, height: 100%, pad: 24px] {
+          Column[class: "center-page", width: 100%, height: 100%, gap: 14px, align: Center, justify: Center] {
+            Badge("XUI GAME EXAMPLE")[class: "eyebrow"]
+            Text("Tetris")[id: "menu-title", class: "hero menu-title"]
+            Text("Clear rows, score points, and raise the level using the authored controls.")[class: "intro", width: 620px]
+            Row[class: "actions", gap: 10px, align: Center] {
+              Button(label: "Play")[press: onStart, class: "primary", width: 140px, height: 42px]
+              Button(label: "Settings")[press: onOpenSettings, class: "secondary", width: 140px, height: 42px]
+              Button(label: "Quit")[press: onQuit, class: "secondary", width: 110px, height: 42px]
             }
-            Text("F3 toggles live FPS sampling. F4 toggles draw-batch count.")[class: "hint"]
+            Text("F3 toggles FPS sampling. F4 toggles draw batches.")[class: "hint"]
           }
         }
       }
-
-      Tab(title: "Encounter") {
-        ScrollView[class: "page-scroll", width: 100%, height: 100%, vertical: true, horizontal: false] {
-          Column[class: "page-content", width: 100%, gap: 14px, pad: 18px] {
-            Row[class: "battle-heading", width: 100%, align: Center, justify: SpaceBetween] {
-              Column[grow: 1, gap: 3px] {
-                Text("Roadside sentinel")[class: "section-title"]
-                Text("Take one action per turn. The sentinel counters after each action.")[class: "body"]
+      Tab(title: "Game") {
+        Row[class: "game-page", width: 100%, height: 100%, gap: 16px, align: Start, pad: 14px] {
+          Panel[class: "board-frame", width: 270px, height: 520px, pad: 8px] {
+            Column[id: "board", class: "board", gap: 2px, width: 100%, height: 100%] {
+              Row[class: "board-row", gap: 2px] {
+                ProgressBar[id: "cell-0-0", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-0-1", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-0-2", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-0-3", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-0-4", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-0-5", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-0-6", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-0-7", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-0-8", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-0-9", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
               }
-              Text("Turn 1")[id: "turn-readout", class: "readout", width: 100px, height: 32px]
-              Text("Score 0")[id: "score-readout", class: "readout", width: 120px, height: 32px]
-              Button(label: "Pause")[press: onPause, class: "secondary", width: 92px, height: 36px]
+              Row[class: "board-row", gap: 2px] {
+                ProgressBar[id: "cell-1-0", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-1-1", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-1-2", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-1-3", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-1-4", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-1-5", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-1-6", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-1-7", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-1-8", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-1-9", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+              }
+              Row[class: "board-row", gap: 2px] {
+                ProgressBar[id: "cell-2-0", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-2-1", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-2-2", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-2-3", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-2-4", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-2-5", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-2-6", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-2-7", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-2-8", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-2-9", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+              }
+              Row[class: "board-row", gap: 2px] {
+                ProgressBar[id: "cell-3-0", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-3-1", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-3-2", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-3-3", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-3-4", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-3-5", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-3-6", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-3-7", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-3-8", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-3-9", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+              }
+              Row[class: "board-row", gap: 2px] {
+                ProgressBar[id: "cell-4-0", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-4-1", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-4-2", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-4-3", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-4-4", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-4-5", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-4-6", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-4-7", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-4-8", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-4-9", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+              }
+              Row[class: "board-row", gap: 2px] {
+                ProgressBar[id: "cell-5-0", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-5-1", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-5-2", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-5-3", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-5-4", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-5-5", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-5-6", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-5-7", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-5-8", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-5-9", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+              }
+              Row[class: "board-row", gap: 2px] {
+                ProgressBar[id: "cell-6-0", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-6-1", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-6-2", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-6-3", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-6-4", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-6-5", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-6-6", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-6-7", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-6-8", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-6-9", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+              }
+              Row[class: "board-row", gap: 2px] {
+                ProgressBar[id: "cell-7-0", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-7-1", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-7-2", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-7-3", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-7-4", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-7-5", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-7-6", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-7-7", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-7-8", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-7-9", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+              }
+              Row[class: "board-row", gap: 2px] {
+                ProgressBar[id: "cell-8-0", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-8-1", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-8-2", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-8-3", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-8-4", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-8-5", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-8-6", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-8-7", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-8-8", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-8-9", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+              }
+              Row[class: "board-row", gap: 2px] {
+                ProgressBar[id: "cell-9-0", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-9-1", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-9-2", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-9-3", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-9-4", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-9-5", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-9-6", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-9-7", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-9-8", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-9-9", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+              }
+              Row[class: "board-row", gap: 2px] {
+                ProgressBar[id: "cell-10-0", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-10-1", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-10-2", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-10-3", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-10-4", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-10-5", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-10-6", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-10-7", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-10-8", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-10-9", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+              }
+              Row[class: "board-row", gap: 2px] {
+                ProgressBar[id: "cell-11-0", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-11-1", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-11-2", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-11-3", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-11-4", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-11-5", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-11-6", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-11-7", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-11-8", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-11-9", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+              }
+              Row[class: "board-row", gap: 2px] {
+                ProgressBar[id: "cell-12-0", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-12-1", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-12-2", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-12-3", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-12-4", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-12-5", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-12-6", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-12-7", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-12-8", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-12-9", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+              }
+              Row[class: "board-row", gap: 2px] {
+                ProgressBar[id: "cell-13-0", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-13-1", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-13-2", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-13-3", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-13-4", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-13-5", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-13-6", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-13-7", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-13-8", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-13-9", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+              }
+              Row[class: "board-row", gap: 2px] {
+                ProgressBar[id: "cell-14-0", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-14-1", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-14-2", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-14-3", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-14-4", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-14-5", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-14-6", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-14-7", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-14-8", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-14-9", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+              }
+              Row[class: "board-row", gap: 2px] {
+                ProgressBar[id: "cell-15-0", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-15-1", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-15-2", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-15-3", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-15-4", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-15-5", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-15-6", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-15-7", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-15-8", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-15-9", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+              }
+              Row[class: "board-row", gap: 2px] {
+                ProgressBar[id: "cell-16-0", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-16-1", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-16-2", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-16-3", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-16-4", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-16-5", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-16-6", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-16-7", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-16-8", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-16-9", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+              }
+              Row[class: "board-row", gap: 2px] {
+                ProgressBar[id: "cell-17-0", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-17-1", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-17-2", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-17-3", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-17-4", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-17-5", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-17-6", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-17-7", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-17-8", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-17-9", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+              }
+              Row[class: "board-row", gap: 2px] {
+                ProgressBar[id: "cell-18-0", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-18-1", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-18-2", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-18-3", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-18-4", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-18-5", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-18-6", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-18-7", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-18-8", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-18-9", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+              }
+              Row[class: "board-row", gap: 2px] {
+                ProgressBar[id: "cell-19-0", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-19-1", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-19-2", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-19-3", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-19-4", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-19-5", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-19-6", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-19-7", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-19-8", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+                ProgressBar[id: "cell-19-9", value: 0, min: 0, max: 1, class: "board-cell", width: 23px, height: 22px]
+              }
             }
-
-            Row[class: "combatants", width: 100%, gap: 14px, align: Start] {
-              Panel[class: "combatant", grow: 1, minSize: 260x150, pad: 16px] {
-                Text("Wayfarer")[class: "panel-title"]
-                Row[class: "health-heading", width: 100%, align: Center, justify: SpaceBetween] {
-                  Text("Health")[class: "body"]
-                  Text("100 / 100")[id: "player-health-readout", class: "value"]
-                }
-                ProgressBar[id: "player-health", class: "health own-health", value: 1, min: 0, max: 1, width: 100%, height: 18px]
-                Text("Healing draughts: 3")[id: "potion-readout", class: "body"]
-              }
-              Panel[class: "combatant enemy", grow: 1, minSize: 260x150, pad: 16px] {
-                Text("Ash sentinel")[class: "panel-title"]
-                Row[class: "health-heading", width: 100%, align: Center, justify: SpaceBetween] {
-                  Text("Health")[class: "body"]
-                  Text("100 / 100")[id: "enemy-health-readout", class: "value"]
-                }
-                ProgressBar[id: "enemy-health", class: "health enemy-health", value: 1, min: 0, max: 1, width: 100%, height: 18px]
-                Text("A stone guardian with a fading ember core.")[class: "body"]
+          }
+          Column[class: "sidebar", grow: 1, gap: 10px] {
+            Panel[class: "score-card", width: 100%, pad: 14px] {
+              Text("SCORE")[class: "field-label"]
+              Text("0")[id: "score-readout", class: "score-value"]
+              Row[class: "stats-row", width: 100%, gap: 8px] {
+                Column[grow: 1, gap: 4px] { Text("LINES")[class: "field-label"] Text("0")[id: "lines-readout", class: "stat-value"] }
+                Column[grow: 1, gap: 4px] { Text("LEVEL")[class: "field-label"] Text("1")[id: "level-readout", class: "stat-value"] }
               }
             }
-
-            Panel[class: "action-panel", width: 100%, pad: 16px] {
-              Text("Choose an action")[class: "panel-title"]
-              Row[class: "action-row", width: 100%, gap: 10px, align: Center] {
-                Button(label: "Strike")[press: onStrike, tooltip: "Deal damage based on your configured strike power.", class: "primary", width: 150px, height: 42px]
-                Button(label: "Heavy strike")[press: onHeavyStrike, tooltip: "Deal a stronger blow, then endure a stronger counter.", class: "secondary", width: 150px, height: 42px]
-                Button(label: "Use draught")[press: onHeal, tooltip: "Restore health. The sentinel still takes its turn.", class: "secondary", width: 150px, height: 42px]
-                Button(label: "Guard")[press: onGuard, tooltip: "Reduce the next counterattack.", class: "secondary", width: 120px, height: 42px]
-                Text("Strike power: 14")[id: "power-readout", class: "readout", grow: 1, height: 34px]
-              }
+            Panel[class: "piece-card", width: 100%, pad: 14px] {
+              Text("CURRENT")[class: "field-label"]
+              Text("T")[id: "piece-readout", class: "stat-value"]
+              Text("NEXT")[class: "field-label"]
+              Text("Next: I")[id: "next-readout", class: "stat-value"]
             }
-
-            Text("The road is quiet.")[id: "battle-log", class: "battle-log", width: 100%, height: 42px]
-            Text("Hint: use Guard to blunt the next counterattack.")[id: "battle-hint", class: "hint", width: 100%, height: 30px]
+            Panel[class: "controls-card", width: 100%, pad: 14px] {
+              Text("CONTROLS")[class: "panel-title"]
+              Text("Move / rotate")[class: "control-help"]
+              Row[width: 100%, gap: 6px] {
+                Button(label: "← Left")[press: onLeft, class: "secondary", grow: 1, height: 36px]
+                Button(label: "Rotate")[press: onRotate, class: "secondary", grow: 1, height: 36px]
+                Button(label: "Right →")[press: onRight, class: "secondary", grow: 1, height: 36px]
+              }
+              Text("Drop")[class: "control-help"]
+              Row[width: 100%, gap: 6px] {
+                Button(label: "Soft drop")[press: onSoftDrop, class: "secondary", grow: 1, height: 36px]
+                Button(label: "Hard drop")[press: onHardDrop, class: "primary", grow: 1, height: 36px]
+              }
+              Row[width: 100%, gap: 6px] {
+                Button(label: "Pause")[press: onPause, class: "secondary", grow: 1, height: 36px]
+                Button(label: "Menu")[press: onMainMenu, class: "secondary", grow: 1, height: 36px]
+              }
+              Text("Use the buttons above to move and drop pieces.")[class: "hint"]
+            }
+            Text("0 lines cleared")[id: "line-toast", class: "line-toast"]
           }
         }
       }
-
       Tab(title: "Paused") {
-        Panel[class: "page-card centered-page", width: 100%, height: 100%, pad: 28px] {
-          Column[class: "center-content", width: 100%, height: 100%, gap: 14px, align: Center, justify: Center] {
-            Text("Encounter paused")[class: "hero"]
-            Text("The turn-based encounter is idle. No game update loop runs while you are here.")[class: "intro"]
+        Panel[class: "page-card", width: 100%, height: 100%, pad: 24px] {
+          Column[class: "center-page", width: 100%, height: 100%, gap: 14px, align: Center, justify: Center] {
+            Text("Paused")[class: "hero"]
+            Text("The gravity timer is stopped while this page is open.")[class: "intro"]
             Row[gap: 10px, align: Center] {
               Button(label: "Resume")[press: onResume, class: "primary", width: 140px, height: 42px]
-              Button(label: "Settings")[press: onOpenSettings, class: "secondary", width: 140px, height: 42px]
               Button(label: "Main menu")[press: onMainMenu, class: "secondary", width: 140px, height: 42px]
             }
           }
         }
       }
-
       Tab(title: "Settings") {
-        Panel[class: "page-card settings-page", width: 100%, height: 100%, pad: 22px] {
-          Column[class: "settings-content", width: 100%, height: 100%, gap: 14px] {
-            Text("Encounter settings")[class: "section-title"]
-            Text("These settings are read from the controls when the game state changes.")[class: "body"]
-            Row[class: "setting-row", width: 100%, align: Center, gap: 18px] {
-              Column[grow: 1, gap: 6px] {
-                Text("Difficulty")[class: "field-label"]
-                Dropdown[id: "difficulty", options: "Easy|Normal|Hard", value: "Normal", change: onDifficultyChange, tooltip: "Changes the sentinel's counterattack and starting health.", class: "dropdown", width: 260px, height: 38px]
-              }
-              Text("Difficulty: Normal")[id: "difficulty-readout", class: "readout", width: 220px, height: 36px]
-            }
-            Column[class: "setting-row", width: 100%, gap: 7px] {
-              Text("Strike power")[class: "field-label"]
-              Slider[id: "strike-power", value: 14, min: 8, max: 22, change: onPowerChange, tooltip: "Adjust the damage of a normal strike.", class: "slider", width: 100%, height: 28px]
-              Text("Strike power: 14")[id: "settings-power-readout", class: "body"]
-            }
-            CheckBox[id: "combat-hints", label: "Show combat hints", checked: true, change: onHintsChange, class: "check", tooltip: "Show a short tip during the encounter."]
-            Text("Hints: on")[id: "hints-readout", class: "body"]
+        Panel[class: "page-card", width: 100%, height: 100%, pad: 24px] {
+          Column[class: "settings-page", width: 100%, height: 100%, gap: 12px] {
+            Text("Game settings")[class: "section-title"]
+            Text("Choose the starting level for the next game.")[class: "body"]
+            Dropdown[id: "starting-level", options: "1|2|3|4|5", value: "1", class: "dropdown", width: 220px, height: 38px]
             Row[width: 100%, justify: End] {
               Button(label: "Back")[press: onSettingsBack, class: "secondary", width: 120px, height: 40px]
+              Button(label: "Play")[press: onStart, class: "primary", width: 120px, height: 40px]
             }
           }
         }
       }
-
-      Tab(title: "Inventory") {
-        Panel[class: "page-card inventory-page", width: 100%, height: 100%, pad: 22px] {
-          Column[class: "inventory-content", width: 100%, height: 100%, gap: 12px] {
-            Text("Pack and equipment")[class: "section-title"]
-            Text("Toggle equipment. The selected items affect combat actions.")[class: "body"]
-            CheckList[id: "equipment", change: onInventoryChange, class: "equipment-list", width: 100%] {
-              CheckItem[id: "rune-blade", label: "Rune blade (+4 strike damage)", checked: false, tooltip: "Adds damage to both strike actions.", class: "inventory-item", width: 100%, height: 38px]
-              CheckItem[id: "iron-shield", label: "Iron shield (-3 counter damage)", checked: true, tooltip: "Reduces each sentinel counterattack by 3.", class: "inventory-item", width: 100%, height: 38px]
-            }
-            Text("Equipment selected: Iron shield")[id: "equipment-readout", class: "readout", width: 100%, height: 36px]
-            Panel[class: "inventory-note", width: 100%, pad: 14px] {
-              Text("Consumables")[class: "panel-title"]
-              Text("Healing draughts restore 30 health, up to the Wayfarer's maximum.")[class: "body"]
-            }
-            Row[width: 100%, justify: End] {
-              Button(label: "Back to encounter")[press: onInventoryBack, class: "secondary", width: 170px, height: 40px]
-            }
-          }
-        }
-      }
-
-      Tab(title: "Results") {
-        Panel[class: "page-card centered-page", width: 100%, height: 100%, pad: 28px] {
-          Column[class: "center-content", width: 100%, height: 100%, gap: 14px, align: Center, justify: Center] {
-            Text("Victory")[id: "result-title", class: "hero result-title"]
-            Text("The road is open.")[id: "result-detail", class: "intro"]
-            Text("Final score: 0")[id: "final-score", class: "readout", width: 220px, height: 36px]
+      Tab(title: "Game Over") {
+        Panel[class: "page-card", width: 100%, height: 100%, pad: 24px] {
+          Column[class: "center-page", width: 100%, height: 100%, gap: 12px, align: Center, justify: Center] {
+            Text("GAME OVER")[id: "gameover-title", class: "gameover-title"]
+            Text("Score 0")[id: "gameover-score", class: "stat-value"]
+            Text("Lines 0")[id: "gameover-lines", class: "stat-value"]
             Row[gap: 10px, align: Center] {
               Button(label: "Play again")[press: onRestart, class: "primary", width: 150px, height: 42px]
               Button(label: "Main menu")[press: onMainMenu, class: "secondary", width: 150px, height: 42px]

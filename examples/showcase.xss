@@ -16,7 +16,8 @@ tokens {
   color.readout = #d6e8ff
 }
 
-Window { resting: { bg: color.canvas, fg: color.text, font-size: 14px } }
+// Native defaults belong to the root Window theme; the showcase .xui intentionally omits title/size.
+Window { resting: { window-title: "Xui widget, image, and text showcase", size: 1080px 760px, radius: 12px, bg: color.canvas, fg: color.text, font-size: 14px } }
 Column.app { resting: { gap: 12px, pad: 18px } }
 Row.masthead { resting: { gap: 16px, align: Center, justify: SpaceBetween } }
 // Window chrome: the custom top menu replaces the native title bar (Window[platformTopMenu: false]).
@@ -111,6 +112,8 @@ Tooltip { resting: { bg: color.surface-raised, fg: color.text, font-size: 13px, 
 Breadcrumb.breadcrumb { resting: { fg: color.text, font-size: 13px } hover: { fg: color.accent-hover } focus: { border: 1px solid color.accent } disabled: { opacity: 0.45 } }
 
 Image.demo-image { resting: { bg: color.surface-raised, border: 1px solid color.outline-soft, radius: 8px } }
+Image.raster-image { resting: { radius: 8px } }
+Image.svg-image { resting: { radius: 8px } }
 Label.inline-label, Label.chrome-label { resting: { fg: color.text, font-size: 13px } }
 Badge.badge { resting: { bg: color.accent, fg: color.canvas, pad: 5px, radius: 5px, font-size: 11px, font-weight: 650, align: Center } }
 Spinner.spinner { resting: { fg: color.accent } disabled: { fg: color.disabled, opacity: 0.42 } }

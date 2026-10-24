@@ -1765,8 +1765,11 @@ TEST(showcase_example_assets_parse_validate_and_build) {
 			CHECK(density.w > 0.f && color.w > 0.f && trail.w > 0.f);
 		}
 		else if (section == 4) {
-			const Rect image = rectFor("demo-image"), toolbar = rectFor("demo-toolbar"), status = rectFor("demo-status");
-			CHECK(image.w > 0.f && toolbar.w > 0.f && status.w > 0.f);
+			const Rect raster = rectFor("raster-image"), image = rectFor("demo-image");
+			const Rect toolbar = rectFor("demo-toolbar"), status = rectFor("demo-status");
+			CHECK(raster.w > 0.f && raster.h > 0.f && image.w > 0.f && image.h > 0.f);
+			CHECK(raster.right() <= image.x + 0.01f);
+			CHECK(toolbar.w > 0.f && status.w > 0.f);
 		}
 		else if (section == 5) {
 			const Rect split = rectFor("main-split"), tasks = rectFor("tasks-panel"), content = rectFor("content-panel");

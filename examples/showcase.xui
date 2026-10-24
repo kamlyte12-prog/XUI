@@ -1,5 +1,5 @@
 // Full interactive reference. Layout/content belong here; visual rules live in showcase.xss.
-Window(title: "Xui widget and layout showcase", size: 1080x760)[platformTopMenu: false] {
+Window[platformTopMenu: false] {
   // The native title bar is hidden (platformTopMenu: false). This TitleBar is the window's
   // custom top menu: dragging its empty area moves the window, double-click toggles maximize,
   // and the framework-drawn minimize/maximize/close buttons sit at its right end. Dropdowns
@@ -276,8 +276,17 @@ Window(title: "Xui widget and layout showcase", size: 1080x760)[platformTopMenu:
         ScrollView[class: "page-scroll", width: 100%, height: 100%, vertical: true, horizontal: false] {
           Column[class: "page", gap: 14px, pad: 18px] {
             Text("Labels, badges, images, and indicators")[class: "section-title"]
-            Text("These display-oriented leaves share the same layout and theme system. Hover the image for its attached tooltip.")[class: "help"]
-            Image("xui-demo-image.svg")[id: "demo-image", fit: Contain, tooltip: "SVG is rasterized and uploaded through the renderer interface.", class: "demo-image", width: 420px, height: 220px]
+            Text("Raster PNG and vector SVG assets are loaded through the shared image path. Hover either sample for details.")[class: "help"]
+            Row(gap: 12px)[class: "image-samples", width: 100%, height: 194px, align: Stretch] {
+              Column(gap: 6px)[grow: 1] {
+                Text("Raster image · PNG")[class: "field-label"]
+                Image("xui-demo-image.png")[id: "raster-image", fit: Contain, tooltip: "PNG decoded to RGBA and uploaded through the renderer interface.", class: "demo-image raster-image", width: 100%, height: 168px]
+              }
+              Column(gap: 6px)[grow: 1] {
+                Text("Vector image · SVG")[class: "field-label"]
+                Image("xui-demo-image.svg")[id: "demo-image", fit: Contain, tooltip: "SVG rasterized at the display size and uploaded through the renderer interface.", class: "demo-image svg-image", width: 100%, height: 168px]
+              }
+            }
             Row(gap: 10)[width: 100%, align: Center] {
               Label("Label text")[class: "inline-label", width: 140px, height: 30px]
               Badge("NEW")[class: "badge", width: 64px, height: 26px]

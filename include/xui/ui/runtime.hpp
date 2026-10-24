@@ -156,6 +156,7 @@ namespace xui {
 		u32 nodeCount() const { return m_authoredNodeCount; }
 
 	private:
+		friend struct UiRuntimeFontWeightProbe; // test-only white-box check; not a public runtime API
 		struct StyleTween {
 			PropId property = PropId::Bg;
 			StyleValue from, to;

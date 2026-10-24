@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <unordered_set>
 
 namespace xui {
 	namespace {
@@ -613,7 +614,7 @@ namespace xui {
 				MatchInput input; input.type = editor.type; input.classes = editor.classes;
 				editor.styleSet = m_styles->match(input);
 				m_styles->resolve(editor.styleSet, stateBit(State::Resting), m_theme, editor.style);
-				const PropId inherited[] = { PropId::Font, PropId::FontSize, PropId::Fg, PropId::Align, PropId::LetterSpacing };
+				const PropId inherited[] = { PropId::Font, PropId::FontSize, PropId::FontWeight, PropId::Fg, PropId::Align, PropId::LetterSpacing };
 				for (u8 i = 0; i < std::size(inherited); ++i) {
 					const PropId property = inherited[i];
 					if (!editor.style.has(property) && owner.style.has(property)) {
@@ -671,7 +672,7 @@ namespace xui {
 			node.styleResolved = true;
 			node.inheritedTextMask = 0;
 			if (node.parentIndex < i) {
-				const PropId inherited[] = { PropId::Font, PropId::FontSize, PropId::Fg, PropId::Align, PropId::LetterSpacing };
+				const PropId inherited[] = { PropId::Font, PropId::FontSize, PropId::FontWeight, PropId::Fg, PropId::Align, PropId::LetterSpacing };
 				const PropTable& parentStyle = m_nodes[node.parentIndex].style;
 				for (u8 propertyIndex = 0; propertyIndex < std::size(inherited); ++propertyIndex) {
 					const PropId property = inherited[propertyIndex];
@@ -1076,7 +1077,7 @@ namespace xui {
 			}
 		}
 		if (parentIndex != 0xFFFFFFFFu && parentIndex < m_nodes.size()) {
-			const PropId inherited[] = { PropId::Font, PropId::FontSize, PropId::Fg, PropId::Align, PropId::LetterSpacing };
+			const PropId inherited[] = { PropId::Font, PropId::FontSize, PropId::FontWeight, PropId::Fg, PropId::Align, PropId::LetterSpacing };
 			const PropTable& parentStyle = m_nodes[parentIndex].style;
 			for (u8 i = 0; i < std::size(inherited); ++i) {
 				const PropId property = inherited[i];
@@ -2304,7 +2305,7 @@ namespace xui {
 				node.styleResolved = true;
 			}
 			if (node.parentIndex != 0xFFFFFFFFu && node.parentIndex < nodeIndex) {
-				const PropId inherited[] = { PropId::Font, PropId::FontSize, PropId::Fg, PropId::Align, PropId::LetterSpacing };
+				const PropId inherited[] = { PropId::Font, PropId::FontSize, PropId::FontWeight, PropId::Fg, PropId::Align, PropId::LetterSpacing };
 				const PropTable& parentStyle = m_nodes[node.parentIndex].style;
 				for (u8 i = 0; i < std::size(inherited); ++i) {
 					const PropId property = inherited[i];
@@ -5343,19 +5344,54 @@ namespace xui {
 	}
 
 	FontHandle UiRuntime::selectFont(const PropTable& style) const {
-		if (!style.has(PropId::Font) || !m_strings) return m_font;
-		const Atom& familyAtom = style.get(PropId::Font).atoms[0];
-		if (familyAtom.kind != AtomKind::String && familyAtom.kind != AtomKind::Ident) return m_font;
-		const StrId familyId = familyAtom.str();
-		const u16 requested = style.has(PropId::FontWeight)
-			? static_cast<u16>(std::clamp(number(style.get(PropId::FontWeight), 0, 400.f), 100.f, 900.f)) : 400;
-		const FontFace* best = nullptr;
-		u16 bestDistance = 0xFFFF;
-		for (const FontFace& face : m_fontFaces) if (face.family == familyId) {
-			const u16 distance = static_cast<u16>(std::abs(static_cast<int>(face.weight) - static_cast<int>(requested)));
-			if (distance < bestDistance) { best = &face; bestDistance = distance; }
+		const bool weightWasAuthored = style.has(PropId::FontWeight);
+		const f32 requested = weightWasAuthored
+			? std::clamp(number(style.get(PropId::FontWeight), 0, 400.f), 100.f, 900.f) : 400.f;
+		if (!m_strings) return m_text ? m_text->fontAtWeight(m_font, requested) : m_font;
+		StrId familyId = m_strings->intern("default");
+		if (style.has(PropId::Font)) {
+			const Atom& familyAtom = style.get(PropId::Font).atoms[0];
+			if (familyAtom.kind != AtomKind::String && familyAtom.kind != AtomKind::Ident)
+				return m_text ? m_text->fontAtWeight(m_font, requested) : m_font;
+			familyId = familyAtom.str();
 		}
-		return best ? best->font : m_font;
+		const FontFace* best = nullptr;
+		f32 bestDistance = std::numeric_limits<f32>::max();
+		bool bestIsVariable = false;
+		for (const FontFace& face : m_fontFaces) if (face.family == familyId) {
+			const Font* candidateFont = m_text ? m_text->font(face.font) : nullptr;
+			const bool isVariable = candidateFont && candidateFont->hasWeightAxis();
+			f32 effectiveWeight = static_cast<f32>(face.weight);
+			if (isVariable) {
+				const auto [minimum, maximum] = candidateFont->weightAxisRange();
+				effectiveWeight = std::clamp(requested, minimum, maximum);
+			}
+			const f32 distance = std::abs(effectiveWeight - requested);
+			// A variable face can produce the requested weight directly. Prefer it on a tie with
+			// a registered static face so the static face cannot mask the variable axis.
+			if (distance < bestDistance || (distance == bestDistance && isVariable && !bestIsVariable)) {
+				best = &face;
+				bestDistance = distance;
+				bestIsVariable = isVariable;
+			}
+		}
+		const FontHandle selected = best ? best->font : m_font;
+		const FontHandle resolved = m_text ? m_text->fontAtWeight(selected, requested) : selected;
+		static const bool traceFontWeight = std::getenv("XUI_TRACE_FONT_WEIGHT") != nullptr;
+		if (traceFontWeight && weightWasAuthored) {
+			const Font* selectedFont = m_text ? m_text->font(resolved) : nullptr;
+			static std::unordered_set<u64> tracedSelections;
+			const u64 selectionKey = (u64(familyId.v) << 32) ^ (u64(std::llround(requested * 1000.f)) << 12) ^
+				(selectedFont ? selectedFont->cacheId() : 0u);
+			if (tracedSelections.insert(selectionKey).second) {
+				std::fprintf(stderr, "font-weight widget-style: requested=%.3f family=%.*s registered-face=%u variable=%s selected-cache=%u applied-axis=%.3f\n",
+					static_cast<double>(requested), static_cast<int>(m_strings->view(familyId).size()),
+					m_strings->view(familyId).data(), best ? best->weight : 400u,
+					selectedFont && selectedFont->hasWeightAxis() ? "yes" : "no", selectedFont ? selectedFont->cacheId() : 0u,
+					static_cast<double>(selectedFont && selectedFont->hasWeightAxis() ? selectedFont->appliedWeight() : -1.f));
+			}
+		}
+		return resolved;
 	}
 
 } // namespace xui

@@ -1,0 +1,158 @@
+// Event-driven turn-based encounter. The C++ file updates values and routes events;
+// this document owns the complete page and widget tree.
+Window(title: "The Ashen Gate", size: 1000x720) {
+  Column[class: "app", width: 100%, height: 100%, pad: 20px, gap: 14px] {
+    Row[class: "masthead", width: 100%, align: Center, justify: SpaceBetween] {
+      Column[grow: 1, gap: 3px] {
+        Text("THE ASHEN GATE")[class: "title"]
+        Text("A small turn-based encounter built with Xui widgets")[class: "subtitle"]
+      }
+      FpsCounter[id: "fps", class: "fps", width: 190px, height: 30px]
+    }
+
+    Tabs[id: "game-pages", selected: 0, change: onPageChange, class: "pages", width: 100%, height: 100%, grow: 1, minSize: 0x0] {
+      Tab(title: "Main Menu") {
+        Panel[class: "page-card menu-page", width: 100%, height: 100%, pad: 28px] {
+          Column[class: "menu-content", width: 100%, height: 100%, gap: 16px, align: Center, justify: Center] {
+            Badge("TURN-BASED DEMO")[class: "eyebrow"]
+            Text("The Ashen Gate")[class: "hero"]
+            Text("A sentinel guards the old road. Choose your actions, manage your gear, and keep your health above zero.")[class: "intro", width: 620px]
+            Row[class: "menu-actions", gap: 10px, align: Center] {
+              Button(label: "Begin encounter")[press: onStart, tooltip: "Start a fresh encounter.", class: "primary", width: 190px, height: 44px]
+              Button(label: "Settings")[press: onOpenSettings, class: "secondary", width: 130px, height: 44px]
+              Button(label: "Inventory")[press: onOpenInventory, class: "secondary", width: 130px, height: 44px]
+              Button(label: "Quit")[press: onQuit, class: "secondary", width: 92px, height: 44px]
+            }
+            Text("F3 toggles live FPS sampling. F4 toggles draw-batch count.")[class: "hint"]
+          }
+        }
+      }
+
+      Tab(title: "Encounter") {
+        ScrollView[class: "page-scroll", width: 100%, height: 100%, vertical: true, horizontal: false] {
+          Column[class: "page-content", width: 100%, gap: 14px, pad: 18px] {
+            Row[class: "battle-heading", width: 100%, align: Center, justify: SpaceBetween] {
+              Column[grow: 1, gap: 3px] {
+                Text("Roadside sentinel")[class: "section-title"]
+                Text("Take one action per turn. The sentinel counters after each action.")[class: "body"]
+              }
+              Text("Turn 1")[id: "turn-readout", class: "readout", width: 100px, height: 32px]
+              Text("Score 0")[id: "score-readout", class: "readout", width: 120px, height: 32px]
+              Button(label: "Pause")[press: onPause, class: "secondary", width: 92px, height: 36px]
+            }
+
+            Row[class: "combatants", width: 100%, gap: 14px, align: Start] {
+              Panel[class: "combatant", grow: 1, minSize: 260x150, pad: 16px] {
+                Text("Wayfarer")[class: "panel-title"]
+                Row[class: "health-heading", width: 100%, align: Center, justify: SpaceBetween] {
+                  Text("Health")[class: "body"]
+                  Text("100 / 100")[id: "player-health-readout", class: "value"]
+                }
+                ProgressBar[id: "player-health", class: "health own-health", value: 1, min: 0, max: 1, width: 100%, height: 18px]
+                Text("Healing draughts: 3")[id: "potion-readout", class: "body"]
+              }
+              Panel[class: "combatant enemy", grow: 1, minSize: 260x150, pad: 16px] {
+                Text("Ash sentinel")[class: "panel-title"]
+                Row[class: "health-heading", width: 100%, align: Center, justify: SpaceBetween] {
+                  Text("Health")[class: "body"]
+                  Text("100 / 100")[id: "enemy-health-readout", class: "value"]
+                }
+                ProgressBar[id: "enemy-health", class: "health enemy-health", value: 1, min: 0, max: 1, width: 100%, height: 18px]
+                Text("A stone guardian with a fading ember core.")[class: "body"]
+              }
+            }
+
+            Panel[class: "action-panel", width: 100%, pad: 16px] {
+              Text("Choose an action")[class: "panel-title"]
+              Row[class: "action-row", width: 100%, gap: 10px, align: Center] {
+                Button(label: "Strike")[press: onStrike, tooltip: "Deal damage based on your configured strike power.", class: "primary", width: 150px, height: 42px]
+                Button(label: "Heavy strike")[press: onHeavyStrike, tooltip: "Deal a stronger blow, then endure a stronger counter.", class: "secondary", width: 150px, height: 42px]
+                Button(label: "Use draught")[press: onHeal, tooltip: "Restore health. The sentinel still takes its turn.", class: "secondary", width: 150px, height: 42px]
+                Button(label: "Guard")[press: onGuard, tooltip: "Reduce the next counterattack.", class: "secondary", width: 120px, height: 42px]
+                Text("Strike power: 14")[id: "power-readout", class: "readout", grow: 1, height: 34px]
+              }
+            }
+
+            Text("The road is quiet.")[id: "battle-log", class: "battle-log", width: 100%, height: 42px]
+            Text("Hint: use Guard to blunt the next counterattack.")[id: "battle-hint", class: "hint", width: 100%, height: 30px]
+          }
+        }
+      }
+
+      Tab(title: "Paused") {
+        Panel[class: "page-card centered-page", width: 100%, height: 100%, pad: 28px] {
+          Column[class: "center-content", width: 100%, height: 100%, gap: 14px, align: Center, justify: Center] {
+            Text("Encounter paused")[class: "hero"]
+            Text("The turn-based encounter is idle. No game update loop runs while you are here.")[class: "intro"]
+            Row[gap: 10px, align: Center] {
+              Button(label: "Resume")[press: onResume, class: "primary", width: 140px, height: 42px]
+              Button(label: "Settings")[press: onOpenSettings, class: "secondary", width: 140px, height: 42px]
+              Button(label: "Main menu")[press: onMainMenu, class: "secondary", width: 140px, height: 42px]
+            }
+          }
+        }
+      }
+
+      Tab(title: "Settings") {
+        Panel[class: "page-card settings-page", width: 100%, height: 100%, pad: 22px] {
+          Column[class: "settings-content", width: 100%, height: 100%, gap: 14px] {
+            Text("Encounter settings")[class: "section-title"]
+            Text("These settings are read from the controls when the game state changes.")[class: "body"]
+            Row[class: "setting-row", width: 100%, align: Center, gap: 18px] {
+              Column[grow: 1, gap: 6px] {
+                Text("Difficulty")[class: "field-label"]
+                Dropdown[id: "difficulty", options: "Easy|Normal|Hard", value: "Normal", change: onDifficultyChange, tooltip: "Changes the sentinel's counterattack and starting health.", class: "dropdown", width: 260px, height: 38px]
+              }
+              Text("Difficulty: Normal")[id: "difficulty-readout", class: "readout", width: 220px, height: 36px]
+            }
+            Column[class: "setting-row", width: 100%, gap: 7px] {
+              Text("Strike power")[class: "field-label"]
+              Slider[id: "strike-power", value: 14, min: 8, max: 22, change: onPowerChange, tooltip: "Adjust the damage of a normal strike.", class: "slider", width: 100%, height: 28px]
+              Text("Strike power: 14")[id: "settings-power-readout", class: "body"]
+            }
+            CheckBox[id: "combat-hints", label: "Show combat hints", checked: true, change: onHintsChange, class: "check", tooltip: "Show a short tip during the encounter."]
+            Text("Hints: on")[id: "hints-readout", class: "body"]
+            Row[width: 100%, justify: End] {
+              Button(label: "Back")[press: onSettingsBack, class: "secondary", width: 120px, height: 40px]
+            }
+          }
+        }
+      }
+
+      Tab(title: "Inventory") {
+        Panel[class: "page-card inventory-page", width: 100%, height: 100%, pad: 22px] {
+          Column[class: "inventory-content", width: 100%, height: 100%, gap: 12px] {
+            Text("Pack and equipment")[class: "section-title"]
+            Text("Toggle equipment. The selected items affect combat actions.")[class: "body"]
+            CheckList[id: "equipment", change: onInventoryChange, class: "equipment-list", width: 100%] {
+              CheckItem[id: "rune-blade", label: "Rune blade (+4 strike damage)", checked: false, tooltip: "Adds damage to both strike actions.", class: "inventory-item", width: 100%, height: 38px]
+              CheckItem[id: "iron-shield", label: "Iron shield (-3 counter damage)", checked: true, tooltip: "Reduces each sentinel counterattack by 3.", class: "inventory-item", width: 100%, height: 38px]
+            }
+            Text("Equipment selected: Iron shield")[id: "equipment-readout", class: "readout", width: 100%, height: 36px]
+            Panel[class: "inventory-note", width: 100%, pad: 14px] {
+              Text("Consumables")[class: "panel-title"]
+              Text("Healing draughts restore 30 health, up to the Wayfarer's maximum.")[class: "body"]
+            }
+            Row[width: 100%, justify: End] {
+              Button(label: "Back to encounter")[press: onInventoryBack, class: "secondary", width: 170px, height: 40px]
+            }
+          }
+        }
+      }
+
+      Tab(title: "Results") {
+        Panel[class: "page-card centered-page", width: 100%, height: 100%, pad: 28px] {
+          Column[class: "center-content", width: 100%, height: 100%, gap: 14px, align: Center, justify: Center] {
+            Text("Victory")[id: "result-title", class: "hero result-title"]
+            Text("The road is open.")[id: "result-detail", class: "intro"]
+            Text("Final score: 0")[id: "final-score", class: "readout", width: 220px, height: 36px]
+            Row[gap: 10px, align: Center] {
+              Button(label: "Play again")[press: onRestart, class: "primary", width: 150px, height: 42px]
+              Button(label: "Main menu")[press: onMainMenu, class: "secondary", width: 150px, height: 42px]
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -71,19 +71,27 @@ Limitations: transformed clips use an axis-aligned scissor bounding box, so a ro
 
 ## Font file and glyph support
 
-`Xui::loadFont(path, family, weight)` registers every loaded face; the first loaded face is the default. Numeric `.xss font-weight` picks the nearest registered weight in that family, without synthetic bold. The loader accepts TrueType `glyf` outlines in TTF files and OpenType containers with TrueType outlines. It reads `cmap` format 4 and 12, composite glyphs, and format-0 kerning.
+`Xui::loadFont(path, family, weight)` registers every loaded face; the first loaded face is the default fallback. If `.xss` omits the `font` family property, the runtime selects from faces registered in the `default` family. For a variable TrueType font with a `wght` axis, numeric `.xss font-weight` selects a cached font instance at that design coordinate, including fractional numeric values. The requested coordinate is clamped to the font axis minimum and maximum; FreeType applies the variation data before measurement and outline extraction. When a family has both variable and static faces, a variable face is preferred when its clamped axis coordinate is at least as close to the request as the static face weight. This prevents a separately registered bold face from masking an in-range variable axis. Outside the variable axis range, normal nearest-effective-weight selection applies; ties prefer the variable face. The glyph atlas keys entries by unique font-instance identity, glyph index, and pixel size, so two weights at the same glyph and size remain distinct in one frame.
+
+Text layout passes each left-to-right, whitespace-delimited run through bundled HarfBuzz 15.0.0. HarfBuzz applies OpenType GPOS pair adjustments and variation deltas using the same `wght` coordinate as the FreeType face. The framework keeps explicit whitespace separate for its existing wrapping rules. `liga` and `clig` substitutions are disabled so a text field retains a straightforward relationship between input characters and glyph positions. The shaping output supplies advances and offsets to layout; FreeType's glyph metrics and outline path use `FT_LOAD_NO_SCALE | FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP | FT_LOAD_IGNORE_TRANSFORM`. Atlas glyph advances use that same unhinted metric path, and outlines are rasterized by Xui's software rasterizer. There is no 26.6 pixel rounding in layout: HarfBuzz positions are kept in font units as integers, scaled to floating-point logical pixels, and accumulated without rounding each glyph to a pixel. Glyph bitmap size is rounded separately to an integer pixel size for atlas lookup. This keeps measurement and drawing on consistent unhinted geometry without changing the existing global rounding or hinting policy.
+
+`font-weight` is inherited by descendants that do not specify their own value; a child `.xss` rule overrides the inherited weight. This applies to text inside buttons and editable fields as well as ordinary `Text` nodes. Static fonts and variable fonts without a `wght` axis use nearest registered face selection. If there is only one face, all requested weights use that same face; the runtime does not synthesize bold or use system fallback. `font-weight` accepts numeric values; named identifiers parse but are not mapped to numeric weights. TTF and OTF containers with TrueType `glyf` outlines are supported. CFF/CFF2-only outlines and color glyph tables remain unsupported. Only `wght` is controlled by `.xss`; all other variable axes remain at their font defaults.
+
+Shaping is currently constrained to left-to-right layout. Bidirectional and right-to-left paragraph layout, ligature substitutions, and complex-script editing/caret mapping are not supported. The implementation depends on the bundled HarfBuzz 15.0.0 and FreeType 2.15.0 source trees; FreeType's optional HarfBuzz integration is disabled because Xui links HarfBuzz directly for shaping.
+
+To trace an end-to-end weight request while diagnosing a font, set `XUI_TRACE_FONT_WEIGHT=1` before launching the app. The trace reports each distinct FreeType axis setup and matching HarfBuzz `wght` coordinate, runtime face selection, glyph-load coordinate, and glyph-atlas key once. It is disabled by default.
 
 | Capability | Current behavior |
 | --- | --- |
 | Multiple files/families/weights | Supported and registered before `attach()`. |
-| Missing requested weight | Nearest registered weight; no synthetic bold. |
+| Missing requested weight | Variable `wght` axis is used when present; otherwise nearest registered weight, with no synthetic bold. |
 | TTF and TrueType-outline OTF | Supported. |
 | CFF/CFF2 OTF outlines | Not rasterized; the file does not provide supported `glyf` outlines. |
-| Variable font axis deltas | Not applied. |
-| Unicode cmap | Format 4 and 12 are read; language-specific shaping is not implemented. |
+| Variable font `wght` axis | Applied through FreeType for variable `glyf` fonts; coordinates are clamped to axis bounds. |
+| Text shaping | HarfBuzz OpenType shaping and GPOS are applied to left-to-right runs; ligatures and bidi are disabled. |
 | Missing glyph fallback | There is no automatic cross-family fallback or system font fallback. Use a face that contains the needed glyphs. |
 | Atlas capacity | Shared growable atlas starts at the configured size and grows to 4096×4096, with LRU eviction. |
-| Complex shaping | No script shaping, ligatures, bidi, or full OpenType shaping; text layout uses supported cmap/metrics/kerning paths. |
+| Complex shaping | No RTL/bidi layout or complex-script editing/caret model; ligature substitutions are disabled. |
 
 Color emoji and CFF-only OTF files are unsupported. No user-visible fallback font is selected automatically, so unsupported characters may render as the font's missing glyph or empty space depending on the face.
 

@@ -73,6 +73,10 @@ For a complete build setup and asset instructions, see [Getting started](doc/get
 
 The screenshot shows the themed showcase window with a tabbed layout, checklist, splitter, and live value readouts. The complete demo is defined in [`showcase.xui`](examples/showcase.xui) and [`showcase.xss`](examples/showcase.xss), and wired by [`glfw_demo.cpp`](examples/glfw_demo.cpp). See the [widget reference](doc/widgets.md) for supported controls and their behavior.
 
+## Game UI example
+
+[`examples/game/`](examples/game/README.md) contains **The Ashen Gate**, a turn-based encounter that uses authored pages and styles, event callbacks, typed control values, tooltips, progress bars, and animations. It exercises game UI without adding platform-specific rendering code.
+
 ## Project links
 
 - [Documentation index](doc/README.md): setup, `.xui`, `.xss`, widget and style references, architecture, performance, and troubleshooting.

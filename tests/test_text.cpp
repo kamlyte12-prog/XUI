@@ -9,7 +9,13 @@
 #include <xui/text/rasterizer.hpp>
 #include <xui/text/text_layout.hpp>
 #include <cstdlib>
+#include <array>
+#include <algorithm>
+#include <cmath>
 #include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <iterator>
 #include <string>
 
 using namespace xui;
@@ -60,6 +66,161 @@ TEST(font_parses_system_ttf) {
 	CHECK(lh > 10 && lh < 40);
 }
 
+TEST(static_font_weight_requests_keep_the_loaded_face_without_synthetic_bold) {
+	FontFixture fx;
+	if (!fx.have() || fx.font.hasWeightAxis()) return;
+	TextSystem text;
+	const FontHandle face = text.loadFont(fx.bytes);
+	CHECK(face.valid());
+	CHECK_EQ(text.fontAtWeight(face, 100), face);
+	CHECK_EQ(text.fontAtWeight(face, 900), face);
+	const TextLayout regular = text.layout(face, "Hamburgefontsiv To Va", 28.f);
+	const TextLayout requestedBold = text.layout(text.fontAtWeight(face, 700), "Hamburgefontsiv To Va", 28.f);
+	CHECK_NEAR(regular.advanceWidth, requestedBold.advanceWidth, 0.001f);
+	std::cout << "static-font-smoke has-wght-axis=no requested-weight=700 uses-same-face=yes"
+		<< " Hamburgefontsiv-To-Va=" << regular.advanceWidth << "px\n";
+}
+
+TEST(variable_font_weights_create_distinct_axis_instances_and_atlas_entries) {
+	std::filesystem::path path;
+	if (const char* env = std::getenv("XUI_VARIABLE_FONT")) path = env;
+#ifdef _WIN32
+	else if (std::filesystem::exists("C:/Windows/Fonts/bahnschrift.ttf")) path = "C:/Windows/Fonts/bahnschrift.ttf";
+#endif
+	if (path.empty() || !std::filesystem::exists(path)) {
+		std::cout << "SKIP variable font smoke: set XUI_VARIABLE_FONT to a variable TrueType font\n";
+		return;
+	}
+	std::ifstream file(path, std::ios::binary);
+	const std::string bytes{ std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>() };
+	if (bytes.empty()) { std::cout << "SKIP variable font smoke: could not read font file\n"; return; }
+	NullRenderer renderer; TextSystem text; CHECK(text.initAtlas(&renderer));
+	std::string error;
+	const FontHandle base = text.loadFont(bytes, &error);
+	CHECK(base.valid()); if (!base.valid()) return;
+	CHECK(text.font(base)->hasWeightAxis()); if (!text.font(base)->hasWeightAxis()) return;
+	const auto [axisMin, axisMax] = text.font(base)->weightAxisRange();
+	const u32 glyphIndex = text.font(base)->glyphIndex('g');
+	const std::array<u16, 6> weights{ 100, 300, 400, 500, 700, 900 };
+	std::array<FontHandle, weights.size()> instances{};
+	std::array<f32, weights.size()> effectiveWeights{};
+	std::array<f32, weights.size()> outlineSums{};
+	for (std::size_t i = 0; i < weights.size(); ++i) {
+		instances[i] = text.fontAtWeight(base, weights[i], &error);
+		CHECK(instances[i].valid()); if (!instances[i].valid()) return;
+		const Font* face = text.font(instances[i]);
+		const f32 expected = std::clamp(static_cast<f32>(weights[i]), axisMin, axisMax);
+		effectiveWeights[i] = expected;
+		CHECK_NEAR(face->appliedWeight(), expected, 0.01f);
+		std::cout << "variable font requested=" << weights[i] << " wght-coordinate=" << face->appliedWeight() << '\n';
+		const TextLayout run = text.layout(instances[i], "The quick brown fox 0123456789", 28.f);
+		CHECK_EQ(run.glyphs.size(), std::size_t{ 26 });
+		const TextLayout t = text.layout(instances[i], "T", 28.f);
+		const TextLayout o = text.layout(instances[i], "o", 28.f);
+		const TextLayout to = text.layout(instances[i], "To", 28.f);
+		const TextLayout kerningSample = text.layout(instances[i], "To Va", 28.f);
+		CHECK_EQ(to.glyphs.size(), 2u);
+		CHECK_EQ(kerningSample.glyphs.size(), 4u);
+		const f32 toPositioning = to.advanceWidth - t.advanceWidth - o.advanceWidth;
+		CHECK(std::isfinite(toPositioning));
+		std::cout << "variable font wght=" << face->appliedWeight() << " To GPOS=" << toPositioning
+			<< "px To-Va-run=" << kerningSample.advanceWidth << "px\n";
+		const AtlasGlyph& atlasGlyph = text.atlas()->glyph(*face, glyphIndex, 28);
+		CHECK(atlasGlyph.width > 0 && atlasGlyph.height > 0);
+		OutlineBuffer outline;
+		CHECK(face->outline(glyphIndex, { &outline, [](void* c, Vec2 p) { static_cast<OutlineBuffer*>(c)->moveTo(p); },
+			[](void* c, Vec2 p) { static_cast<OutlineBuffer*>(c)->lineTo(p); } }));
+		for (Vec2 p : outline.pts) outlineSums[i] += std::abs(p.x) + std::abs(p.y);
+	}
+	std::size_t uniqueEffectiveWeights = 0;
+	for (std::size_t i = 0; i < instances.size(); ++i) {
+		bool seen = false;
+		for (std::size_t j = 0; j < i; ++j) {
+			if (std::abs(effectiveWeights[i] - effectiveWeights[j]) < 0.01f) seen = true;
+			else CHECK(instances[i].index != instances[j].index);
+		}
+		if (!seen) ++uniqueEffectiveWeights;
+	}
+	CHECK_EQ(text.atlas()->glyphCount(), static_cast<u32>(uniqueEffectiveWeights));
+	std::cout << "font-weight atlas: one glyph at size 28 has " << text.atlas()->glyphCount()
+		<< " cached entries for " << uniqueEffectiveWeights << " distinct effective weights\n";
+	for (const FontHandle instance : instances)
+		(void)text.atlas()->glyph(*text.font(instance), glyphIndex, 28);
+	CHECK_EQ(text.atlas()->glyphCount(), static_cast<u32>(uniqueEffectiveWeights));
+	CHECK(text.rasterCount() >= uniqueEffectiveWeights); // Weights outside this font's axis range clamp to an existing effective weight.
+	CHECK(std::abs(outlineSums.front() - outlineSums.back()) > 0.01f);
+	for (std::size_t i = 0; i < weights.size(); ++i)
+		for (std::size_t j = i + 1; j < weights.size(); ++j)
+			if (std::abs(effectiveWeights[i] - effectiveWeights[j]) < 0.01f)
+				CHECK_NEAR(outlineSums[i], outlineSums[j], 0.01f);
+}
+
+TEST(variable_font_gpos_kerning_and_advances_follow_each_weight) {
+#ifndef XUI_EXAMPLE_DIR
+	std::cout << "SKIP Roboto GPOS regression: XUI_EXAMPLE_DIR is not configured\n";
+	return;
+#else
+	const std::filesystem::path path = std::filesystem::path(XUI_EXAMPLE_DIR) / "layout" / "Roboto.ttf";
+	std::ifstream file(path, std::ios::binary);
+	if (!file) { std::cout << "SKIP Roboto GPOS regression: Roboto.ttf is missing\n"; return; }
+	const std::string bytes{ std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>() };
+	TextSystem text;
+	NullRenderer renderer;
+	CHECK(renderer.init({ 64, 64, 1.f, {}, false }));
+	CHECK(text.initAtlas(&renderer));
+	const FontHandle base = text.loadFont(bytes);
+	CHECK(base.valid()); if (!base.valid()) return;
+	const Font* baseFont = text.font(base);
+	CHECK(baseFont->hasWeightAxis()); if (!baseFont->hasWeightAxis()) return;
+	const std::array<f32, 4> weights{ 100.f, 400.f, 700.f, 900.f };
+	constexpr std::array<char, 4> representatives{ 'H', 'i', 'm', '.' };
+	std::array<f32, 4> toAdjustments{};
+	std::array<f32, 4> vaAdjustments{};
+	for (std::size_t i = 0; i < weights.size(); ++i) {
+		const FontHandle handle = text.fontAtWeight(base, weights[i]);
+		CHECK(handle.valid()); if (!handle.valid()) continue;
+		const Font* font = text.font(handle);
+		CHECK_NEAR(font->appliedWeight(), weights[i], 0.01f);
+		for (char character : representatives) {
+			const u32 glyph = font->glyphIndex(static_cast<u8>(character));
+			const TextLayout single = text.layout(handle, std::string_view(&character, 1), 28.f);
+			const f32 ftAdvance = font->advance(glyph);
+			const f32 expected = ftAdvance * font->scaleFor(28.f);
+			const AtlasGlyph& atlasGlyph = text.atlas()->glyph(*font, glyph, 28);
+			CHECK_EQ(single.glyphs.size(), 1u);
+			CHECK_NEAR(single.advanceWidth, expected, 0.01f);
+			CHECK_NEAR(atlasGlyph.advance, expected, 0.01f);
+			std::cout << "Roboto wght=" << weights[i] << " glyph=" << character << " FT_Load_Glyph advance=" << ftAdvance
+				<< " shaped=" << single.advanceWidth / font->scaleFor(28.f)
+				<< " atlas=" << atlasGlyph.advance / font->scaleFor(28.f) << " font-units\n";
+		}
+
+		const f32 t = text.layout(handle, "T", 28.f).advanceWidth;
+		const f32 o = text.layout(handle, "o", 28.f).advanceWidth;
+		const f32 v = text.layout(handle, "V", 28.f).advanceWidth;
+		const f32 a = text.layout(handle, "a", 28.f).advanceWidth;
+		const TextLayout to = text.layout(handle, "To", 28.f);
+		const TextLayout vaPair = text.layout(handle, "Va", 28.f);
+		CHECK_EQ(to.glyphs.size(), 2u);
+		CHECK_EQ(vaPair.glyphs.size(), 2u);
+		toAdjustments[i] = to.advanceWidth - t - o;
+		vaAdjustments[i] = vaPair.advanceWidth - v - a;
+		CHECK(toAdjustments[i] < -0.01f);
+		CHECK(vaAdjustments[i] < -0.01f);
+		const TextLayout sample = text.layout(handle, "Hamburgefontsiv", 28.f);
+		const TextLayout pairs = text.layout(handle, "To Va", 28.f);
+		CHECK_EQ(sample.glyphs.size(), 15u);
+		CHECK_EQ(pairs.glyphs.size(), 4u);
+		std::cout << "Roboto wght=" << weights[i] << " To GPOS=" << toAdjustments[i] << "px Va GPOS=" << vaAdjustments[i]
+			<< "px Hamburgefontsiv=" << sample.advanceWidth << "px To Va=" << pairs.advanceWidth << "px\n";
+	}
+	CHECK(text.atlas()->glyphCount() >= weights.size());
+	CHECK(std::abs(toAdjustments[1] - toAdjustments[2]) > 0.001f);
+	text.atlas()->shutdown();
+	renderer.shutdown();
+#endif
+}
+
 TEST(font_outline_flattens_segments) {
 	FontFixture fx;
 	if (!fx.have()) return;
@@ -98,6 +259,35 @@ TEST(rasterizer_produces_coverage) {
 	std::vector<u8> bits2(std::size_t(w) * h);
 	rasterizeContours(pts.data(), u32(pts.size()), buf.starts.data(), u32(buf.starts.size()), bits2.data(), w, h, scratch);
 	CHECK(bits == bits2);
+}
+
+TEST(rasterizer_uses_nonzero_winding_for_overlapping_and_nested_contours) {
+	constexpr u32 width = 12, height = 12;
+	auto rasterize = [](const std::vector<Vec2>& points, const std::vector<u32>& starts) {
+		std::vector<u8> pixels(std::size_t(width) * height);
+		std::vector<f32> scratch;
+		rasterizeContours(points.data(), static_cast<u32>(points.size()), starts.data(),
+			static_cast<u32>(starts.size()), pixels.data(), width, height, scratch);
+		return pixels;
+	};
+	// Two same-direction contours overlap. Non-zero fill treats them as one solid shape;
+	// even-odd fill incorrectly punched a transparent stripe through their intersection.
+	const std::vector<Vec2> overlapping{
+		{1, 1}, {6, 1}, {6, 8}, {1, 8},
+		{4, 1}, {9, 1}, {9, 8}, {4, 8}
+	};
+	const auto overlapBits = rasterize(overlapping, { 0, 4 });
+	CHECK_EQ(overlapBits[std::size_t(4) * width + 4], 255);
+	CHECK_EQ(overlapBits[std::size_t(4) * width + 7], 255);
+
+	// An oppositely oriented inner contour remains a transparent counter.
+	const std::vector<Vec2> counter{
+		{1, 1}, {10, 1}, {10, 10}, {1, 10},
+		{3, 3}, {3, 8}, {8, 8}, {8, 3}
+	};
+	const auto counterBits = rasterize(counter, { 0, 4 });
+	CHECK_EQ(counterBits[std::size_t(2) * width + 2], 255);
+	CHECK_EQ(counterBits[std::size_t(5) * width + 5], 0);
 }
 
 TEST(atlas_rasterises_and_caches_through_null_renderer) {

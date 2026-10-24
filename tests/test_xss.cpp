@@ -1,6 +1,7 @@
 #include "xtest.hpp"
 #include <xui/core/color.hpp>
 #include <xui/style/xss.hpp>
+#include <array>
 #include <cstdio>
 using namespace xui;
 
@@ -256,6 +257,27 @@ Panel.conic { resting: { gradient: conic-gradient(45deg, #ff0000, #00ff00, #0000
 	CHECK(table.has(PropId::Bg) && table.get(PropId::Bg).atoms[0].bits == 0x11223344u);
 	CHECK(table.has(PropId::Opacity) && table.has(PropId::FontSize) && table.has(PropId::FontWeight));
 	CHECK(!errorsOf("Panel { resting: { gradient: radial-gradient(#fff) } }").empty());
+}
+
+TEST(xss_numeric_font_weights_preserve_requested_axis_values) {
+	StringInterner in;
+	auto styles = mustCompile(in, R"(
+Text.w100 { resting: { font-weight: 100 } }
+Text.w300 { resting: { font-weight: 300 } }
+Text.w400 { resting: { font-weight: 400 } }
+Text.w500 { resting: { font-weight: 500 } }
+Text.w700 { resting: { font-weight: 700 } }
+Text.w900 { resting: { font-weight: 900 } }
+)");
+	const std::array<u16, 6> expected{ 100, 300, 400, 500, 700, 900 };
+	const std::array<const char*, 6> classes{ "w100", "w300", "w400", "w500", "w700", "w900" };
+	for (std::size_t i = 0; i < expected.size(); ++i) {
+		MatchInput match; match.type = in.intern("Text");
+		const StrId klass = in.intern(classes[i]); match.classes = std::span<const StrId>(&klass, 1);
+		PropTable table; styles.resolve(styles.match(match), stateBit(State::Resting), 0, table);
+		CHECK(table.has(PropId::FontWeight));
+		CHECK_NEAR(table.get(PropId::FontWeight).atoms[0].num, static_cast<f32>(expected[i]), 0.001f);
+	}
 }
 TEST(xss_focus_outline_compiles_and_validates_values) {
 	StringInterner strings;

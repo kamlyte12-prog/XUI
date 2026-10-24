@@ -36,7 +36,7 @@ Side shorthands use one to four values: one applies to all sides; two means vert
 | `transform` | Up to 6 values using `translate(x, y)`, `scale(x[, y])`, and `rotate(angle)` | Applies a paint transform to the widget and its descendants; hit testing uses the inverse transform. Translation values use logical pixels or percentages of the widget size; rotation uses degrees. |
 | `font` (`font-family`) | One string or identifier | Selects a loaded family; default is the first `loadFont()` face, or no glyph rendering if none was loaded. |
 | `font-size` | One number | Logical font size, runtime fallback 16; the Fluent 2 baseline sets 14 for common text and 12 for compact labels. Rasterization scales with DPI. |
-| `font-weight` | One number or identifier | Numeric 100–900 selects nearest registered face weight; default 400. Identifier keywords compile but do not map to weights in the runtime. |
+| `font-weight` | One number or identifier | Numeric values create/select a `wght` axis instance when the selected font exposes that axis (clamped to its range). Otherwise they select the nearest registered face; no synthetic bold. Inherits through descendants unless overridden. Default 400. Identifier keywords compile but do not map to weights in the runtime. |
 | `letter-spacing` | One number | Extra spacing between glyph positions; default 0. |
 | `align` | 1–2 identifiers | `Start`, `Center`, `End`, or `Stretch`; affects container child alignment and text alignment on text-bearing leaves. Default is layout stretch for containers and start for text. The second accepted value is currently unused. |
 | `justify` | One identifier | `Start`, `Center`, `End`, `SpaceBetween`, `SpaceAround`, `SpaceEvenly`; main-axis distribution for flex containers. Default `Start`. |

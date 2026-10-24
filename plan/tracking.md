@@ -2,6 +2,72 @@
 
 This file records project changes, design decisions, trade-offs, current status, and next steps. It is updated as implementation work lands.
 
+## Variable-font OpenType shaping and GPOS — 2026-10-24
+
+### Audit and root cause
+
+- The visible spacing problem was pair-specific, not a uniform per-glyph advance error: variable font advances changed correctly with `wght`, but the old layout path only used the font's legacy `kern` table format 0. Roboto Variable supplies the relevant pair positioning through GPOS, including variation data, and has no legacy `kern` table for those pairs. `To`/`Va` therefore had no adjustment in the old path.
+- FreeType already applied the selected variable axis before measuring (`FT_Load_Glyph`) and extracting outlines. In the new check, Roboto's `H/i/m/.` advances differ among weights and the shaped single-glyph position and atlas advance exactly match FreeType at all checked weights. This rules out a stale default-master advance, measurement/draw axis mismatch, and an atlas key collision for the tested path.
+- Measurement and outline extraction use the same unscaled, unhinted flags: `FT_LOAD_NO_SCALE | FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP | FT_LOAD_IGNORE_TRANSFORM`. The atlas uses those outlines with the software rasterizer; layout keeps advances in font units and scales them to floating-point pixels without per-glyph pixel rounding. No global rounding rule or FreeType hinting flag was changed.
+- Static Segoe UI uses the nearest registered face policy. A 700 request returns the same single static face, with no synthetic bold; it does not exercise variable GPOS deltas. Other variable fonts expose different axis ranges (local Bahnschrift is 300–700; Roboto Flex is 100–1000).
+
+### Changes and decisions
+
+- Bundled HarfBuzz 15.0.0 from `lib/harfbuzz-15.0.0` through CMake and linked its `harfbuzz` target to `xui_text` using the `xui::harfbuzz` interface target. HarfBuzz utilities, subset, raster/vector/GPU features and optional Graphite2/GLib/ICU/Cairo integrations are disabled. FreeType's own HarfBuzz integration stays disabled; the text layer calls bundled HarfBuzz directly.
+- Added a per-`Font` HarfBuzz face/font over the font's owned bytes. Variable `wght` updates set the corresponding HarfBuzz variation along with `FT_Set_Var_Design_Coordinates`, so GPOS variation deltas and FreeType outlines use the same effective axis value.
+- `TextSystem` now shapes each left-to-right whitespace-delimited run with HarfBuzz and places glyph advances/offsets from the shaping result. Explicit whitespace remains under the existing wrap policy. `liga` and `clig` are disabled to preserve a simple editable-character/caret mapping. This is not an RTL/bidi or complex-script editing implementation.
+- Added parent `font-weight` to the runtime's inherited text style set, including build-time inheritance, state/theme re-resolution, live style updates, and picker editor inheritance. A child `.xss` rule still overrides the inherited value.
+- Trade-off: HarfBuzz adds a required bundled build dependency and more work on a text-layout cache miss, but provides general OpenType GPOS/variation support instead of a font-specific kerning patch. Cached steady-state text layout and glyph atlas behavior remain in place. No platform/backend API or graphics dependency was added.
+
+### Verification
+
+- Full Windows MSVC Release build completed for tests, benchmarks, and all example targets. CMake reports that HarfBuzz's CMake build is community-maintained and notes unavailable optional PkgConfig/Python tooling; the Xui targets compiled with warnings-as-errors and emitted no compiler warnings. CTest passes, and the test executable reports **197 tests, 0 failures**.
+- Windows MSVC Release built `xui_tests` and `xui_glfw_demo` with warnings-as-errors. The full test binary reports **197 tests, 0 failures** with `XUI_VARIABLE_FONT=examples/layout/Roboto.ttf` and static `XUI_TEST_FONT=C:/Windows/Fonts/segoeui.ttf`; it also reports **197 tests, 0 failures** with bundled test font `RobotoFlex-Variable.ttf` plus Segoe UI. `XUI_VARIABLE_FONT=C:/Windows/Fonts/bahnschrift.ttf` was also exercised; its 900 request clamps correctly to its 700 axis maximum.
+- For the checked-in `examples/layout/Roboto.ttf`, test diagnostics at size 28 print raw FreeType font-unit advance = HarfBuzz single-glyph advance = atlas advance:
+
+  | `wght` | H | i | m | . | `To` GPOS adjustment | `Va` GPOS adjustment |
+  |---:|---:|---:|---:|---:|---:|---:|
+  | 100 | 1438 | 422 | 1836 | 439 | −1.35352 px | −0.628906 px |
+  | 400 | 1461 | 498 | 1796 | 540 | −1.35352 px | −0.628906 px |
+  | 700 | 1446 | 542 | 1774 | 594 | −2.36523 px | −0.628906 px |
+  | 900 | 1439 | 563 | 1764 | 620 | −2.84375 px | −0.628906 px |
+
+- Before the shaping integration, these Roboto `To` and `Va` pair adjustments were both zero at all weights. The changed `To` result demonstrates weight-sensitive GPOS; `Va` is nonzero but constant in this font. `Hamburgefontsiv` and `To Va` are also measured at each weight. The companion variable-font test checks distinct font/atlas entries.
+- A second variable-font run used HarfBuzz's bundled Roboto Flex test font (axis 100–1000). Its `To` GPOS adjustment at 28 px was −1.27148, −1.79102, −2.05078, −1.91406, −1.65430, and −1.39453 px at weights 100, 300, 400, 500, 700, and 900 respectively; `To Va` runs measured 68.2227, 68.3867, 68.4688, 70.0547, 73.1992, and 76.3301 px. This verifies weight-specific positioning in a second variable font; the asset is used only for a local test and is not an Xui runtime dependency.
+- The `.xss` runtime test verifies inherited weight on `Text`, plus child overrides on `Button` and `TextBox`, and renders all three. Existing text caret/deletion, wrapping, row clipping, and runtime tests pass as part of the 197-test suite.
+- The latest hidden GLFW/OpenGL animation profile completed **1,979 frames in 5.03855 s (392.771 FPS)** with Roboto selected. This is an uncapped hidden-loop throughput sample, not visible FPS, resize cadence, or input latency. Inter and Source Sans 3 variable font files were not present in the repo or local font folder; they are unverified. No visible manual font comparison was available.
+
+### Current status and next steps
+
+- Tested variable TrueType fonts now use HarfBuzz OpenType GPOS positioning with the selected `wght` coordinate; static single-face fallback stays unchanged. The Windows Release test/build path is green.
+- Remaining gaps: verify Inter and Source Sans 3 variable files when available; visually inspect weight-sensitive spacing in a visible GLFW run; run Linux/macOS builds; broader RTL/bidi and editable complex-script shaping remain out of scope. Continue to treat visible performance/resize criteria as unverified by the hidden profile.
+
+## Variable-font weight axis support — 2026-10-23
+
+> Historical implementation record. Its initial package setup and “verification pending” notes were superseded by the bundled-source integration recorded at the end of this file.
+
+### Audit and root cause
+
+- `.xss` already parses numeric `font-weight`, and `UiRuntime::selectFont()` already resolves a request against registered family faces. With one variable font file, that code still selected the same registered `FontHandle` for every weight.
+- The text engine is a custom TrueType `glyf` parser, not FreeType. It read the default `hmtx` and `glyf` data and did not evaluate `fvar`/`gvar`/`HVAR`; therefore measurements, advances, and glyphs stayed at the default instance. This was not a parser/cascade bug.
+- `GlyphKey` was keyed by glyph index and pixel size only. The atlas stored a font pointer for rebuilds but could return a cached glyph from another font/weight when both used the same glyph ID and size. This would mask distinct faces even after variable instances existed.
+- Windows `C:/Windows/Fonts/bahnschrift.ttf` was inspected locally and contains `fvar`, `gvar`, `HVAR`, and `avar`, so it can serve as the local variable-font smoke input. It is not copied into the repository.
+
+### Changes and decisions
+
+- Added FreeType 2.9+ as a required dependency for the text target, with package setup in Linux/macOS/Windows CI and a vcpkg manifest for Windows. Static fonts continue using the existing parser, so their current path remains unchanged.
+- Variable `glyf` fonts now expose the `wght` axis range, create cached `Font` instances per effective requested weight, apply coordinates using `FT_Set_Var_Design_Coordinates`, and use FreeType-evaluated advances and outlines for shaping/measurement/rasterization. Out-of-range coordinates clamp to the font axis range; other axes keep their defaults.
+- Made atlas keys include a unique font-instance identity. Text layout already keys by font handle, so concurrent font weights now remain separate in both caches.
+- `font-weight` without an explicit `font` family now applies to the default face too. Static fonts or fonts without `wght` retain the existing fallback policy: nearest registered face, no synthetic bold and no system fallback.
+- Added a six-weight `.xss` parser test (100, 300, 400, 500, 700, 900), a variable-font smoke test that reports the effective coordinate and checks simultaneous instances/outline differences, and a static-font fallback test.
+- Trade-off: correct variable-font deltas need a text dependency. FreeType was chosen over implementing `gvar`/`HVAR` in the small custom parser; the later bundled-source integration avoids requiring a separately installed package.
+
+### Verification status and next steps
+
+- `git diff --check` passes. The variable-font smoke asset is available on this Windows machine and its variation tables were confirmed.
+- The local vcpkg install was rejected, so FreeType is not installed in the current build environment. A build/configure and the new tests could not be run. No claim is made yet that the implementation compiles, renders six visible weights, or preserves FPS/layout.
+- Next: install the declared dependency, build with MSVC warnings-as-errors, run `xui_tests` and `xui_glfw_demo`, set `XUI_VARIABLE_FONT=C:/Windows/Fonts/bahnschrift.ttf` for the variable-font check, then record output and compare visible weight samples. Fix any compile/runtime issues before marking this feature as verified.
+
 ## Fluent 2 defaults, focus outlines, and checklist values — 2026-10-21
 
 ### Audit and scope
@@ -1465,3 +1531,43 @@ Premise corrections worth recording: this checkout has a GLFW + OpenGL 2.1 backe
 - Corrected `doc/getting-started.md`, which incorrectly claimed Windows builds an `xui_hello` target. The current build target is `xui_glfw_demo`.
 - An incremental MSBuild refresh was attempted, but the process stopped producing output and was interrupted. Thus the profile results verify the existing Release binary, not a fresh rebuild in this follow-up. No source code changed in this follow-up.
 - Next step if the error remains: launch the current `xui_glfw_demo` target from a fresh build directory and copy the complete error text, including anything after the colon. A current OpenGL shader failure should now include its driver log.
+
+# 2026-10-23 — Build FreeType from the bundled source
+
+- Audit: `lib/freetype-2.15.0` is a complete FreeType 2.15.0 source tree. No prebuilt library files were present. The vcpkg manifest listed only FreeType; CI used vcpkg only to install FreeType for Windows. There is no root `CMakePresets.json` or `.gitmodules`.
+- Changes: replaced system package discovery with `add_subdirectory` for the bundled FreeType source and a stable `xui::freetype` interface target. The text library links that wrapper. The FreeType target is kept static. System zlib and optional bzip2, PNG, HarfBuzz, Brotli, and HVF integrations are disabled; FreeType keeps its internal zlib inflater.
+- Removed package-manager wiring for the one declared dependency: removed `vcpkg.json`, the Windows vcpkg install/toolchain steps, Linux `libfreetype-dev`, macOS Homebrew FreeType installation, and the stale setup instructions. GLFW's unrelated system requirements remain.
+- Decision: use source instead of platform-specific prebuilts. This keeps the dependency build consistent across Windows/macOS/Linux and avoids accidental system FreeType selection. Optional modules are disabled because Xui calls FreeType for variable `glyf` axis evaluation/outlines and does not use their services.
+- Trade-off: configure/build now compiles FreeType each time in a clean build tree, increasing build time while removing a separately installed dependency. The vendored source is pinned to 2.15.0.
+- Verification: fresh Windows MSVC Debug and Release configure/builds and the full 195-test suite now pass. The variable-font smoke tests report effective axis coordinates and confirm multiple weight instances render in the software renderer. Bahnschrift clamps 100 to 300 and 900 to 700; clamped requests are tested against the effective coordinate. Link rules show the Debug demo uses `build/.../_deps/freetype/freetyped.lib` and Release uses the corresponding bundled `freetype.lib`; these are static libraries, so no FreeType DLL appears in runtime imports. All example targets, including `xui_glfw_demo`, build in both configurations. No visible desktop interaction/FPS claim is made here.
+- Status/next steps: the bundled source is compiled into a static FreeType library and linked by Xui targets. Verify CI on Linux/macOS and perform a visible GLFW smoke test when a desktop session is available.
+
+# 2026-10-23 — Fix variable font-weight face selection
+
+- Diagnosis before the fix: `.xss` parsing and cascade retained numeric weights 100, 300, 400, 500, 700, and 900. FreeType exposed Bahnschrift's `wght` axis with min/default/max **300/400/700**, and `FT_Set_Var_Design_Coordinates` accepted the corresponding fixed-point values. `GlyphAtlas` already keyed entries by unique font cache ID, glyph index, and pixel size, so separate weight instances were not sharing glyphs.
+- The missed runtime case was face selection. Rules without `font-family` returned the first loaded face directly, bypassing registered faces under the default family. The showcase has weight rules without an explicit family. Also, when a family did contain both variable and static faces, nearest registered-face selection could choose static bold before consulting the variable axis. The old runtime test named the variable family explicitly and registered no competing static face, so it did not cover either failure.
+- Changes: implicit-family styles now resolve through the registered `default` family. A variable face is selected when its clamped axis coordinate is closer to the requested weight, and it wins equal-distance ties against a static face. Static-only families still choose the nearest registered face and do not synthesize bold. Added opt-in `XUI_TRACE_FONT_WEIGHT=1` diagnostics for axis metadata and `FT_Set_Var_Design_Coordinates`, runtime face selection, the actual FreeType coordinate at glyph loading, and atlas keys. Added tests that reproduce the default-family + registered static-bold setup, inspect runtime-selected weights, compare rendered rows for each distinct effective weight, and assert one glyph has one atlas entry per distinct effective weight.
+- Diagnostic values for Bahnschrift: parser/cascade requests **100, 300, 400, 500, 700, 900**; effective axis values **300, 300, 400, 500, 700, 700**. `FT_Set_Var_Design_Coordinates` logs fixed coordinates **19,660,800; 26,214,400; 32,768,000; 45,875,200** for the distinct effective weights. The glyph-load trace confirms the same axis values immediately before FreeType loads glyphs. Atlas test: one glyph at 28 px creates **4 entries for 4 distinct effective weights**; repeat requests create no more entries. Software-rendered row coverage counts were **1485, 1485, 1857, 2092, 2453, 2453**; row comparisons prove each distinct effective weight produces different pixels, and clamped pairs are identical.
+- Decision/trade-off: preserve the previously agreed static fallback (nearest registered face, no synthetic bold). Prefer the variable font on an equal-distance tie because it can honor the authored axis and should not be masked by a static companion face. Trace output is disabled unless its environment variable is set.
+- Verification: Windows MSVC Debug and Release builds of `xui_tests` and `xui_glfw_demo` succeeded. Full suite in both configurations: **195 passed, 0 failed** with `XUI_VARIABLE_FONT=C:/Windows/Fonts/bahnschrift.ttf`. The latest five-second Release GLFW `--profile-animation` run with `XUI_DEMO_FONT` set to Bahnschrift exited normally at **401.733 FPS** without tracing. A separate diagnostic run with tracing enabled also exited normally; tracing output is not used as the performance baseline. The profile exercises real GLFW/OpenGL frames but does not replace manual visual inspection or interaction testing. Linux/macOS remain unverified.
+- Remaining scope: this change addresses `font-weight` only. Suggested later text-feature slice: explicit line-height, text decoration, text transform, and overflow/ellipsis controls, after choosing syntax and behavior. No broader text features were added.
+
+## 2026-10-24 — Fix damaged variable-font glyph fills and layout demo styling
+
+- Diagnosis: the screenshot is produced by `examples/layout/layout.xui` and its `.xss`. The title rule explicitly requested `font-size: 100px` and omitted a foreground color, explaining the oversized wrap and dark, low-contrast text. The two row strings are fully visible in the screenshot, so Row tail clipping is not reproduced there. Separately, `src/text/rasterizer.cpp` claimed non-zero fill but actually filled sorted edge pairs (even-odd). TrueType variable/composite glyphs can contain overlapping contours; even-odd fill cancels their overlap and creates the rectangular gaps visible in the glyphs.
+- Changes: raster scanlines now accumulate signed crossings and fill spans while the winding count is non-zero. Coincident crossings are grouped to avoid seams. Added `rasterizer_uses_nonzero_winding_for_overlapping_and_nested_contours`, which verifies same-direction overlapping contours remain solid while a reversed inner contour remains a counter. Updated `examples/layout/layout.xss` to use a 32px title, explicit high-contrast foreground colors, and consistent page/row padding and gap. Added a troubleshooting note about contour-fill artifacts.
+- Decision/trade-off: use the TrueType/OpenType non-zero winding rule at the shared rasterizer, rather than special-casing FreeType glyphs or the GLFW backend. The same correction applies to static and variable outlines. Kept the `.xui` structure and text content unchanged; only the demo theme controls title sizing/contrast.
+- Verification: Windows MSVC Release build completed for `xui_tests` and `xui_layout_demo`; the test executable reports **198 passed, 0 failed**, including the new overlapping-contour/counter test and existing Roboto variable-weight tests. CMake rebuilt/copied the updated layout example assets.
+- Verification limits: no visible GLFW desktop inspection was available in this run, so the corrected appearance in the user's exact screenshot is not visually confirmed. No interactive FPS sample was taken; this change only alters raster fill work on newly baked glyphs and demo style values. FPS, visible resize, and interaction remain unverified here.
+- Current status / next steps: the known contour-fill cause is corrected and covered by a synthetic regression. Run `build/examples/layout/Release/xui_layout_demo.exe` to visually check the title, glyph contours, and two complete Row labels; then inspect the full showcase with Roboto at the intended production sizes.
+## 2026-10-24 — Add The Ashen Gate turn-based game UI example
+
+- Choice: implement the user-selected turn-based encounter, with combat actions driven by UI events. `Xui::run()` does not expose a per-frame application callback, so the sample does not add a parallel GL render loop or bypass the backend interfaces. The agreed scope is an event-driven game-UI sample; real-time simulation and per-frame HUD updates are out of scope.
+- Added `examples/game/` with `game.cpp`, `game.xui`, `game.xss`, a target-specific `CMakeLists.txt`, and `README.md`. Six authored pages cover Main Menu, Encounter, Paused, Settings, Inventory, and Results. The UI document owns widget structure; the stylesheet owns the theme, control states, and notice animations. C++ implements strike/heavy strike, guard, healing, difficulty, equipment bonuses, and state-to-widget updates through the existing typed value/event API.
+- Added `xui_game_demo` under the existing GLFW example option and copy rules for the game documents and the shared Roboto font. Root README and `doc/README.md` now link the sample. Added `turn_based_game_example_assets_parse_validate_and_build` to parse, validate, build, lay out, and check its authored control IDs in the null backend.
+- The first build caught an unused local under warnings-as-errors. The asset test then caught malformed `.xui` property delimiters and button callbacks placed in the constructor parameter list instead of the widget property block. Fixed these at the example source; added a live `Hints: on/off` readout update alongside the combat hint.
+- Trade-off: the pause page is a tab, not a focus-trapping modal; there is no game canvas or sprite rendering; idle gameplay has no simulation loop. These choices exercise framework UI without introducing platform-specific rendering or changing the public run-loop API.
+- Verification: Windows MSVC Release build succeeded for `xui_tests` and `xui_game_demo`; the target links the GLFW/OpenGL backend libraries. The full test executable reports **199 tests, 0 failures**, including the new game asset/runtime case. `git diff --check` found no whitespace errors; its output contains existing LF-to-CRLF working-copy notices.
+- Verification limits: the game was not visibly launched and played in this session. Therefore no claim is made about visible widget appearance, interactive playthrough, live resize, visible FPS, or idle CPU. The 60+ FPS target is not established for this game sample; its loop is event-driven and only redraws for UI work/animation.
+- Next: run `build/examples/game/Release/xui_game_demo.exe` visibly; play through start, combat, pause/resume, settings, inventory, defeat/victory, and restart; resize during combat; record visible FPS and idle behavior. Fix any runtime findings without moving UI structure or styling into C++.
+

@@ -28,6 +28,7 @@ The standalone Release benchmarks exercise more controlled stages. `bench_style`
 - Let the facade's event loop sleep when idle. Continuous redraw is intended for animation/profile use, not normal static UI.
 - Enabling FPS with F3 opts into continuous redraw so the displayed FPS measures rendered frame cadence. This intentionally raises CPU/GPU use while visible; turn it off with F3 for event-driven idle behavior. F4 adds the previous frame's draw-batch count without enabling continuous redraw.
 - Keep glyph atlases reusable and load fonts before `attach()` so atlas setup and glyph upload happen through the normal renderer lifecycle.
+- HarfBuzz shapes text only when the text-layout cache misses; subsequent paints reuse the cached advances/positions and atlas glyphs. Each variable weight has a distinct font/layout/atlas identity, so the first use of a new weight incurs its own shaping and glyph-raster work.
 - Avoid very large shadows or thousands of separately styled objects. Painter batches compatible draw commands, but each visible object still contributes geometry and style/layout work.
 - Do not force `vsync = false` in shipped applications unless uncapped throughput is intentional. Vsync can cap frame rate at display refresh and reduce tearing.
 

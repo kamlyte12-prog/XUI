@@ -5,14 +5,31 @@
 namespace xui {
 
 	FontHandle TextSystem::loadFont(std::string_view ttfData, std::string* error) {
-		Font f;
-		if (!f.load(ttfData, error)) return FontHandle{};
+		auto f = std::make_unique<Font>();
+		if (!f->load(ttfData, error)) return FontHandle{};
 		m_fonts.push_back(std::move(f));
 		return FontHandle{ u32(m_fonts.size() - 1), 1 };
 	}
 
 	const Font* TextSystem::font(FontHandle h) const {
-		return h.index < m_fonts.size() ? &m_fonts[h.index] : nullptr;
+		return h.index < m_fonts.size() ? m_fonts[h.index].get() : nullptr;
+	}
+
+	FontHandle TextSystem::fontAtWeight(FontHandle base, f32 weight, std::string* error) {
+		const Font* source = font(base);
+		if (!source || !source->hasWeightAxis()) return base;
+		const auto [minimum, maximum] = source->weightAxisRange();
+		const f32 effectiveWeight = std::clamp(weight, minimum, maximum);
+		const i32 coordinate = static_cast<i32>(std::llround(static_cast<double>(effectiveWeight) * 65536.0));
+		for (const FontVariant& variant : m_variants)
+			if (variant.base == base.index && variant.coordinate == coordinate) return variant.handle;
+
+		auto instance = std::make_unique<Font>();
+		if (!instance->load(source->m_data, error) || !instance->setWeightAxis(effectiveWeight, error)) return FontHandle{};
+		m_fonts.push_back(std::move(instance));
+		const FontHandle handle{ static_cast<u32>(m_fonts.size() - 1), 1 };
+		m_variants.push_back({ base.index, coordinate, handle });
+		return handle;
 	}
 
 	bool TextSystem::initAtlas(Renderer* r, u32 atlasSize) { return m_atlas.init(r, atlasSize); }
@@ -43,7 +60,7 @@ namespace xui {
 			f32 width = 0;                        // ink advance including the trailing space, if any
 			f32 spaceAfter = 0;                   // width of the trailing space (dropped at line ends)
 		};
-		struct TempGlyph { u32 g; f32 adv; };
+		struct TempGlyph { u32 g; f32 adv, xOffset, yOffset; };
 	} // namespace
 
 	const TextLayout& TextSystem::layout(FontHandle fh, std::string_view text, f32 sizePx, f32 wrapWidth) {
@@ -74,62 +91,63 @@ namespace xui {
 		f32 scale = f->scaleFor(f32(key.sizePx));
 		f32 wrap = key.wrap == 0x7FFFFFFF ? 0.f : f32(key.wrap);
 
-		// Pass 1: shape into words (kerned advances). Positions come in pass 2.
-		std::vector<TempGlyph> tg;
-		std::vector<Word> words;
-		tg.reserve(text.size());
-		words.reserve(16);
-		u32 prevG = 0;
-		std::size_t i = 0;
-		bool pendingSpace = false;
-		while (i < text.size()) {
-			u32 cp = decodeUtf8(text, i);
-			if (cp == '\n') { words.push_back({ u32(tg.size()), 0, 0, 0 }); words.back().width = -1.f; prevG = 0; pendingSpace = false; continue; }
-			u32 g = f->glyphIndex(cp);
-			f32 adv = f->advance(g) * scale;
-			// A literal tab is non-rendering whitespace with a predictable four-space indent.
-			// Measure it from the actual space glyph (some fonts give control glyphs a nonzero advance).
-			// TextArea key input expands tabs to the configured number of spaces before shaping.
-			if (cp == '\t') adv = f->advance(f->glyphIndex(' ')) * scale * 4.f;
-			if (isSpaceChar(cp)) {
-				pendingSpace = true;                 // widths resolve when the next word starts
-				if (!words.empty()) words.back().spaceAfter += adv;
-				prevG = 0;
-				continue;
-			}
-			Word w;
-			w.glyphFirst = u32(tg.size());
-			if (pendingSpace && !words.empty()) {
-				words.back().width += words.back().spaceAfter;   // the space belongs to the flow
-			}
-			pendingSpace = false;
-			if (prevG) {
-				i16 kx = 0;
-				if (f->kerning(prevG, g, kx)) adv += kx * scale;
-			}
-			tg.push_back({ g, adv });
-			w.glyphCount = 1;
-			w.width = adv;
-			words.push_back(w);
-			prevG = g;
-		}
-		// merge single-glyph words split only by kerning into fewer word records is unnecessary: each
-		// decoded char became one Word; merge runs of non-space chars (same word) by folding widths.
-		// (Decoding above creates one Word per char; fold consecutive non-space words into one.)
-		std::vector<Word> folded;
-		folded.reserve(words.size());
-		for (const Word& w : words) {
-			if (w.width == -1.f) { folded.push_back(w); continue; }          // newline marker
-			if (!folded.empty() && folded.back().width != -1.f && folded.back().spaceAfter == 0.f) {
-				folded.back().glyphCount += w.glyphCount;
-				folded.back().width += w.width;
-				folded.back().spaceAfter = w.spaceAfter;
-			}
-			else
-				folded.push_back(w);
-		}
-		words.swap(folded);
-
+        // Pass 1: shape each uninterrupted text run with HarfBuzz. Whitespace remains explicit so
+        // the existing greedy line-break policy is preserved while GPOS sees every adjacent pair.
+        std::vector<TempGlyph> tg;
+        std::vector<Word> words;
+        tg.reserve(text.size());
+        words.reserve(16);
+        std::size_t i = 0;
+        while (i < text.size()) {
+            const std::size_t cpStart = i;
+            const u32 cp = decodeUtf8(text, i);
+            if (cp == '\n') { words.push_back({ u32(tg.size()), 0, 0, 0 }); words.back().width = -1.f; continue; }
+            if (isSpaceChar(cp)) {
+                // A literal tab advances to a four-space stop. Other whitespace uses its own
+                // font advance; leading whitespace retains the prior behavior and is ignored.
+                const f32 adv = cp == '\t' ? f->advance(f->glyphIndex(' ')) * scale * 4.f
+                    : f->advance(f->glyphIndex(cp)) * scale;
+                if (!words.empty() && words.back().width != -1.f) {
+                    words.back().spaceAfter += adv;
+                    words.back().width += adv;
+                }
+                continue;
+            }
+            // Gather one run up to a breakable space or newline. Shape the segment as a
+            // whole so pair positioning, including variable GPOS deltas, is applied.
+            const std::size_t runStart = cpStart;
+            while (i < text.size()) {
+                const std::size_t next = i;
+                const u32 nextCp = decodeUtf8(text, i);
+                if (nextCp == '\n' || isSpaceChar(nextCp)) { i = next; break; }
+            }
+            Word w;
+            w.glyphFirst = u32(tg.size());
+            std::vector<Font::ShapedGlyph> shaped;
+            const std::string_view run = text.substr(runStart, i - runStart);
+            if (f->shapeText(run, shaped)) {
+                for (const Font::ShapedGlyph& glyph : shaped) {
+                    const f32 advance = glyph.xAdvance * scale;
+                    tg.push_back({ glyph.glyph, advance, glyph.xOffset * scale, glyph.yOffset * scale });
+                    w.width += advance;
+                    ++w.glyphCount;
+                }
+            }
+            else {
+                // HarfBuzz allocation failure is rare; keep readable text with the built-in
+                // cmap/advance path rather than dropping the run.
+                std::size_t fallback = runStart;
+                while (fallback < i) {
+                    const u32 fallbackCp = decodeUtf8(text, fallback);
+                    const u32 glyph = f->glyphIndex(fallbackCp);
+                    const f32 advance = f->advance(glyph) * scale;
+                    tg.push_back({ glyph, advance, 0.f, 0.f });
+                    w.width += advance;
+                    ++w.glyphCount;
+                }
+            }
+            words.push_back(w);
+        }
 		// Pass 2: greedy word wrap; assign pen positions. A line starts when lineStarts grows; the last
 		// line stays open until the loop ends (no phantom empty line for text not ending in '\n').
 		out.glyphs.reserve(tg.size());
@@ -161,8 +179,9 @@ namespace xui {
 					while (fit < remain && wp + tg[start + fit].adv <= wrap) { wp += tg[start + fit].adv; ++fit; }
 					if (!fit) fit = 1;                                       // one oversized char per line
 					for (u32 k = 0; k < fit; ++k) {
-						out.glyphs.push_back({ tg[start + k].g, pen, lineY, tg[start + k].adv });
-						pen += tg[start + k].adv;
+						const TempGlyph& glyph = tg[start + k];
+						out.glyphs.push_back({ glyph.g, pen + glyph.xOffset, lineY - glyph.yOffset, glyph.adv });
+						pen += glyph.adv;
 					}
 					remain -= fit;
 					if (remain) breakLine();
@@ -171,7 +190,7 @@ namespace xui {
 			}
 			for (u32 k = 0; k < w.glyphCount; ++k) {
 				const TempGlyph& t = tg[w.glyphFirst + k];
-				out.glyphs.push_back({ t.g, pen, lineY, t.adv });
+				out.glyphs.push_back({ t.g, pen + t.xOffset, lineY - t.yOffset, t.adv });
 				pen += t.adv;
 			}
 			if (w.spaceAfter) pen += w.spaceAfter;   // room for the next word on this line (dropped on wrap)

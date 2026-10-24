@@ -14,6 +14,7 @@
 #include <xui/text/font.hpp>
 #include <string>
 #include <string_view>
+#include <memory>
 #include <unordered_map>
 #include <vector>
 
@@ -48,6 +49,9 @@ namespace xui {
 		/// Load a font from a TTF/OTF buffer; returns an invalid handle on parse failure.
 		FontHandle loadFont(std::string_view ttfData, std::string* error = nullptr);
 		const Font* font(FontHandle h) const;
+		/// Return a cached variable-font instance at the requested CSS weight, or the original face
+		/// when it has no `wght` axis. Static-face fallback remains the caller's responsibility.
+		FontHandle fontAtWeight(FontHandle base, f32 weight, std::string* error = nullptr);
 		bool initAtlas(Renderer* r, u32 atlasSize = GlyphAtlas::kMinSize);
 		GlyphAtlas* atlas() { return &m_atlas; }
 		void beginFrame() { m_atlas.beginFrame(); }
@@ -77,7 +81,9 @@ namespace xui {
 
 		const TextLayout& shape(FontHandle fh, std::string_view text, const CacheKey& key);
 
-		std::vector<Font> m_fonts;
+		struct FontVariant { u32 base = 0; i32 coordinate = 0; FontHandle handle; };
+		std::vector<std::unique_ptr<Font>> m_fonts;
+		std::vector<FontVariant> m_variants;
 		GlyphAtlas m_atlas;
 		std::vector<CacheEntry> m_cache;
 		std::vector<u32> m_index;       // open addressing over m_cache: entry index + 1, 0 = empty

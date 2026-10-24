@@ -18,6 +18,7 @@
 namespace xui {
 
 	struct GlyphKey {
+		u32 font = 0;        ///< font instance identity, including variable-axis instances
 		u32 glyph = 0;        ///< font glyph index
 		u16 sizePx = 0;       ///< pixel size (rounded)
 		u16 pad = 0;
@@ -25,7 +26,8 @@ namespace xui {
 	};
 	struct GlyphKeyHash {
 		std::size_t operator()(GlyphKey k) const noexcept {
-			return std::size_t(k.glyph) * 0x9E3779B97F4A7C15ull ^ (std::size_t(k.sizePx) << 32);
+			return std::size_t(k.font) * 0xD6E8FEB86659FD93ull ^
+				std::size_t(k.glyph) * 0x9E3779B97F4A7C15ull ^ (std::size_t(k.sizePx) << 32);
 		}
 	};
 

@@ -1,8 +1,133 @@
 #include <xui/text/font.hpp>
 #include <algorithm>
+#include <cmath>
 #include <cstring>
+#include <atomic>
+#include <cstdio>
+#include <cstdlib>
+#include <limits>
+#include <unordered_set>
+#include <utility>
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include FT_MULTIPLE_MASTERS_H
+#include FT_OUTLINE_H
+#include <hb.h>
+#include <hb-ot.h>
 
 namespace xui {
+	namespace { std::atomic<u32> s_nextFontCacheId{ 1 }; }
+
+	struct Font::VariationState {
+		FT_Library library = nullptr;
+		FT_Face face = nullptr;
+		FT_MM_Var* axes = nullptr;
+		FT_UInt weightAxis = 0;
+		FT_Fixed minimum = 0, maximum = 0;
+		~VariationState() {
+			if (axes && library) FT_Done_MM_Var(library, axes);
+			if (face) FT_Done_Face(face);
+			if (library) FT_Done_FreeType(library);
+		}
+	};
+
+	struct Font::ShapingState {
+		hb_blob_t* blob = nullptr;
+		hb_face_t* face = nullptr;
+		hb_font_t* font = nullptr;
+		~ShapingState() {
+			if (font) hb_font_destroy(font);
+			if (face) hb_face_destroy(face);
+			if (blob) hb_blob_destroy(blob);
+		}
+	};
+
+	namespace {
+		template<class Variation>
+		void traceWeightAtGlyphLoad(const Variation& variation, u32 glyph) {
+			static const bool enabled = std::getenv("XUI_TRACE_FONT_WEIGHT") != nullptr;
+			if (!enabled) return;
+			static std::unordered_set<u64> seen;
+			const u64 key = static_cast<u64>(reinterpret_cast<std::uintptr_t>(variation.face)) ^ (u64(glyph) << 1);
+			if (!seen.insert(key).second) return;
+			std::vector<FT_Fixed> coordinates(variation.axes->num_axis);
+			if (FT_Get_Var_Design_Coordinates(variation.face, variation.axes->num_axis, coordinates.data())) {
+				std::fprintf(stderr, "font-weight glyph-load: glyph=%u FT_Get_Var_Design_Coordinates=failed\n", glyph);
+				return;
+			}
+			const FT_Fixed coordinate = coordinates[variation.weightAxis];
+			std::fprintf(stderr, "font-weight glyph-load: glyph=%u axis=wght fixed=%ld applied=%.3f\n",
+				glyph, static_cast<long>(coordinate), static_cast<double>(coordinate) / 65536.0);
+		}
+	}
+
+	Font::Font() = default;
+	Font::~Font() = default;
+
+	bool Font::hasWeightAxis() const { return m_variation != nullptr; }
+
+	std::pair<f32, f32> Font::weightAxisRange() const {
+		if (!m_variation) return { 400.f, 400.f };
+		return { static_cast<f32>(m_variation->minimum) / 65536.f,
+			static_cast<f32>(m_variation->maximum) / 65536.f };
+	}
+
+	bool Font::setWeightAxis(f32 weight, std::string* error) {
+		if (!m_variation) return false;
+		std::vector<FT_Fixed> coords(m_variation->axes->num_axis);
+		if (FT_Get_Var_Design_Coordinates(m_variation->face, m_variation->axes->num_axis, coords.data())) {
+			for (FT_UInt i = 0; i < m_variation->axes->num_axis; ++i) coords[i] = m_variation->axes->axis[i].def;
+		}
+		const FT_Fixed requested = static_cast<FT_Fixed>(std::llround(static_cast<double>(weight) * 65536.0));
+		coords[m_variation->weightAxis] = std::clamp(requested, m_variation->minimum, m_variation->maximum);
+		if (FT_Set_Var_Design_Coordinates(m_variation->face, m_variation->axes->num_axis, coords.data())) {
+			if (error) *error = "FreeType could not apply the requested wght axis coordinate";
+			return false;
+		}
+		m_appliedWeight = static_cast<f32>(coords[m_variation->weightAxis]) / 65536.f;
+		if (m_shaping) {
+			const hb_variation_t variation{ HB_TAG('w', 'g', 'h', 't'), m_appliedWeight };
+			hb_font_set_variations(m_shaping->font, &variation, 1);
+		}
+		if (std::getenv("XUI_TRACE_FONT_WEIGHT")) {
+			std::fprintf(stderr, "font-weight FT_Set_Var_Design_Coordinates: wght requested=%.3f fixed=%ld applied=%.3f HarfBuzz-wght=%.3f range=%.3f..%.3f default=%.3f result=success\n",
+				static_cast<double>(weight), static_cast<long>(coords[m_variation->weightAxis]),
+				static_cast<double>(m_appliedWeight), static_cast<double>(m_shaping ? m_appliedWeight : -1.f),
+				static_cast<double>(weightAxisRange().first),
+				static_cast<double>(weightAxisRange().second), static_cast<double>(m_weightAxisDefault));
+		}
+		m_metrics.ascender = static_cast<f32>(m_variation->face->ascender);
+		m_metrics.descender = static_cast<f32>(m_variation->face->descender);
+		m_metrics.lineGap = static_cast<f32>(m_variation->face->height) - m_metrics.ascender + m_metrics.descender;
+		return true;
+	}
+
+	namespace {
+		struct OutlineContext { OutlineBuffer outline; };
+		int ftMoveTo(const FT_Vector* p, void* user) {
+			static_cast<OutlineContext*>(user)->outline.moveTo({ static_cast<f32>(p->x), static_cast<f32>(p->y) });
+			return 0;
+		}
+		int ftLineTo(const FT_Vector* p, void* user) {
+			static_cast<OutlineContext*>(user)->outline.lineTo({ static_cast<f32>(p->x), static_cast<f32>(p->y) });
+			return 0;
+		}
+		int ftConicTo(const FT_Vector* control, const FT_Vector* to, void* user) {
+			auto& outline = static_cast<OutlineContext*>(user)->outline;
+			if (outline.pts.empty()) return 1;
+			const Vec2 from = outline.pts.back();
+			const Vec2 c{ static_cast<f32>(control->x), static_cast<f32>(control->y) };
+			const Vec2 end{ static_cast<f32>(to->x), static_cast<f32>(to->y) };
+			constexpr int steps = 8;
+			for (int i = 1; i <= steps; ++i) {
+				const f32 t = static_cast<f32>(i) / steps, u = 1.f - t;
+				outline.lineTo({ u * u * from.x + 2.f * u * t * c.x + t * t * end.x,
+					u * u * from.y + 2.f * u * t * c.y + t * t * end.y });
+			}
+			return 0;
+		}
+		int ftCubicTo(const FT_Vector*, const FT_Vector*, const FT_Vector*, void*) { return 1; }
+	}
 
 	// ---- table directory --------------------------------------------------------------------------
 
@@ -16,8 +141,12 @@ namespace xui {
 	}
 
 	bool Font::load(std::string_view data, std::string* error) {
+		m_variation.reset();
+		m_shaping.reset();
 		auto fail = [&](const char* why) {
 			if (error) *error = why;
+			m_variation.reset();
+			m_shaping.reset();
 			m_data.clear();
 			return false;
 			};
@@ -59,6 +188,85 @@ namespace xui {
 		if (u32 name = tableOffset("name")) parseName(name);
 		if ((m_kern = tableOffset("kern"))) parseKern(m_kern);
 		m_metrics.hasKernTable = !m_kernPairs.empty();
+
+		// Keep the font bytes owned by Font; HarfBuzz uses them for OpenType shaping and
+		// resolves GPOS variation data independently for each cached Font weight instance.
+		m_shaping = std::make_unique<ShapingState>();
+		m_shaping->blob = hb_blob_create(m_data.data(), static_cast<unsigned>(m_data.size()),
+			HB_MEMORY_MODE_READONLY, nullptr, nullptr);
+		if (!m_shaping->blob || hb_blob_get_length(m_shaping->blob) == 0)
+			return fail("HarfBuzz could not create a font blob");
+		m_shaping->face = hb_face_create(m_shaping->blob, 0);
+		if (!m_shaping->face || hb_face_get_glyph_count(m_shaping->face) == 0)
+			return fail("HarfBuzz could not read the font face");
+		m_shaping->font = hb_font_create(m_shaping->face);
+		if (!m_shaping->font) return fail("HarfBuzz could not create a shaping font");
+		hb_ot_font_set_funcs(m_shaping->font);
+		const int shapingScale = static_cast<int>(m_metrics.unitsPerEm);
+		hb_font_set_scale(m_shaping->font, shapingScale, shapingScale);
+
+		// Keep the existing zero-dependency parser for static faces. Variable `glyf` fonts need
+		// FreeType to evaluate fvar/gvar and HVAR data at a concrete design coordinate.
+		if (tableOffset("fvar")) {
+			auto variation = std::make_unique<VariationState>();
+			if (FT_Init_FreeType(&variation->library) ||
+				FT_New_Memory_Face(variation->library, reinterpret_cast<const FT_Byte*>(m_data.data()),
+					static_cast<FT_Long>(m_data.size()), 0, &variation->face) ||
+				FT_Get_MM_Var(variation->face, &variation->axes)) {
+				return fail("FreeType could not initialize the variable font");
+			}
+			bool foundWeight = false;
+			for (FT_UInt i = 0; i < variation->axes->num_axis; ++i) {
+				const FT_Var_Axis& axis = variation->axes->axis[i];
+				if (axis.tag == FT_MAKE_TAG('w', 'g', 'h', 't')) {
+					variation->weightAxis = i;
+					variation->minimum = axis.minimum;
+					variation->maximum = axis.maximum;
+					m_weightAxisDefault = static_cast<f32>(axis.def) / 65536.f;
+					foundWeight = true;
+					break;
+				}
+			}
+			if (foundWeight) {
+				m_variation = std::move(variation);
+				if (!setWeightAxis(400, error)) { m_variation.reset(); m_data.clear(); return false; }
+			}
+		}
+		m_cacheId = s_nextFontCacheId.fetch_add(1, std::memory_order_relaxed);
+		return true;
+	}
+
+	bool Font::shapeText(std::string_view utf8, std::vector<ShapedGlyph>& glyphs) const {
+		if (!m_shaping || !m_shaping->font || utf8.empty() ||
+			utf8.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) return false;
+		hb_buffer_t* buffer = hb_buffer_create();
+		if (!buffer) return false;
+		hb_buffer_set_cluster_level(buffer, HB_BUFFER_CLUSTER_LEVEL_MONOTONE_CHARACTERS);
+		hb_buffer_add_utf8(buffer, utf8.data(), static_cast<int>(utf8.size()), 0,
+			static_cast<int>(utf8.size()));
+		hb_buffer_guess_segment_properties(buffer);
+		// The current layout/caret model is left-to-right. Disable ligature substitutions so
+		// editable text retains a stable relationship between input characters and glyphs.
+		hb_buffer_set_direction(buffer, HB_DIRECTION_LTR);
+		const hb_feature_t features[]{
+			{ HB_TAG('l', 'i', 'g', 'a'), 0, HB_FEATURE_GLOBAL_START, HB_FEATURE_GLOBAL_END },
+			{ HB_TAG('c', 'l', 'i', 'g'), 0, HB_FEATURE_GLOBAL_START, HB_FEATURE_GLOBAL_END }
+		};
+		hb_shape(m_shaping->font, buffer, features, 2);
+		unsigned count = 0;
+		const hb_glyph_info_t* infos = hb_buffer_get_glyph_infos(buffer, &count);
+		const hb_glyph_position_t* positions = hb_buffer_get_glyph_positions(buffer, &count);
+		if (!hb_buffer_allocation_successful(buffer) || (!infos && count) || (!positions && count)) {
+			hb_buffer_destroy(buffer);
+			return false;
+		}
+		glyphs.clear();
+		glyphs.reserve(count);
+		for (unsigned i = 0; i < count; ++i) {
+			glyphs.push_back({ infos[i].codepoint, static_cast<f32>(positions[i].x_advance),
+				static_cast<f32>(positions[i].x_offset), static_cast<f32>(positions[i].y_offset), infos[i].cluster });
+		}
+		hb_buffer_destroy(buffer);
 		return true;
 	}
 
@@ -122,6 +330,10 @@ namespace xui {
 
 	f32 Font::advance(u32 g) const {
 		if (g >= m_numGlyphs) return 0;
+		if (m_variation) traceWeightAtGlyphLoad(*m_variation, g);
+		if (m_variation && !FT_Load_Glyph(m_variation->face, g,
+			FT_LOAD_NO_SCALE | FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP | FT_LOAD_IGNORE_TRANSFORM))
+			return static_cast<f32>(m_variation->face->glyph->metrics.horiAdvance);
 		u32 entry = g < m_numHMetrics ? g : m_numHMetrics - 1;
 		return u16At(m_hmtx + entry * 4);
 	}
@@ -296,7 +508,19 @@ namespace xui {
 
 	bool Font::outline(u32 g, const OutlineSink& sink) const {
 		OutlineBuffer b;
+		if (m_variation) {
+			traceWeightAtGlyphLoad(*m_variation, g);
+			if (FT_Load_Glyph(m_variation->face, g,
+				FT_LOAD_NO_SCALE | FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP | FT_LOAD_IGNORE_TRANSFORM) ||
+				m_variation->face->glyph->format != FT_GLYPH_FORMAT_OUTLINE) return false;
+			OutlineContext context;
+			const FT_Outline_Funcs funcs{ ftMoveTo, ftLineTo, ftConicTo, ftCubicTo, 0, 0 };
+			if (FT_Outline_Decompose(&m_variation->face->glyph->outline, &funcs, &context)) return false;
+			b = std::move(context.outline);
+		}
+		else {
 		emitGlyph(g, Xform{}, b, 0);
+		}
 		if (b.starts.empty()) return false;
 		for (u32 ci = 0; ci < b.starts.size(); ++ci) {
 			u32 s = b.starts[ci];
@@ -310,6 +534,16 @@ namespace xui {
 	}
 
 	Rect Font::bounds(u32 g) const {
+		if (m_variation) {
+			traceWeightAtGlyphLoad(*m_variation, g);
+			if (FT_Load_Glyph(m_variation->face, g,
+				FT_LOAD_NO_SCALE | FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP | FT_LOAD_IGNORE_TRANSFORM) ||
+				m_variation->face->glyph->format != FT_GLYPH_FORMAT_OUTLINE) return {};
+			FT_BBox box{};
+			FT_Outline_Get_CBox(&m_variation->face->glyph->outline, &box);
+			return Rect{ static_cast<f32>(box.xMin), static_cast<f32>(box.yMin),
+				static_cast<f32>(box.xMax - box.xMin), static_cast<f32>(box.yMax - box.yMin) };
+		}
 		u32 off, len;
 		if (!glyphData(g, off, len) || !len) return {};
 		return Rect{ f32(i16At(off + 2)), f32(i16At(off + 4)), f32(i16At(off + 6) - i16At(off + 2)),

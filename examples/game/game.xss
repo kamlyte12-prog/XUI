@@ -1,0 +1,65 @@
+tokens {
+  color.canvas = #101827
+  color.surface = #172235
+  color.raised = #202f46
+  color.hover = #293d59
+  color.text = #edf3fb
+  color.muted = #a6b5c9
+  color.accent = #d7a85c
+  color.accent-hover = #efc77f
+  color.outline = #415875
+  color.health = #54b889
+  color.danger = #d76572
+}
+
+Window { resting: { bg: color.canvas, fg: color.text, font-size: 14px } }
+Column.app { resting: { pad: 20px, gap: 14px } }
+Row.masthead { resting: { gap: 16px, align: Center, justify: SpaceBetween } }
+Text.title { resting: { fg: color.text, font-size: 22px, font-weight: 700 } }
+Text.subtitle { resting: { fg: color.muted, font-size: 13px } }
+FpsCounter.fps { resting: { bg: color.raised, fg: color.text, pad: 6px, border: 1px solid color.outline, radius: 6px, font-size: 12px } }
+
+Tabs.pages { resting: { bg: color.surface, border: 1px solid color.outline, radius: 9px } focus: { border: 1px solid color.accent } }
+Tab {
+  resting: { bg: color.canvas, fg: color.muted, font-size: 12px }
+  hover: { bg: color.hover, fg: color.text }
+  selected: { bg: color.surface, fg: color.accent-hover, border: 1px solid color.accent }
+}
+Panel.page-card { resting: { bg: color.surface, pad: 24px, border: 1px solid color.outline, radius: 9px } }
+Panel.combatant, Panel.action-panel, Panel.inventory-note { resting: { bg: color.raised, fg: color.text, pad: 14px, border: 1px solid color.outline, radius: 8px } }
+Panel.enemy { resting: { border: 1px solid #8c5261 } }
+Column.page-content { resting: { gap: 14px, pad: 18px } }
+Text.hero { resting: { fg: color.text, font-size: 32px, font-weight: 700, align: Center } }
+Text.intro { resting: { fg: color.muted, font-size: 15px, align: Center } }
+Badge.eyebrow { resting: { bg: #47391f, fg: color.accent-hover, size: auto 26px, pad: 10px 4px, radius: 13px, font-size: 11px, font-weight: 700, align: Center } }
+Text.section-title { resting: { fg: color.text, font-size: 20px, font-weight: 650 } }
+Text.panel-title { resting: { fg: color.text, font-size: 16px, font-weight: 650, margin: 0px 0px 8px } }
+Text.body { resting: { fg: color.muted, font-size: 13px } }
+Text.field-label { resting: { fg: color.text, font-size: 14px, font-weight: 600 } }
+Text.hint { resting: { fg: color.muted, font-size: 12px, align: Center } }
+Text.readout { resting: { bg: #18283e, fg: color.accent-hover, pad: 7px, border: 1px solid color.outline, radius: 6px, font-size: 13px, align: Center } }
+Text.value { resting: { fg: color.text, font-size: 13px, font-weight: 600, align: Right } }
+Text.battle-log { resting: { bg: #24344b, fg: color.text, pad: 10px, border: 1px solid color.outline, radius: 6px, font-size: 14px, animation: battle-pulse 450ms paused ease-out } }
+Text.result-title { resting: { fg: color.accent-hover, animation: battle-pulse 450ms paused ease-out } }
+ProgressBar.health { resting: { bg: #344457, fg: color.health, radius: 5px } }
+ProgressBar.enemy-health { resting: { fg: color.danger } }
+
+Button.primary, Button.secondary {
+  resting: { bg: color.raised, fg: color.text, pad: 8px 12px, border: 1px solid color.outline, radius: 6px, font-size: 13px, font-weight: 600 }
+  hover: { bg: color.hover, border: 1px solid color.accent }
+  pressed: { bg: #18283e }
+  focus: { border: 1px solid color.accent-hover }
+  disabled: { fg: color.muted, opacity: 0.48 }
+}
+Button.primary { resting: { bg: #765723, fg: #fff7e7, border: 1px solid color.accent } hover: { bg: #8a682d } pressed: { bg: #5b431b } }
+Dropdown.dropdown { resting: { bg: color.raised, fg: color.text, pad: 8px, border: 1px solid color.outline, radius: 6px } hover: { bg: color.hover } focus: { border: 1px solid color.accent } open: { border: 1px solid color.accent } }
+Slider.slider { resting: { bg: #344457, fg: color.accent, border: 1px solid color.outline, radius: 5px } hover: { fg: color.accent-hover } focus: { border: 1px solid color.accent-hover } }
+CheckBox.check { resting: { bg: color.raised, fg: color.text, pad: 8px, border: 1px solid color.outline, radius: 6px } hover: { bg: color.hover } checked: { fg: color.accent-hover } focus: { border: 1px solid color.accent } }
+CheckList.equipment-list { resting: { gap: 6px } }
+CheckItem.inventory-item { resting: { bg: color.raised, fg: color.text, pad: 8px, border: 1px solid color.outline, radius: 6px } hover: { bg: color.hover } checked: { fg: color.accent-hover } focus: { border: 1px solid color.accent } }
+Tooltip { resting: { bg: #18283e, fg: color.text, pad: 8px, border: 1px solid color.accent, radius: 6px, font-size: 12px } }
+
+keyframes battle-pulse {
+  from { opacity: 0.55 }
+  to { opacity: 1 }
+}

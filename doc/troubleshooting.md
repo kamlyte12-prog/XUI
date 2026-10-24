@@ -15,11 +15,14 @@ Start with the actual error string from `Xui::lastError()`, then confirm the run
 ## Text is blank, missing, or shows boxes
 
 - Load a real supported TrueType font before `attach()`. If no valid default font is loaded, text paint is skipped.
-- Confirm the `.xss` family name exactly matches `loadFont(path, family, weight)`. If it does not match, the runtime falls back to the first loaded face.
+- Confirm the `.xss` family name exactly matches `loadFont(path, family, weight)`. Without a `font-family` rule, the runtime uses registered faces in the `default` family; an unknown explicit family falls back to the first loaded face.
+- If `font-weight` appears unchanged, confirm the loaded font contains a `wght` axis and that the stylesheet `font` family matches the registered family. If the family also has a static bold face, the runtime prefers the variable face when its clamped axis value is as close as the static face. Set `XUI_TRACE_FONT_WEIGHT=1` before launch to print cascade/runtime selection, FreeType axis coordinates at glyph loads, and atlas cache keys. Static-only families use the nearest registered face and do not synthesize bold. See [font behavior](animations-fonts-transforms.md#font-file-and-glyph-support).
+- If variable-font text spacing differs at some weights, confirm the bundled HarfBuzz target is present in the build and check that the run is shaped as one LTR token. HarfBuzz supplies OpenType GPOS positions while FreeType supplies the same-weight variable outline/advance; `XUI_TRACE_FONT_WEIGHT=1` prints the selected axis and atlas identity. Xui does not implement RTL/bidi paragraph layout or complex-script editing/caret mapping.
 - Confirm `attach()` initializes the renderer and glyph atlas successfully. Glyph coverage uses `TextureFormat::A8`; a renderer that treats it as RGBA or ignores texture alpha will draw incorrect glyphs.
 - Check that the draw-list backend samples the atlas's alpha/coverage channel and preserves the documented texture lifecycle.
+- If glyph strokes contain rectangular gaps or disappear where contours overlap, check that the rasterizer uses the TrueType non-zero winding fill rule. Even-odd crossing pairs can cancel overlapping contours in variable-font glyph outlines.
 - If only long strings fail, inspect their available width and `.xss size`; the standard `Text` widget wraps to constrained width and clips to its bounds.
-- Complex-script shaping and automatic fallback fonts are not yet supported; start with a short Latin string to isolate font/atlas problems.
+- Automatic fallback fonts, RTL/bidi paragraph layout, and complex-script editing are not yet supported; start with a short Latin string to isolate font/atlas problems.
 
 ## UI freezes or responds slowly
 

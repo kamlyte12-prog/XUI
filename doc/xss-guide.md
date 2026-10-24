@@ -123,7 +123,7 @@ Background gradients are available as `linear-gradient(angle, stops...)`, `radia
 
 `glow: blur spread color` draws an outer halo and remains separate from the offset `shadow` property. It uses an additional SDF shadow primitive rather than a cached texture, so keep large glow radii and counts modest. See the [paint-property reference](styling-reference.md#alpha-gradients-and-glow).
 
-Font size and numeric font weight are `.xss` properties. Weight selects the nearest registered face; the runtime does not synthesize bold. Load additional weights with `loadFont(path, family, weight)` when a design needs them. Font format and glyph coverage limits are listed in the [getting-started guide](getting-started.md#fonts). `size: auto` uses intrinsic content sizing; min/max still clamp the result, and nested Button content participates in the measurement.
+Font size and numeric font weight are `.xss` properties. For variable TrueType fonts with a `wght` axis, weight sets that axis and uses cached face instances. Static fonts use the nearest registered face; the runtime does not synthesize bold. Load static weights with `loadFont(path, family, weight)` when a design needs them. Font formats and axis fallback behavior are listed in the [getting-started guide](getting-started.md#fonts). `size: auto` uses intrinsic content sizing; min/max still clamp the result, and nested Button content participates in the measurement.
 
 ## Best practices
 

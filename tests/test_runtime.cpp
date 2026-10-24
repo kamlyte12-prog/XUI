@@ -9,6 +9,8 @@
 #include <xui/xui.hpp>
 #include <cstdlib>
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -17,8 +19,27 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 
 using namespace xui;
+
+namespace xui {
+	struct UiRuntimeFontWeightProbe {
+		static f32 appliedWeight(const UiRuntime& runtime, std::string_view id) {
+			for (const UiRuntime::Node& node : runtime.m_nodes)
+				if (node.id.v && runtime.m_strings->view(node.id) == id) {
+					const Font* font = runtime.m_text ? runtime.m_text->font(node.font) : nullptr;
+					return font ? font->appliedWeight() : -1.f;
+				}
+			return -1.f;
+		}
+		static Rect bounds(const UiRuntime& runtime, std::string_view id) {
+			for (const UiRuntime::Node& node : runtime.m_nodes)
+				if (node.id.v && runtime.m_strings->view(node.id) == id) return runtime.m_layout.absRect(node.layout);
+			return {};
+		}
+	};
+}
 
 namespace {
 	void recordPress(void* context, std::string_view name) {
@@ -48,6 +69,19 @@ namespace {
 		}
 		return {};
 	}
+	std::string readVariableTestFont() {
+		std::vector<std::filesystem::path> candidates;
+		if (const char* configured = std::getenv("XUI_VARIABLE_FONT")) candidates.emplace_back(configured);
+#ifdef _WIN32
+		candidates.emplace_back("C:/Windows/Fonts/bahnschrift.ttf");
+#endif
+		for (const auto& path : candidates) {
+			if (!std::filesystem::exists(path)) continue;
+			std::ifstream file(path, std::ios::binary);
+			return { std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>() };
+		}
+		return {};
+	}
 
 	TEST(auto_sized_empty_widgets_keep_intrinsic_space_for_content) {
 		constexpr std::string_view xuiSource = R"(
@@ -65,6 +99,7 @@ Window(size: 520x640) {
     Button(label: "")
   }
 }
+
 )";
 		StringInterner strings;
 		auto document = parseXui(xuiSource, "intrinsic-controls.xui", strings);
@@ -106,6 +141,189 @@ Window(size: 520x640) {
 			CHECK(ui.setValue("growing-field", std::string("A much longer field value that must grow intrinsically")));
 			ui.layout(520.f, 640.f);
 			CHECK(ui.bounds({ 9, 1 }).w > growingBefore.w);
+		}
+	}
+
+	TEST(ui_runtime_applies_xss_weight_to_multiple_variable_font_instances) {
+		const std::string fontBytes = readVariableTestFont();
+		if (fontBytes.empty()) { std::cout << "SKIP runtime variable-font smoke: set XUI_VARIABLE_FONT to a variable TrueType font\n"; return; }
+		constexpr std::string_view sample = "The quick brown fox 0123456789";
+		constexpr std::string_view xuiSource = R"(
+Window(size: 900x360) {
+  Column(gap: 8px) {
+    Text("The quick brown fox 0123456789")[id: "w100", class: "w100"]
+    Text("The quick brown fox 0123456789")[id: "w300", class: "w300"]
+    Text("The quick brown fox 0123456789")[id: "w400", class: "w400"]
+    Text("The quick brown fox 0123456789")[id: "w500", class: "w500"]
+    Text("The quick brown fox 0123456789")[id: "w700", class: "w700"]
+    Text("The quick brown fox 0123456789")[id: "w900", class: "w900"]
+  }
+})";
+		constexpr std::string_view xssSource = R"(
+Text { resting: { font-size: 25px, fg: #ffffffff } }
+Text.w100 { resting: { font-weight: 100 } }
+Text.w300 { resting: { font-weight: 300 } }
+Text.w400 { resting: { font-weight: 400 } }
+Text.w500 { resting: { font-weight: 500 } }
+Text.w700 { resting: { font-weight: 700 } }
+Text.w900 { resting: { font-weight: 900 } }
+)";
+		StringInterner strings; UiAssetBundle assets; std::string error;
+		CHECK(loadUiAssets(xuiSource, xssSource, strings, assets, error)); if (!error.empty()) return;
+		const std::array<std::pair<std::string_view, f32>, 6> requestedCases{{
+			std::pair<std::string_view, f32>{ "w100", 100.f }, { "w300", 300.f }, { "w400", 400.f },
+			{ "w500", 500.f }, { "w700", 700.f }, { "w900", 900.f } }};
+		for (const auto& [className, requested] : requestedCases) {
+			MatchInput input;
+			input.type = strings.intern("Text");
+			const StrId classId = strings.intern(className);
+			input.classes = std::span<const StrId>(&classId, 1);
+			PropTable cascaded;
+			assets.styles.resolve(assets.styles.match(input), stateBit(State::Resting), 0, cascaded);
+			CHECK(cascaded.has(PropId::FontWeight));
+			const f32 resolved = cascaded.has(PropId::FontWeight) ? cascaded.get(PropId::FontWeight).atoms[0].num : -1.f;
+			std::cout << "font-weight xss-parse/cascade: class=" << className << " requested=" << requested
+				<< " resolved=" << resolved << '\n';
+			CHECK_NEAR(resolved, requested, 0.01f);
+		}
+		SoftRenderer renderer; CHECK(renderer.init({ 900, 360, 1.f, nullptr, false }));
+		TextSystem text; CHECK(text.initAtlas(&renderer));
+		const FontHandle font = text.loadFont(fontBytes, &error); CHECK(font.valid()); if (!font.valid()) return;
+		CHECK(text.font(font)->hasWeightAxis()); if (!text.font(font)->hasWeightAxis()) return;
+		const auto [axisMin, axisMax] = text.font(font)->weightAxisRange();
+		std::cout << "font-weight axis: tag=wght min=" << axisMin << " default=" << text.font(font)->weightAxisDefault()
+			<< " max=" << axisMax << '\n';
+		UiRuntime ui; CHECK(ui.build(assets.document, assets.styles, strings, text, font, error)); if (!error.empty()) return;
+		CHECK(ui.registerFont("default", 400, font, error)); if (!error.empty()) return;
+		// Reproduce the GLFW demo's regular-variable + separately registered static-bold setup.
+		const std::string staticFontBytes = readTestFont();
+		FontHandle staticFont;
+		if (!staticFontBytes.empty()) {
+			staticFont = text.loadFont(staticFontBytes, &error);
+			if (staticFont.valid() && !text.font(staticFont)->hasWeightAxis()) {
+				CHECK(ui.registerFont("default", 700, staticFont, error));
+				std::cout << "font-weight fallback face registered: weight=700 variable=no\n";
+			}
+		}
+		const std::array<f32, 6> expectedWeights{
+			std::clamp(100.f, axisMin, axisMax), std::clamp(300.f, axisMin, axisMax),
+			std::clamp(400.f, axisMin, axisMax), std::clamp(500.f, axisMin, axisMax),
+			std::clamp(700.f, axisMin, axisMax), std::clamp(900.f, axisMin, axisMax)
+		};
+		const std::array<std::string_view, 6> nodeIds{ "w100", "w300", "w400", "w500", "w700", "w900" };
+		const std::array<f32, 6> widgetRequestedWeights{ 100, 300, 400, 500, 700, 900 };
+		for (std::size_t i = 0; i < nodeIds.size(); ++i) {
+			const f32 actual = UiRuntimeFontWeightProbe::appliedWeight(ui, nodeIds[i]);
+			std::cout << "font-weight cascade/widget/text: requested=" << widgetRequestedWeights[i]
+				<< " node=" << nodeIds[i] << " applied=" << actual << '\n';
+			CHECK_NEAR(actual, expectedWeights[i], 0.01f);
+		}
+		ui.layout(900.f, 360.f);
+		Painter painter; painter.begin(900, 360, 1.f); text.beginFrame(); ui.paint(painter);
+		const DrawList list = painter.finish();
+		renderer.beginFrame({ 900, 360, 1.f, Color{ 0, 0, 0, 1 }, 1 });
+		renderer.submit(list); renderer.endFrame();
+		const Image image = renderer.snapshot();
+		std::unordered_set<u32> glyphs;
+		for (char ch : sample) if (ch != ' ') glyphs.insert(text.font(font)->glyphIndex(static_cast<u8>(ch)));
+		std::array<f32, 6> effectiveWeights{};
+		constexpr std::array<f32, 6> requestedWeights{ 100, 300, 400, 500, 700, 900 };
+		std::size_t uniqueEffectiveWeights = 0;
+		for (std::size_t i = 0; i < requestedWeights.size(); ++i) {
+			effectiveWeights[i] = std::clamp(requestedWeights[i], axisMin, axisMax);
+			bool seen = false;
+			for (std::size_t j = 0; j < i; ++j)
+				if (std::abs(effectiveWeights[i] - effectiveWeights[j]) < 0.01f) seen = true;
+			if (!seen) ++uniqueEffectiveWeights;
+		}
+		CHECK(text.rasterCount() >= glyphs.size() * uniqueEffectiveWeights);
+		u32 glyphCommands = 0;
+		for (u32 i = 0; i < list.nCmds; ++i) if (list.cmds[i].tex.valid()) ++glyphCommands;
+		CHECK(glyphCommands >= 6);
+		std::array<u32, 6> brightPixels{};
+		for (u32 weight = 0; weight < brightPixels.size(); ++weight) {
+			const Rect row = ui.bounds({ weight + 2, 1 });
+			for (u32 y = static_cast<u32>(std::max(0.f, std::floor(row.y))); y < static_cast<u32>(std::min(360.f, std::ceil(row.bottom()))); ++y)
+				for (u32 x = 0; x < image.width; ++x) {
+					const u8* pixel = image.px(x, y);
+					if (pixel[0] > 250 && pixel[1] > 250 && pixel[2] > 250) ++brightPixels[weight];
+				}
+			CHECK(brightPixels[weight] > 0);
+			std::cout << "font-weight rendered row: requested=" << requestedWeights[weight]
+				<< " effective=" << effectiveWeights[weight] << " bright-pixels=" << brightPixels[weight] << '\n';
+		}
+		auto rowsDiffer = [&](u32 first, u32 second) {
+			const Rect a = ui.bounds({ first + 2, 1 }), b = ui.bounds({ second + 2, 1 });
+			const u32 height = static_cast<u32>(std::max(0.f, std::min(a.h, b.h)));
+			for (u32 y = 0; y < height; ++y)
+				for (u32 x = 0; x < image.width; ++x) {
+					const u8* pa = image.px(x, static_cast<u32>(a.y) + y);
+					const u8* pb = image.px(x, static_cast<u32>(b.y) + y);
+					if (pa[0] != pb[0] || pa[1] != pb[1] || pa[2] != pb[2]) return true;
+				}
+			return false;
+		};
+		bool visibleWeightDifference = false;
+		for (std::size_t i = 0; i < effectiveWeights.size(); ++i)
+			for (std::size_t j = i + 1; j < effectiveWeights.size(); ++j) {
+				const bool different = rowsDiffer(static_cast<u32>(i), static_cast<u32>(j));
+				if (std::abs(effectiveWeights[i] - effectiveWeights[j]) > 0.01f) {
+					CHECK(different);
+					if (different) visibleWeightDifference = true;
+				}
+				else CHECK(!different);
+				if (std::abs(effectiveWeights[i] - effectiveWeights[j]) > 0.01f && brightPixels[i] != brightPixels[j])
+					visibleWeightDifference = true;
+			}
+		CHECK(visibleWeightDifference);
+		if (std::abs(effectiveWeights[4] - effectiveWeights[5]) < 0.01f)
+			CHECK_EQ(brightPixels[4], brightPixels[5]);
+		CHECK(brightPixels.front() != brightPixels.back());
+	}
+
+	TEST(ui_runtime_variable_font_weight_cascades_through_text_button_and_textbox) {
+		const std::string fontBytes = readVariableTestFont();
+		if (fontBytes.empty()) { std::cout << "SKIP variable-font cascade: set XUI_VARIABLE_FONT to a variable TrueType font\n"; return; }
+		constexpr std::string_view xuiSource = R"(
+Window(size: 360x320) {
+  Column[class: "parent-weight"] {
+    Text("Inherited from parent")[id: "inherited-text"]
+    Button(label: "Inherited button")[id: "inherited-button", width: 240px, height: 42px]
+    TextBox[id: "inherited-textbox", value: "Inherited editable value", width: 280px, height: 42px]
+    Button(label: "Button weight override")[id: "button-weight", class: "button-weight", width: 240px, height: 42px]
+    TextBox[id: "textbox-weight", class: "textbox-weight", value: "TextBox weight override", width: 280px, height: 42px]
+  }
+})";
+		constexpr std::string_view xssSource = R"(
+Column.parent-weight { resting: { font-weight: 700, font-size: 18px } }
+Button.button-weight { resting: { font-weight: 500, font-size: 16px } }
+TextBox.textbox-weight { resting: { font-weight: 900, font-size: 16px } }
+)";
+		StringInterner strings; UiAssetBundle assets; std::string error;
+		CHECK(loadUiAssets(xuiSource, xssSource, strings, assets, error)); if (!error.empty()) return;
+		SoftRenderer renderer; CHECK(renderer.init({ 360, 320, 1.f, nullptr, false }));
+		TextSystem text; CHECK(text.initAtlas(&renderer));
+		const FontHandle font = text.loadFont(fontBytes, &error); CHECK(font.valid()); if (!font.valid()) return;
+		CHECK(text.font(font)->hasWeightAxis()); if (!text.font(font)->hasWeightAxis()) return;
+		const auto [weightMin, weightMax] = text.font(font)->weightAxisRange();
+		UiRuntime ui; CHECK(ui.build(assets.document, assets.styles, strings, text, font, error)); if (!error.empty()) return;
+		CHECK_NEAR(UiRuntimeFontWeightProbe::appliedWeight(ui, "inherited-text"), std::clamp(700.f, weightMin, weightMax), 0.01f);
+		CHECK_NEAR(UiRuntimeFontWeightProbe::appliedWeight(ui, "inherited-button"), std::clamp(700.f, weightMin, weightMax), 0.01f);
+		CHECK_NEAR(UiRuntimeFontWeightProbe::appliedWeight(ui, "inherited-textbox"), std::clamp(700.f, weightMin, weightMax), 0.01f);
+		CHECK_NEAR(UiRuntimeFontWeightProbe::appliedWeight(ui, "button-weight"), std::clamp(500.f, weightMin, weightMax), 0.01f);
+		CHECK_NEAR(UiRuntimeFontWeightProbe::appliedWeight(ui, "textbox-weight"), std::clamp(900.f, weightMin, weightMax), 0.01f);
+		ui.layout(360.f, 320.f);
+		Painter painter; painter.begin(360, 320, 1.f); text.beginFrame(); ui.paint(painter);
+		const DrawList list = painter.finish();
+		renderer.beginFrame({ 360, 320, 1.f, Color{ 0, 0, 0, 1 }, 1 }); renderer.submit(list); renderer.endFrame();
+		const Image image = renderer.snapshot();
+		CHECK(image.width == 360 && image.height == 320);
+		u32 glyphCommands = 0;
+		for (u32 i = 0; i < list.nCmds; ++i) if (list.cmds[i].tex.valid()) ++glyphCommands;
+		CHECK(glyphCommands >= 3);
+		for (std::string_view id : { "inherited-text", "inherited-button", "inherited-textbox", "button-weight", "textbox-weight" }) {
+			const Rect nodeBounds = UiRuntimeFontWeightProbe::bounds(ui, id);
+			CHECK(nodeBounds.w > 0.f && nodeBounds.h > 0.f);
 		}
 	}
 
@@ -1579,6 +1797,25 @@ TEST(showcase_example_assets_parse_validate_and_build) {
 	ui.layout(1080, 760);
 	CHECK(rectFor("tasks-panel").w > leftPaneBefore.w + 10.f);
 	(void)ui.pointerUp({ gutterPoint.x + 24.f, gutterPoint.y });
+}
+
+TEST(turn_based_game_example_assets_parse_validate_and_build) {
+	const std::string xuiSource = readExample("game/game.xui");
+	const std::string xssSource = readExample("game/game.xss");
+	CHECK(!xuiSource.empty()); CHECK(!xssSource.empty());
+	StringInterner strings; UiAssetBundle assets; std::string error;
+	CHECK(loadUiAssets(xuiSource, xssSource, strings, assets, error, "game.xui", "game.xss"));
+	if (!error.empty()) { std::cerr << error << '\n'; return; }
+	TextSystem text; UiRuntime ui;
+	CHECK(ui.build(assets.document, assets.styles, strings, text, {}, error));
+	if (!error.empty()) { std::cerr << error << '\n'; return; }
+	ui.layout(1000, 720);
+	for (const std::string_view id : { "game-pages", "player-health", "enemy-health", "difficulty",
+		"strike-power", "equipment", "rune-blade", "iron-shield", "combat-hints", "battle-log" }) {
+		CHECK(ui.value(id).has_value());
+	}
+	CHECK_EQ(std::get<u32>(*ui.value("game-pages")), 0u);
+	CHECK(ui.bounds(ui.root()).w > 0.f);
 }
 
 TEST(ui_runtime_scrollview_wheel_keyboard_programmatic_and_nested_scroll) {

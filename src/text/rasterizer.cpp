@@ -16,7 +16,8 @@ namespace xui {
 		scratch.assign(std::size_t(w) * h, 0.f);
 		f32* acc = scratch.data();
 
-		std::vector<f32> xs;   // crossings at one sample line (reused)
+		struct Crossing { f32 x; i32 winding; };
+		std::vector<Crossing> crossings; // crossings at one sample line (reused)
 		// Build a flat edge list: consecutive points within each contour, plus the closing segment.
 		struct Edge { f32 x0, y0, x1, y1; };
 		std::vector<Edge> edges;
@@ -39,28 +40,41 @@ namespace xui {
 			for (int sub = 0; sub < kSubY; ++sub) {
 				f32 sample = f32(py) + (f32(sub) + 0.5f) / f32(kSubY);
 				if (sample >= yMax) break;
-				xs.clear();
+				crossings.clear();
 				for (const Edge& e : edges) {
 					f32 y0 = e.y0, y1 = e.y1;
 					if ((sample < y0 && sample < y1) || (sample >= y0 && sample >= y1)) continue;
 					f32 t = (sample - y0) / (y1 - y0);
 					f32 x = e.x0 + t * (e.x1 - e.x0);
-					xs.push_back(x);
+					crossings.push_back({ x, y1 > y0 ? 1 : -1 });
 				}
-				if (xs.size() < 2) continue;
-				std::sort(xs.begin(), xs.end());
-				// Nonzero winding for simple outlines == fill between crossing pairs (contours are closed
-				// and non-self-crossing in practice; overlaps still composite sanely for UI glyphs).
-				for (std::size_t k = 0; k + 1 < xs.size(); k += 2) {
-					f32 xa = xs[k], xb = xs[k + 1];
-					if (xb <= 0 || xa >= f32(w)) continue;
-					xa = std::max(xa, 0.f);
-					xb = std::min(xb, f32(w));
-					i32 ix0 = i32(xa), ix1 = i32(std::ceil(xb) - 1e-6f);
-					for (i32 x = ix0; x <= ix1 && x < i32(w); ++x) {
-						f32 covL = std::min(f32(x + 1), xb) - std::max(f32(x), xa);   // overlap with pixel x
-						if (covL > 0) row[x] += covL / f32(kSubY);
+				if (crossings.size() < 2) continue;
+				std::sort(crossings.begin(), crossings.end(), [](const Crossing& a, const Crossing& b) { return a.x < b.x; });
+				// TrueType outlines use the non-zero winding rule. Pairing crossings (even-odd fill)
+				// incorrectly cuts holes into overlapping contours in variable and composite glyphs.
+				i32 winding = 0;
+				f32 previousX = crossings.front().x;
+				for (std::size_t k = 0; k < crossings.size();) {
+					const f32 x = crossings[k].x;
+					if (winding != 0) {
+						f32 xa = previousX, xb = x;
+						if (xb > 0 && xa < f32(w)) {
+							xa = std::max(xa, 0.f);
+							xb = std::min(xb, f32(w));
+							i32 ix0 = i32(xa), ix1 = i32(std::ceil(xb) - 1e-6f);
+							for (i32 pixel = ix0; pixel <= ix1 && pixel < i32(w); ++pixel) {
+								f32 covL = std::min(f32(pixel + 1), xb) - std::max(f32(pixel), xa);
+								if (covL > 0) row[pixel] += covL / f32(kSubY);
+							}
+						}
 					}
+					std::size_t next = k;
+					while (next < crossings.size() && std::abs(crossings[next].x - x) <= 1e-5f) {
+						winding += crossings[next].winding;
+						++next;
+					}
+					previousX = x;
+					k = next;
 				}
 			}
 		}

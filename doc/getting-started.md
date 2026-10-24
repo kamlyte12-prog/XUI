@@ -4,7 +4,24 @@ This guide creates a small app with one `.xui` layout and one `.xss` stylesheet.
 
 ## Build Xui
 
-Xui uses CMake 3.25+ and a C++23 compiler. The bundled GLFW example requires OpenGL 2.1 support. On Linux, install OpenGL, X11, and Wayland development packages (for Ubuntu: `libgl-dev xorg-dev libwayland-dev libxkbcommon-dev`). The GLFW source is bundled; macOS uses its system Cocoa/OpenGL frameworks.
+Xui uses CMake 3.25+, a C++23 compiler, and a C compiler for bundled FreeType and HarfBuzz. Their source is included under `lib/` and built as static dependencies by CMake; no system FreeType or HarfBuzz package is used. The GLFW source is also bundled. The GLFW example needs OpenGL development files and the platform window-system dependencies. On Ubuntu, install `libgl-dev xorg-dev libwayland-dev libxkbcommon-dev`; macOS uses its system Cocoa/OpenGL frameworks.
+
+Keep the bundled FreeType source in this exact directory layout:
+
+```text
+lib/
+├── freetype-2.15.0/
+│   ├── CMakeLists.txt
+│   ├── include/freetype/freetype.h
+│   └── src/
+└── harfbuzz-15.0.0/
+    ├── CMakeLists.txt
+    └── src/hb.h
+```
+
+Xui disables FreeType's optional zlib, bzip2, PNG, HarfBuzz, Brotli, and HVF integrations. Its built-in inflater remains available without an external zlib library. HarfBuzz is a separate required dependency: the text layer uses it for OpenType shaping and GPOS positioning. FreeType handles variable `wght` coordinates and TrueType `glyf` outlines. Both vendored source trees are built directly, so a system HarfBuzz cannot take precedence. Platform builds still need their normal compiler and, for GLFW, graphics/window-system SDKs.
+
+HarfBuzz identifies Meson as its primary build system and prints an advisory when configured through its community-maintained CMake files. Xui currently uses that CMake build; the Windows Release build and tests are verified, while Linux/macOS builds still need verification.
 
 Configure, build, and test from a checkout:
 
@@ -71,7 +88,7 @@ The file paths are interpreted by the process working directory. Bundle or locat
 
 ## Fonts
 
-The built-in loader supports TTF and OTF containers that use TrueType `glyf` outlines. Load each family/weight before `attach()`; multiple loaded files are registered, and a requested missing weight uses the nearest registered face. The framework does not synthesize bold or select system fallback fonts. CFF/CFF2-only OTF outlines, variable font deltas, emoji color tables, complex script shaping, ligatures, and bidi layout are not supported. See [font, transform, cursor, and animation details](animations-fonts-transforms.md).
+The loader supports TTF and OTF containers that use TrueType `glyf` outlines. A variable font with a `wght` axis can be loaded once; numeric `.xss font-weight` values create cached axis instances, clamped to the axis range. Other variation axes use their font defaults. For static fonts, or fonts without a `wght` axis, the runtime selects the nearest registered face. It does not synthesize bold or select system fallback fonts. Text runs use HarfBuzz for left-to-right OpenType positioning; ligature substitutions stay disabled so editable text retains a stable character-to-glyph relationship. CFF/CFF2-only OTF outlines, emoji color tables, right-to-left/bidirectional layout, and complex-script editing are not supported. See [font, transform, cursor, and animation details](animations-fonts-transforms.md).
 
 To customize the window, construct `Xui` with `XuiOptions`:
 

@@ -3,8 +3,23 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <cstdio>
+#include <cstdlib>
+#include <unordered_set>
 
 namespace xui {
+	namespace {
+		bool traceGlyphRequest(const Font& font, u32 glyph, u16 size) {
+			static const bool enabled = std::getenv("XUI_TRACE_FONT_WEIGHT") != nullptr;
+			if (!enabled) return false;
+			static std::unordered_set<u64> seen;
+			const u64 key = (u64(font.cacheId()) << 32) ^ (u64(glyph) << 12) ^ size;
+			if (!seen.insert(key).second) return false;
+			std::fprintf(stderr, "font-weight glyph-atlas request: font-cache=%u glyph=%u size=%u applied=%.3f atlas-key=(%u,%u,%u)\n",
+				font.cacheId(), glyph, size, static_cast<double>(font.appliedWeight()), font.cacheId(), glyph, size);
+			return true;
+		}
+	}
 
 	bool GlyphAtlas::init(Renderer* r, u32 initialSize) {
 		shutdown();
@@ -141,7 +156,8 @@ namespace xui {
 
 	const AtlasGlyph& GlyphAtlas::glyph(const Font& font, u32 glyphIndex, u16 sizePx) {
 		if (!sizePx) sizePx = 1;
-		GlyphKey key{ glyphIndex, sizePx, 0 };
+		(void)traceGlyphRequest(font, glyphIndex, sizePx);
+		GlyphKey key{ font.cacheId(), glyphIndex, sizePx, 0 };
 		u32 slot = findSlot(key);
 		if (slot != kNone) {
 			Entry& e = m_entries[slot];

@@ -1,16 +1,15 @@
 #pragma once
-/// @file font.hpp  Hand-written TrueType/OpenType parser: sfnt table directory, cmap (4+12), head, hhea,
-/// hmtx, maxp, loca, glyf (quadratic outlines incl. composite glyphs), kern (format 0), OS/2, name.
-///
-/// Scope: outline fonts with `glyf` outlines (TTF and OTF-wrapped TTF). CFF (`OTTO` with CFF table) and
-/// variable-font deltas are not rasterized: cmap/hmtx metrics still work, glyphs render as empty boxes.
-/// No third-party code — the whole file is self-contained, like the rest of the framework.
+/// @file font.hpp  Compact sfnt parser for cmap, metrics, names, legacy kern, and static `glyf` outlines.
+/// HarfBuzz shapes OpenType runs; FreeType evaluates variable `glyf` outlines and metrics at a selected
+/// axis instance. CFF/CFF2 outlines are outside the current font pipeline.
 #include <xui/core/math.hpp>
 #include <xui/core/types.hpp>
 #include <cstdint>
 #include <cstring>
 #include <string>
 #include <string_view>
+#include <memory>
+#include <utility>
 #include <vector>
 
 namespace xui {
@@ -62,7 +61,12 @@ namespace xui {
 
 	class Font {
 	public:
-		Font() = default;
+		Font();
+		~Font();
+		Font(const Font&) = delete;
+		Font& operator=(const Font&) = delete;
+		Font(Font&&) = delete;
+		Font& operator=(Font&&) = delete;
 		/// Parse a TTF/OTF buffer (copied internally; the caller may free it after load).
 		bool load(std::string_view data, std::string* error = nullptr);
 		bool loaded() const { return !m_data.empty(); }
@@ -86,8 +90,24 @@ namespace xui {
 		Rect bounds(u32 glyphIndex) const;
 
 		const std::string& family() const { return m_metrics.family; }
+		bool hasWeightAxis() const;
+		std::pair<f32, f32> weightAxisRange() const;
+		/// Default coordinate of the `wght` axis in CSS weight units.
+		f32 weightAxisDefault() const { return m_weightAxisDefault; }
+		/// Axis coordinate last accepted by FreeType, in user-facing CSS weight units.
+		f32 appliedWeight() const { return m_appliedWeight; }
+		u32 cacheId() const { return m_cacheId; }
 
 	private:
+		friend class TextSystem;
+		struct ShapingState;
+		bool setWeightAxis(f32 weight, std::string* error = nullptr);
+		struct ShapedGlyph {
+			u32 glyph = 0;
+			f32 xAdvance = 0, xOffset = 0, yOffset = 0; // font units; y offset is positive upward
+			u32 cluster = 0;                              // UTF-8 byte index in the shaped input
+		};
+		bool shapeText(std::string_view utf8, std::vector<ShapedGlyph>& glyphs) const;
 		u32 tableOffset(std::string_view tag) const;
 		u16 u16At(u32 off) const { u16 v; std::memcpy(&v, m_data.data() + off, 2); return (u16)(v << 8 | v >> 8); }
 		i16 i16At(u32 off) const { return (i16)u16At(off); }
@@ -109,6 +129,12 @@ namespace xui {
 		u32 m_numGlyphs = 0, m_numHMetrics = 0;
 		bool m_longLoca = false, m_cff = false;
 		std::vector<std::pair<u64, u32>> m_kernPairs;   // key = (left<<32)|right, sorted; kern format 0
+		struct VariationState;
+		std::unique_ptr<VariationState> m_variation;
+		std::unique_ptr<ShapingState> m_shaping;
+		f32 m_weightAxisDefault = 400.f;
+		f32 m_appliedWeight = 400.f;
+		u32 m_cacheId = 0;
 	};
 
 } // namespace xui

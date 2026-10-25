@@ -224,6 +224,96 @@ TEST(xui_loader_resolves_relative_imports_and_components) {
 		CHECK(validate(*r, XuiSchema::withCoreWidgets(), in).has_value());
 	}
 }
+TEST(xui_component_expansion_substitutes_props_slots_and_instance_ids) {
+	MemFs fs; fs.files = {
+		{"ui/main.xui", R"(@import "components/card.xui"
+Window(size: 420x240)[id: "root", class: "root-window"] {
+  Card(title: "Welcome", note: "Optional")[id: "welcome", class: "featured"] {
+    Text("Caller body")[id: "body"]
+    Text("Actions")[slot: "footer", id: "actions"]
+  }
+})"},
+		{"ui/components/card.xui", R"(component Card(title, note: "Default note") {
+Panel {
+  Text(title)[id: "title", class: "card-title", part: "title"]
+  Text(note)[id: "note"]
+  Slot()
+  Slot(name: "footer") { Text("Fallback footer") }
+}
+})"} };
+	StringInterner in;
+	auto program = loadXui("ui/main.xui", readMem, &fs, in);
+	CHECK(program.has_value()); if (!program) return;
+	auto valid = validate(*program, XuiSchema::withCoreWidgets(), in);
+	CHECK(valid.has_value()); if (!valid) return;
+	Document expanded; std::string error;
+	CHECK(expandXuiComponents(*program, in, expanded, error));
+	if (!error.empty()) std::printf("  expansion error: %s\n", error.c_str());
+	if (!error.empty()) return;
+	CHECK_EQ(expanded.roots.size(), 1u);
+	CHECK_EQ(expanded.nodes.size(), 6u); // Window, Panel, title, note, caller body, named footer.
+	CHECK_EQ(expanded.childrenOf(expanded.nodes[expanded.roots[0]]).size(), 1u);
+	Program expandedProgram; expandedProgram.files.push_back(std::move(expanded));
+	CHECK(validate(expandedProgram, XuiSchema::withCoreWidgets(), in).has_value());
+	const Document& result = expandedProgram.files.front();
+	bool hasRootId = false, hasWelcomeId = false, hasNamespacedTitle = false, hasBody = false, hasActions = false, hasFallback = false;
+	bool hasComponentTitlePart = false, strippedPartAttribute = true;
+	for (const XNode& node : result.nodes) {
+		for (const XProp& prop : result.propsOf(node)) {
+			const std::string_view propName = in.view(prop.name);
+			if (propName == "part") strippedPartAttribute = false;
+			if (propName == "class" && prop.expr < result.exprs.size() && in.view(result.exprs[prop.expr].name).find(detail::componentPartMarker("Card", "title")) != std::string_view::npos)
+				hasComponentTitlePart = true;
+			if (propName == "id") {
+				const std::string_view id = in.view(result.exprs[prop.expr].name);
+				hasRootId |= id == "root";
+				hasWelcomeId |= id == "welcome";
+				hasNamespacedTitle |= id == "welcome.title";
+				hasBody |= id == "body";
+				hasActions |= id == "actions";
+			}
+		}
+		for (const XArg& arg : result.argsOf(node)) {
+			if (arg.expr < result.exprs.size() && result.exprs[arg.expr].kind == XExprKind::String) {
+				const std::string_view text = in.view(result.exprs[arg.expr].name);
+				hasFallback |= text == "Fallback footer";
+			}
+		}
+	}
+	CHECK(hasRootId && hasWelcomeId && hasNamespacedTitle && hasBody && hasActions);
+	CHECK(hasComponentTitlePart && strippedPartAttribute);
+	CHECK(!hasFallback); // a provided named slot replaces its fallback content.
+}
+TEST(xui_component_arguments_reject_positional_after_named) {
+	MemFs fs; fs.files = {
+		{"main.xui", "@import \"card.xui\"\nWindow { Card(title: \"Hello\", \"Subtitle\") }"},
+		{"card.xui", "component Card(title, subtitle) { Panel }"}
+	};
+	StringInterner in; auto program = loadXui("main.xui", readMem, &fs, in);
+	CHECK(program.has_value()); if (!program) return;
+	auto valid = validate(*program, XuiSchema::withCoreWidgets(), in);
+	CHECK(!valid.has_value());
+	if (!valid) CHECK(has(valid.error().format(), "positional arguments cannot follow named arguments"));
+}
+TEST(xui_component_part_is_rejected_outside_component_definition) {
+	MemFs fs; fs.files = {
+		{"main.xui", "@import \"card.xui\"\nWindow { Card[part: \"title\"] }"},
+		{"card.xui", "component Card { Panel }"}
+	};
+	StringInterner in; auto program = loadXui("main.xui", readMem, &fs, in);
+	CHECK(program.has_value()); if (!program) return;
+	auto valid = validate(*program, XuiSchema::withCoreWidgets(), in);
+	CHECK(!valid.has_value());
+	if (!valid) CHECK(has(valid.error().format(), "part` is only valid on widgets inside a component definition"));
+}
+TEST(xui_component_expansion_rejects_recursive_components) {
+	MemFs fs; fs.files = { {"main.xui", "@import \"loop.xui\"\nWindow { Loop }"}, {"loop.xui", "component Loop { Panel { Loop } }"} };
+	StringInterner in; auto program = loadXui("main.xui", readMem, &fs, in);
+	CHECK(program.has_value()); if (!program) return;
+	Document expanded; std::string error;
+	CHECK(!expandXuiComponents(*program, in, expanded, error));
+	CHECK(has(error, "recursive component expansion"));
+}
 TEST(xui_loader_detects_cycles_missing_files_and_duplicates) {
 	StringInterner in;
 	{

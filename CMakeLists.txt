@@ -145,7 +145,7 @@ target_link_libraries(xui_core PRIVATE xui_warnings)
 # --- xui_assets: .xss (and, from M3, .xui) parsers and compilers. Depends only on xui_core. ---
 add_library(xui_assets STATIC
   src/style/style_types.cpp src/style/style_sheet.cpp src/style/xss_parser.cpp src/style/xss_compiler.cpp
-  src/lang/xui_parser.cpp src/lang/xui_loader.cpp src/lang/xui_schema.cpp)
+  src/lang/xui_parser.cpp src/lang/xui_loader.cpp src/lang/xui_schema.cpp src/lang/xui_expand.cpp)
 target_include_directories(xui_assets PRIVATE src/style)
 target_link_libraries(xui_assets PUBLIC xui_core PRIVATE xui_warnings)
 

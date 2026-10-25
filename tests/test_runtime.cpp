@@ -42,6 +42,14 @@ namespace xui {
 }
 
 namespace {
+	struct ComponentFs { std::unordered_map<std::string, std::string> files; };
+	std::optional<std::string> readComponentFile(void* context, std::string_view path) {
+		auto& files = static_cast<ComponentFs*>(context)->files;
+		auto it = files.find(std::string(path));
+		if (it == files.end()) return std::nullopt;
+		return it->second;
+	}
+
 	void recordPress(void* context, std::string_view name) {
 		if (name == "onSubmit") ++*static_cast<u32*>(context);
 		if (name == "onChange") ++static_cast<u32*>(context)[1];
@@ -81,6 +89,46 @@ namespace {
 			return { std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>() };
 		}
 		return {};
+	}
+
+	TEST(ui_runtime_expands_imported_components_and_routes_component_events) {
+		ComponentFs fs; fs.files = {
+			{"main.xui", R"(@import "card.xui"
+Window(size: 320x200) {
+  Card("Hello", onSubmit)[id: "card"] { Text("Caller content")[id: "content"] }
+})"},
+			{"card.xui", R"(component Card(title, action) {
+Panel {
+  Text(title)[id: "title"]
+  Button(label: "Activate")[id: "button", press: action]
+  Slot()
+}
+})"} };
+		StringInterner strings;
+		auto program = loadXui("main.xui", readComponentFile, &fs, strings);
+		CHECK(program.has_value()); if (!program) return;
+		auto validation = validate(*program, XuiSchema::withCoreWidgets(), strings);
+		CHECK(validation.has_value());
+		if (!validation) { std::printf("  component validation error: %s\n", validation.error().format().c_str()); return; }
+		auto styles = compileXss("Panel { pad: 8px } Button { min-width: 90px }", "components.xss", strings);
+		CHECK(styles.has_value()); if (!styles) return;
+		TextSystem text; UiRuntime ui; std::string error;
+		CHECK(ui.build(*program, *styles, strings, text, {}, error));
+		if (!error.empty()) std::printf("  component runtime error: %s\n", error.c_str());
+		if (!error.empty()) return;
+		CHECK_EQ(ui.nodeCount(), 5u);
+		CHECK(ui.controlText("card.title") == "Hello");
+		CHECK(ui.controlText("content") == "Caller content");
+		ui.layout(320.f, 200.f);
+		const Rect button = UiRuntimeFontWeightProbe::bounds(ui, "card.button");
+		CHECK(button.w >= 90.f && button.h > 0.f);
+		u32 presses = 0;
+		ui.setEventHandler([](void* context, std::string_view name) {
+			if (name == "onSubmit") ++*static_cast<u32*>(context);
+		}, &presses);
+		const Vec2 center{ button.x + button.w * 0.5f, button.y + button.h * 0.5f };
+		CHECK(ui.pointerDown(center)); CHECK(ui.pointerUp(center));
+		CHECK_EQ(presses, 1u);
 	}
 
 	TEST(auto_sized_empty_widgets_keep_intrinsic_space_for_content) {
@@ -531,6 +579,26 @@ DockPreview { resting: { bg: #5386d866, border: 1px solid #69a7ff, radius: 4px }
 		if (!file) return {};
 		return { std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>() };
 	}
+}
+
+TEST(component_card_example_imports_styles_and_builds) {
+	ComponentFs fs;
+	fs.files.emplace("examples/composites/main.xui", readExample("composites/main.xui"));
+	fs.files.emplace("examples/composites/card.xui", readExample("composites/card.xui"));
+	StringInterner strings;
+	auto program = loadXui("examples/composites/main.xui", readComponentFile, &fs, strings);
+	CHECK(program.has_value()); if (!program) return;
+	CHECK(validate(*program, XuiSchema::withCoreWidgets(), strings).has_value());
+	auto styles = compileXss(readExample("composites/main.xss"), "main.xss", strings);
+	CHECK(styles.has_value()); if (!styles) { std::printf("  Card example style error: %s\n", styles.error().format().c_str()); return; }
+	TextSystem text; UiRuntime ui; std::string error;
+	CHECK(ui.build(*program, *styles, strings, text, {}, error));
+	if (!error.empty()) std::printf("  Card example runtime error: %s\n", error.c_str());
+	if (!error.empty()) return;
+	CHECK(ui.controlText("welcome.title") == "Reusable card");
+	CHECK(ui.controlText("welcome.subtitle") == "A component expands into ordinary widgets");
+	CHECK(ui.controlText("body-copy") == "This body comes from the calling document.");
+	CHECK_EQ(ui.nodeCount(), 9u);
 }
 
 TEST(ui_runtime_pointer_stacking_activates_only_the_front_widget) {

@@ -4,8 +4,16 @@
 #include <xui/core/small_vector.hpp>
 #include <array>
 #include <span>
+#include <string>
 #include <string_view>
 namespace xui {
+	/// Internal class name used to carry a component part through the existing class matcher.
+	/// Authored XSS uses the readable `Component::part` spelling instead.
+	namespace detail {
+		inline std::string componentPartMarker(std::string_view component, std::string_view part) {
+			return "__xui_component_part_" + std::string(component) + "__" + std::string(part);
+		}
+	}
 
 	enum class Unit : u8 { None, Px, Percent, Em, Rem, Vw, Vh, Dp, Sp, Ms, S, Deg };
 	enum class AtomKind : u8 { None, Number, Color, Ident, String, Curve, Func, Slot };

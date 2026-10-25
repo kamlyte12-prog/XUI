@@ -1,0 +1,9 @@
+// Reusable composition: one Panel root with a default body slot and optional named footer.
+component Card(title, subtitle: "") {
+  Panel[id: "surface", class: "card-surface", part: "surface"] {
+    Text(title)[id: "title", part: "title"]
+    Text(subtitle)[id: "subtitle", class: "card-subtitle"]
+    Column(class: "card-body") { Slot() }
+    Row(class: "card-footer") { Slot(name: "footer") { Text("No footer actions") } }
+  }
+}

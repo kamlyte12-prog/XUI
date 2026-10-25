@@ -109,6 +109,10 @@ namespace xui {
 	/// Load @p entryPath and everything it `@import`s (paths resolve relative to the importing file).
 	/// Detects import cycles, missing files and duplicate component names.
 	Result<Program, XuiError> loadXui(std::string_view entryPath, ReadFileFn read, void* ctx, StringInterner& in);
+	/// Expand declared components into ordinary widget nodes. Only literal arguments and handler names
+	/// are substituted; arbitrary runtime expressions are not evaluated. Slot children are cloned into
+	/// their named insertion points, and IDs authored inside a component are namespaced by its instance.
+	bool expandXuiComponents(const Program& program, StringInterner& in, Document& out, std::string& error);
 
 	// ---- schema validation ---------------------------------------------------------------------------
 	/// Which widget types exist and which constructor params / properties they accept. Widgets register

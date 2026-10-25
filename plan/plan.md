@@ -10,6 +10,7 @@ This is the canonical readiness plan. The detailed chronology and rationale for 
 - Initial native window title and size resolve field-by-field from explicit `XuiOptions`, then `.xui Window(title, size)`, then root `.xss` `window-title`/`size`, then facade defaults. Windows Release tests cover each layer, single-field overrides, and explicit default-valued overrides.
 - `compileXss()` supplies a Fluent 2-inspired light baseline across the supported runtime widget catalog; project-authored rules continue through the ordinary cascade and override it. The compiler and runtime also support paint-only `outline` / `outline-offset` focus rings. Checklist containers expose and accept a typed list of selected child IDs.
 - `.xui` parsing/schema validation and `.xss` parsing/compilation are separate from runtime rendering. Tests exercise selectors, tokens, state resolution, diagnostics, layout constraints, draw-list rendering, text, and runtime event handling.
+- Imported components now expand before normal runtime construction. Literal parameters/defaults, named and default slots with fallback children, handler-name parameters, caller classes, namespaced internal IDs, and `Component::part` selectors use the ordinary widget/style/layout/event paths. Positional arguments after named arguments are rejected with source diagnostics. Recursive expansion returns an error. A runnable `xui_component_demo` target loads the Card assets through `xui::Xui`. The current scope is documented in [`components.md`](../docs/components.md) and covered by headless parser/expansion/runtime tests.
 - The retained runtime materializes the controls and containers listed as supported in the [widget reference](../docs/widgets.md), including text input, tabs, dropdown/color picker, split panels, ScrollView, and value retrieval. The GLFW showcase exercises that supported set.
 - Layout supports retained flow, Split, ScrollView, absolute child insets, percentage sizing, explicit min/max constraints on leaves and containers, measured text wrapping, viewport clipping, and nested scroll routing. Runtime behavior is covered by automated tests.
 - Text layout now uses bundled HarfBuzz 15.0.0 for left-to-right OpenType shaping and GPOS positioning; variable `wght` is applied to both HarfBuzz and FreeType instances. The layout cache retains shaped advances and offsets. Ligature substitutions remain off for editable-text caret stability.
@@ -38,7 +39,7 @@ This is the canonical readiness plan. The detailed chronology and rationale for 
 
 ### What does not work
 
-- Parser/schema recognition is broader than runtime support. Bindings, dynamic expressions, conditional/repeated nodes, component expansion, and the unsupported objects listed in the [widget reference](../docs/widgets.md) do not render as runtime features.
+- Parser/schema recognition is broader than runtime support. Bindings, arbitrary dynamic expressions, conditional/repeated nodes, and the unsupported objects listed in the [widget reference](../docs/widgets.md) do not render as runtime features. Components currently accept only literal parameters and handler names; runtime binding expressions, per-instance part selectors, and selector combinators are not implemented.
 - There is no separate native Win32 backend target in this checkout. `xui_hello` is also GLFW/OpenGL; it does not verify Win32-specific behavior.
 - There is no installed/exported CMake package target.
 
@@ -148,5 +149,6 @@ Effort estimates are relative, not calendar commitments. Do not start P2/P3 feat
 - Which missing runtime widgets should follow Grid/Stack, and are menus/dialogs or virtualized data views the higher priority?
 - What accessibility baseline, IME behavior, and text-shaping languages are required before professional release?
 - Image decoder/rendering platform scope remains partly open: PNG has a decode test and SVG has a raster test; JPEG/BMP/TGA lack dedicated fixtures, and Linux/macOS builds have not run in this checkout.
+- Before exposing `Grid` through `.xui`, confirm the authored track-list and child-placement syntax. The low-level solver already supports `px`/`auto`/`fr` tracks, up to eight columns, row-major auto placement, explicit zero-based cells, and spans; explicit-cell overlap is currently allowed.
 - What compatibility/versioning policy and package-distribution form should the first stable release use?
 - Should dedicated Menu/MenuItem controls use an in-client popup system, and what keyboard/accessibility behavior is required? The current `MenuBar` is a regular client-area container; the custom draggable top menu (`TitleBar` + `platformTopMenu`) now covers window-level chrome, but a command-menu model remains open.

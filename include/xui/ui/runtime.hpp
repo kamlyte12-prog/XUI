@@ -76,6 +76,9 @@ namespace xui {
 		/// component expansion, and property-filter selectors are not evaluated by this first runtime.
 		bool build(const Document& document, StyleSheet& styles, StringInterner& strings,
 			TextSystem& text, FontHandle font, std::string& error);
+		/// Build from an import-loaded program after expanding its declared components.
+		bool build(const Program& program, StyleSheet& styles, StringInterner& strings,
+			TextSystem& text, FontHandle font, std::string& error);
 		/// Attach a font after a renderer-backed glyph atlas is ready.
 		bool setFont(FontHandle font, std::string& error);
 		/// Register a loaded font face for the `.xss` font-family and font-weight properties.

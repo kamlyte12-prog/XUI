@@ -217,7 +217,7 @@ namespace xui {
 		}
 
 		const FontHandle defaultFont = m_fonts.empty() ? FontHandle{} : m_fonts.front().handle;
-		if (!m_runtime.build(m_assets.document, m_assets.styles, m_strings, m_text, defaultFont, m_error)) {
+		if (!m_runtime.build(m_program, m_assets.styles, m_strings, m_text, defaultFont, m_error)) {
 			shutdown(); return false;
 		}
 		m_runtime.setWindowMetadata(initial.title, initial.width, initial.height);

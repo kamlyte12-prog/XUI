@@ -9,6 +9,7 @@ Use the focused guide for the topic you need. `.xui` defines structure and layou
 | [`README.md`](README.md) | This index and current documentation scope. |
 | [`getting-started.md`](getting-started.md) | Prerequisites, build/link/setup, minimal app, assets/fonts, configuration, and custom backends. |
 | [`xui-guide.md`](xui-guide.md) | `.xui` syntax, layout, sizing, structure, events, imports, and runtime support. |
+| [`components.md`](components.md) | Imported component composition, parameters, slots, ID scoping, styling, and limits. |
 | [`xss-guide.md`](xss-guide.md) | `.xss` rule syntax, selectors, cascade, themes, state styles, and layout/style boundaries. |
 | [`widgets.md`](widgets.md) | Runtime widget behavior, authored properties, values/events, and unsupported objects. |
 | [`docking.md`](docking.md) | DockHost/DockPanel authoring, recursive splits, tabs, floating overlays, events, values, and styles. |
@@ -23,5 +24,7 @@ The root [`README.md`](../README.md) is a short project entry point. Agent rules
 ## Examples and implementation scope
 
 The [showcase](../examples/showcase.xui) and [stylesheet](../examples/showcase.xss) are the default interactive reference. The [Tetris example](../examples/game/README.md) demonstrates a timed application update through the facade, with its board and controls authored as widgets. Focused [cross-platform](../tests/fixtures/cross_platform.xui) and [controls](../tests/fixtures/controls.xui) fixtures are shared by tests and these guides. GLFW backend implementations live in [`backends/glfw`](../backends/glfw/glfw_platform.hpp) and [`backends/opengl`](../backends/opengl/gl_drawlist_renderer.hpp); the showcase application remains in [`examples/glfw_demo.cpp`](../examples/glfw_demo.cpp).
+
+The [Card composition sample](../examples/composites/README.md) has its own `xui_component_demo` GLFW target so its imports, parts, slots, and forwarded action can be tried as a runnable app.
 
 Parser/schema acceptance does not guarantee runtime support. The [widget reference](widgets.md) labels objects that are not materialized by `UiRuntime`; only runtime-backed objects should be treated as interactive controls.

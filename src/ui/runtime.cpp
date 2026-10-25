@@ -452,6 +452,13 @@ namespace xui {
 		return false;
 	}
 
+	bool UiRuntime::build(const Program& program, StyleSheet& styles, StringInterner& strings,
+		TextSystem& text, FontHandle font, std::string& error) {
+		Document expanded;
+		if (!expandXuiComponents(program, strings, expanded, error)) return false;
+		return build(expanded, styles, strings, text, font, error);
+	}
+
 	bool UiRuntime::build(const Document& document, StyleSheet& styles, StringInterner& strings,
 		TextSystem& text, FontHandle font, std::string& error) {
 		if (m_root.valid() || !m_nodes.empty()) { error = "this UiRuntime already has a document"; return false; }

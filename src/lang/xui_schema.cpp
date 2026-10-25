@@ -14,7 +14,7 @@ namespace xui {
 		std::sort(v.begin(), v.end()); return v;
 	}
 	const std::vector<std::string_view>& XuiSchema::genericProps() {
-		static const std::vector<std::string_view> g = { "id", "class", "key", "slot", "grow", "shrink", "visible", "disabled", "tooltip",
+		static const std::vector<std::string_view> g = { "id", "class", "key", "slot", "part", "grow", "shrink", "visible", "disabled", "tooltip",
 			"tooltipShowDelay", "tooltipHideDelay", "tooltipTrigger", "tooltipHideOnClick", "tooltipDisabled",
 			"align", "justify", "position", "left", "top", "right", "bottom", "pad", "margin", "size", "minSize", "maxSize", "width", "height",
 			"minWidth", "maxWidth", "minHeight", "maxHeight", "opacity" };
@@ -78,6 +78,7 @@ namespace xui {
 
 		struct Validator {
 			const Program& prog; const XuiSchema& schema; const StringInterner& in; const Document& doc; DiagnosticList& dl;
+			const std::vector<u8>& componentBody;
 
 			void unknownName(std::string_view what, std::string_view name, u32 off, std::string_view onType, const std::vector<std::string_view>& valid) {
 				std::string s = didYouMean(name, valid);
@@ -85,7 +86,8 @@ namespace xui {
 				dl.error(off, u32(name.size()), "unknown " + std::string(what) + " '" + std::string(name) + "' on " + std::string(onType), hint);
 			}
 
-			void node(const XNode& n) {
+			void node(u32 nodeIndex) {
+				const XNode& n = doc.nodes[nodeIndex];
 				std::string_view type = in.view(n.type);
 				if (type == "Slot") {
 					for (const XArg& a : doc.argsOf(n))
@@ -109,13 +111,14 @@ namespace xui {
 				if (w) for (const auto& p : w->props) valid.push_back(p);
 				for (auto g : XuiSchema::genericProps()) valid.push_back(g);
 
-				std::vector<std::string_view> seen; std::size_t pos = 0; bool tooMany = false;
+				std::vector<std::string_view> seen; std::size_t pos = 0; bool tooMany = false, sawNamedArgument = false;
 				auto mark = [&](std::string_view name, u32 off, u32 len) {
 					if (contains(seen, name)) dl.error(off, len, "'" + std::string(name) + "' is given more than once");
 					else seen.push_back(name);
 					};
 				for (const XArg& a : doc.argsOf(n)) {
 					if (a.name.v == 0) {
+						if (sawNamedArgument) dl.error(a.off, a.len, "positional arguments cannot follow named arguments");
 						if (pos >= ctor.size()) {
 							if (!tooMany) dl.error(a.off, a.len, std::string(type) + " takes " + std::to_string(ctor.size()) + " positional argument(s)", "pass extra values by name, e.g. Name(prop: value)");
 							tooMany = true;
@@ -123,6 +126,7 @@ namespace xui {
 						else mark(ctor[pos++], a.off, a.len);
 					}
 					else {
+						sawNamedArgument = true;
 						std::string_view name = in.view(a.name);
 						if (!contains(valid, name)) unknownName("parameter", name, a.off, type, valid);
 						else mark(name, a.off, u32(name.size()));
@@ -133,6 +137,13 @@ namespace xui {
 					std::string_view name = in.view(p.name);
 					if (!contains(valid, name)) unknownName("property", name, p.off, type, valid);
 					else mark(name, p.off, u32(name.size()));
+					if (name == "part") {
+						if (!componentBody[nodeIndex]) dl.error(p.off, p.len, "`part` is only valid on widgets inside a component definition");
+						if (p.expr >= doc.exprs.size() || (doc.exprs[p.expr].kind != XExprKind::String && doc.exprs[p.expr].kind != XExprKind::Name))
+							dl.error(p.off, p.len, "`part` must be a literal name", "use part: \"title\"");
+						else if (doc.exprs[p.expr].name.v == 0 || in.view(doc.exprs[p.expr].name).empty())
+							dl.error(p.off, p.len, "`part` cannot be empty");
+					}
 				}
 				if (comp) for (const XParam& p : owner->paramsOf(*comp))
 					if (p.defaultExpr == kNoExpr && !contains(seen, in.view(p.name)))
@@ -145,8 +156,16 @@ namespace xui {
 		XuiError e;
 		for (const Document& d : prog.files) {
 			DiagnosticList dl = d.diagnostics();
-			Validator v{ prog, schema, in, d, dl };
-			for (const XNode& n : d.nodes) v.node(n);
+			std::vector<u8> componentBody(d.nodes.size(), 0);
+			auto markComponentTree = [&](auto&& self, u32 index) -> void {
+				if (index >= d.nodes.size() || componentBody[index]) return;
+				componentBody[index] = 1;
+				for (u32 child : d.childrenOf(d.nodes[index])) self(self, child);
+			};
+			for (const XComponent& component : d.components)
+				if (component.root != kNoExpr) markComponentTree(markComponentTree, component.root);
+			Validator v{ prog, schema, in, d, dl, componentBody };
+			for (u32 i = 0; i < d.nodes.size(); ++i) v.node(i);
 			if (dl.hasErrors()) e.lists.push_back(std::move(dl));
 		}
 		if (!e.lists.empty()) return fail(std::move(e));

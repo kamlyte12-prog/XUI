@@ -171,6 +171,23 @@ TEST(xss_precedence_id_class_filter_type) {
 	CHECK_EQ(opacity(true, false, true), 0.25f);   // class beats filter; later .big wins over earlier .big
 	CHECK_EQ(opacity(true, true, true), 0.4f);     // id beats everything
 }
+TEST(xss_component_part_selector_matches_expanded_marker_class) {
+	StringInterner in;
+	StyleSheet sh = mustCompile(in, R"(
+        Text { resting: { font-size: 10px } }
+        .card-title { resting: { font-size: 14px } }
+        Card::title { resting: { font-size: 24px, font-weight: 600 } }
+    )");
+	const StrId classes[] = { in.intern("card-title"), in.intern(detail::componentPartMarker("Card", "title")) };
+	MatchInput part; part.type = in.intern("Text"); part.classes = classes;
+	PropTable resolved; sh.resolve(sh.match(part), 0, 0, resolved);
+	CHECK(resolved.has(PropId::FontSize)); CHECK_NEAR(resolved.get(PropId::FontSize).atoms[0].num, 24.f, 0.01f);
+	CHECK(resolved.has(PropId::FontWeight)); CHECK_NEAR(resolved.get(PropId::FontWeight).atoms[0].num, 600.f, 0.01f);
+	const StrId ordinaryClass[] = { in.intern("card-title") };
+	MatchInput ordinary; ordinary.type = in.intern("Text"); ordinary.classes = ordinaryClass;
+	PropTable ordinaryStyle; sh.resolve(sh.match(ordinary), 0, 0, ordinaryStyle);
+	CHECK_NEAR(ordinaryStyle.get(PropId::FontSize).atoms[0].num, 14.f, 0.01f);
+}
 TEST(xss_style_sets_are_shared) {
 	StringInterner in; StyleSheet sh = mustCompile(in, kSpec);
 	MatchInput mi; mi.type = in.intern("Column");

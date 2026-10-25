@@ -1,0 +1,9 @@
+Window { bg: #f3f4f6ff; pad: 24px }
+.page { size: 100%; gap: 16px }
+.featured-card { size: 100% auto; max-width: 520px; gap: 12px }
+Card::surface { pad: 20px; bg: #ffffffff; border: 1px solid #d1d5dbff; radius: 10px }
+Card::title { font-size: 24px; font-weight: 600; fg: #111827ff }
+.card-subtitle { font-size: 14px; fg: #4b5563ff }
+.card-body { gap: 8px }
+.card-footer { justify: End; gap: 8px }
+Button { resting: { size: 112px 36px; bg: #2563ebff; fg: #ffffffff; radius: 6px; pad: 8px 14px } hover: { bg: #1d4ed8ff } focus: { border: 2px solid #1d4ed8ff } }

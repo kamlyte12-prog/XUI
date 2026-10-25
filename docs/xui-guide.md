@@ -35,7 +35,7 @@ Window(title: "Editor", size: 800x500) {                  // named constructor a
 }
 ```
 
-The parser accepts expression syntax in these positions, but the standard runtime currently materializes literal widget trees. It does not evaluate arbitrary expressions, string interpolation, `bind`, `if`, or `for`. Parsing and schema validation therefore do not imply that a dynamic expression will produce a rendered value or repeated/conditional nodes. Component declarations and imports are also parser/loader features; component expansion is not implemented by `UiRuntime::build()`.
+The parser accepts expression syntax in these positions, but the standard runtime evaluates only literal widget values. It does not evaluate arbitrary expressions, string interpolation, `bind`, `if`, or `for`. Parsing and schema validation therefore do not imply that a dynamic expression will produce a rendered value or repeated/conditional nodes. Imported components are expanded at runtime only when their parameters resolve to literal values or handler names; see [Components](components.md).
 
 ```xui
 Window(title: "Tasks", size: 900x620) {
@@ -52,6 +52,7 @@ Comments support `// line comments` and `/* block comments */`. Strings support 
 
 - `id: "name"` identifies one node; it is useful for `.xss` selectors and reading dropdown/color-picker state.
 - `class: "primary compact"` adds space-separated class names.
+- `part: "title"` marks a styleable internal part of a component definition. It is consumed during component expansion and is not a runtime widget property; see the [component guide](components.md#styling-component-parts).
 - Bracket properties are written as `[name: value]`; the parser validates them against the schema.
 - Event properties use `eventName: handlerName`, for example `press: onSave` or `change: onColorChange`.
 
@@ -75,7 +76,7 @@ ScrollView[id: "results", vertical: true, horizontal: false, scrollSpeed: 42,
 
 Use `ui.runtime().scrollTo("results", {0, 120})` for direct positioning or `scrollIntoView("target", true)` to reveal a descendant. See the [ScrollView widget reference](widgets.md#scrollview) for nested input routing, clipping, keyboard behavior, and current limitations.
 
-The common validator accepts generic names including `id`, `class`, `key`, `slot`, `grow`, `shrink`, `visible`, `disabled`, `tooltip`, `tooltipShowDelay`, `tooltipHideDelay`, `tooltipTrigger`, `tooltipHideOnClick`, `tooltipDisabled`, `align`, `justify`, `pad`, `margin`, `size`, `minSize`, `maxSize`, `width`, `height`, `minWidth`, `maxWidth`, `minHeight`, `maxHeight`, and `opacity`. Tooltip timing/trigger are behavior properties in `.xui`; bubble appearance belongs to `.xss`. The runtime applies structural geometry properties from `.xui`; Row/Column also accept a named `gap` constructor argument, and CheckList accepts `gap` as a property. `.xui` values override the same `.xss` layout defaults. `visible` and `.xui opacity` are still not implemented as runtime state/paint behavior; use `.xss opacity` for visual opacity.
+The common validator accepts generic names including `id`, `class`, `key`, `slot`, `part`, `grow`, `shrink`, `visible`, `disabled`, `tooltip`, `tooltipShowDelay`, `tooltipHideDelay`, `tooltipTrigger`, `tooltipHideOnClick`, `tooltipDisabled`, `align`, `justify`, `pad`, `margin`, `size`, `minSize`, `maxSize`, `width`, `height`, `minWidth`, `maxWidth`, `minHeight`, `maxHeight`, and `opacity`. `part` is valid only inside a component definition. Tooltip timing/trigger are behavior properties in `.xui`; bubble appearance belongs to `.xss`. The runtime applies structural geometry properties from `.xui`; Row/Column also accept a named `gap` constructor argument, and CheckList accepts `gap` as a property. `.xui` values override the same `.xss` layout defaults. `visible` and `.xui opacity` are still not implemented as runtime state/paint behavior; use `.xss opacity` for visual opacity.
 
 ## Supported layout containers
 
@@ -168,7 +169,7 @@ The first two split children are weighted using `ratio`; further children receiv
 
 ## Imports and components
 
-The parser and import loader support relative imports and component declarations:
+The parser and import loader support relative imports and component declarations, and the standard runtime expands components before building the retained widget tree:
 
 ```xui
 @import "shared.xui"
@@ -178,7 +179,9 @@ component PageTitle(text) {
 }
 ```
 
-`xui::Xui::loadXui(path)` resolves imports and schema-validates the loaded program. However, `UiRuntime::build()` currently materializes only the entry document's supported widget nodes; it does not expand component instances, evaluate bindings/interpolation, or execute `if` / `for`. Use literal widget trees for a working runtime UI. Component and control-flow syntax is parser-level functionality, not a promise of rendered output yet.
+`xui::Xui::loadXui(path)` resolves imports and schema-validates the loaded program. The facade's runtime build expands declared components, substitutes literal parameters and handler names, and routes caller children into default or named slots. See the [component guide](components.md) for the complete behavior and limits. The runtime still does not evaluate arbitrary bindings/interpolation or execute `if` / `for`.
+
+Component calls may mix positional arguments before named arguments, but not after them. Use `Component::part` in `.xss` to style a marked internal part. The part selector follows the ordinary class cascade; see the [stylesheet selector guide](xss-guide.md#selectors-and-precedence).
 
 ## Best practices
 

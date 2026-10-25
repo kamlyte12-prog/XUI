@@ -26,9 +26,10 @@ Button { ... }                     // widget type
 Button.primary#save { ... }        // combination
 * { ... }                           // universal
 Button[variant: primary] { ... }   // property filter syntax
+Card::title { ... }                // marked part inside every Card component instance
 ```
 
-The runtime currently matches type, class, and ID. Property filters parse and compile, but the current `UiRuntime` does not provide a property lookup callback, so filtered selectors should not be relied on in runtime UI.
+The runtime currently matches type, class, ID, and component-part markers. A `Component::part` selector is compiled to the same class-matching path as other selectors; components must mark the internal widget with `[part: "part"]` in their definition. Property filters parse and compile, but the current `UiRuntime` does not provide a property lookup callback, so filtered selectors should not be relied on in runtime UI.
 
 Matching rules use a simple deterministic score: ID selectors outrank classes, classes outrank filters, and filters outrank type selectors; later source order wins when scores tie. This is not full CSS: there are no descendant/child combinators, pseudo-classes, selector inheritance, or browser-style specificity rules.
 

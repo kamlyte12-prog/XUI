@@ -1,0 +1,11 @@
+@import "card.xui"
+
+Window(title: "Xui component example", size: 620x360) {
+  Column(class: "page", gap: 16px) {
+    Card(title: "Reusable card", subtitle: "A component expands into ordinary widgets")
+      [id: "welcome", class: "featured-card"] {
+      Text("This body comes from the calling document.")[id: "body-copy"]
+      Button(label: "Continue")[slot: "footer", id: "continue", press: onContinue]
+    }
+  }
+}

@@ -364,7 +364,18 @@ namespace xui::xss {
 			// ---- selectors / rules -----------------------------------------------------------------
 			bool parseSelector(Selector& s) {
 				bool any = false;
-				if (peek().k == Tok::Ident) { s.type = m_in.intern(text(next())); any = true; }
+				if (peek().k == Tok::Ident) {
+					Token name = next();
+					if (accept(Tok::Colon)) {
+						if (!expect(Tok::Colon, "second ':' in component part selector")) return false;
+						Token part = peek();
+						if (part.k != Tok::Ident) { err(part, "expected a part name after '::'"); return false; }
+						next();
+						s.classes.push_back(m_in.intern(detail::componentPartMarker(text(name), text(part))));
+					}
+					else s.type = m_in.intern(text(name));
+					any = true;
+				}
 				else if (peek().k == Tok::Star) { next(); any = true; }
 				for (;;) {
 					if (peek().k == Tok::Dot && peek(1).k == Tok::Ident) { next(); s.classes.push_back(m_in.intern(text(next()))); any = true; }

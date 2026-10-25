@@ -1,6 +1,6 @@
 # Implementation conventions
 
-This document captures repository-specific practices for agents. For the full contributor workflow and current build commands, also read [`../CONTRIBUTING.md`](../CONTRIBUTING.md). For public file-format behavior, use the guides under [`../doc/`](../doc/README.md) as the source of truth.
+This document captures repository-specific practices for agents. For the full contributor workflow and current build commands, also read [`../CONTRIBUTING.md`](../CONTRIBUTING.md). For public file-format behavior, use the guides under [`../docs/`](../docs/README.md) as the source of truth.
 
 ## C++ style and structure
 
@@ -14,7 +14,7 @@ This document captures repository-specific practices for agents. For the full co
 - Use stable, descriptive authored IDs for stateful controls and callbacks. Keep widget structure, text/content, layout relationships, and behavior attributes in `.xui`.
 - Put colors, typography, borders, spacing, and visual state rules in `.xss`. Prefer shared selectors/tokens and consistent state blocks over one-off inline/demo colors.
 - Keep examples small enough to teach one pattern, with clear IDs and comments only where they explain behavior. The complete interactive reference is `examples/showcase.xui` plus `examples/showcase.xss`.
-- Check the current guides before extending syntax: [`xui-guide.md`](../doc/xui-guide.md), [`xss-guide.md`](../doc/xss-guide.md), and [`styling-reference.md`](../doc/styling-reference.md). Parser acceptance alone does not mean the runtime implements an object or property.
+- Check the current guides before extending syntax: [`xui-guide.md`](../docs/xui-guide.md), [`xss-guide.md`](../docs/xss-guide.md), and [`styling-reference.md`](../docs/styling-reference.md). Parser acceptance alone does not mean the runtime implements an object or property.
 
 ## Adding a widget end to end
 
@@ -33,7 +33,7 @@ Follow the existing runtime path and contribution checklist in [`../CONTRIBUTING
 1. Trace an existing property end to end through style declarations/types, parser/compiler validation, cascade/merge/resolution, runtime consumption, paint/layout, and docs/tests. A property is not supported merely because its name parses.
 2. Define accepted values, units, defaults, inheritance/cascade behavior, and precedence against `.xui` layout/behavior attributes. Keep visual styling in `.xss`; use `.xui` for authored structure and layout intent unless the documented property is explicitly shared.
 3. Add valid/invalid parser tests, cascade/state tests, and a runtime or rendering test proving the property changes output. Avoid per-frame allocations or repeated style compilation/resolution in hot paths.
-4. Update [`../doc/styling-reference.md`](../doc/styling-reference.md), the relevant guide, and canonical [`plan.md`](plan.md) / [`tracking.md`](tracking.md) where status or decisions change.
+4. Update [`../docs/styling-reference.md`](../docs/styling-reference.md), the relevant guide, and canonical [`plan.md`](plan.md) / [`tracking.md`](tracking.md) where status or decisions change.
 
 ## Testing and verification
 

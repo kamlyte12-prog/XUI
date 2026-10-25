@@ -11,4 +11,4 @@ This folder is the entry point for coding agents working on Xui. Start with [`ag
 - [`architecture.md`](architecture.md) — agent-facing source map and invariants, linked to the user-facing architecture guide.
 - [`tracking.md`](tracking.md) — canonical change history, decisions, and verification record.
 
-The canonical roadmap and tracker live here. The root `plan.md` and `tracking.md` remain as compatibility pointers. The user-facing architecture guide stays in `doc/architecture.md`; `plan/architecture.md` contains only the agent source map and links there.
+The canonical roadmap and tracker live here. The root `plan.md` and `tracking.md` remain as compatibility pointers. The user-facing architecture guide stays in `docs/architecture.md`; `plan/architecture.md` contains only the agent source map and links there.

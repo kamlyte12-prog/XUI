@@ -18,7 +18,7 @@ option(XUI_SANITIZE          "Enable ASan+UBSan (GCC/Clang)" OFF)
 # Build vendored FreeType so builds do not depend on a system package or package
 # manager. Xui uses FreeType for variable glyf axes/outlines; shaping is provided
 # by the separate bundled HarfBuzz target below.
-set(XUI_FREETYPE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib/freetype-2.15.0")
+set(XUI_FREETYPE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/freetype-2.15.0")
 if(NOT EXISTS "${XUI_FREETYPE_SOURCE_DIR}/CMakeLists.txt" OR
    NOT EXISTS "${XUI_FREETYPE_SOURCE_DIR}/include/freetype/freetype.h")
   message(FATAL_ERROR
@@ -55,7 +55,7 @@ target_link_libraries(xui_freetype INTERFACE freetype)
 
 # HarfBuzz applies OpenType GPOS (including variable-font positioning) during text shaping.
 # Keep the bundled source in sync with FreeType so builds do not depend on system packages.
-set(XUI_HARFBUZZ_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib/harfbuzz-15.0.0")
+set(XUI_HARFBUZZ_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/harfbuzz-15.0.0")
 if(NOT EXISTS "${XUI_HARFBUZZ_SOURCE_DIR}/CMakeLists.txt" OR
    NOT EXISTS "${XUI_HARFBUZZ_SOURCE_DIR}/src/hb.h")
   message(FATAL_ERROR
@@ -91,13 +91,13 @@ target_link_libraries(xui_harfbuzz INTERFACE harfbuzz)
 # Image decoding is optional. stb_image is a single-header decoder; LunaSVG
 # includes its plutovg rasterizer as a source subdirectory.
 if(XUI_ENABLE_IMAGE_SUPPORT)
-  set(XUI_LUNASVG_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib/lunasvg-3.5.0")
+  set(XUI_LUNASVG_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/lunasvg-3.5.0")
   if(NOT EXISTS "${XUI_LUNASVG_SOURCE_DIR}/CMakeLists.txt" OR
      NOT EXISTS "${XUI_LUNASVG_SOURCE_DIR}/include/lunasvg.h" OR
-     NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/std_image/stb_image.h")
+     NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libs/std_image/stb_image.h")
     message(FATAL_ERROR
       "Image support was enabled, but bundled stb_image or LunaSVG sources are missing. "
-      "Expected lib/std_image/stb_image.h and lib/lunasvg-3.5.0/CMakeLists.txt.")
+      "Expected libs/std_image/stb_image.h and libs/lunasvg-3.5.0/CMakeLists.txt.")
   endif()
   set(LUNASVG_BUILD_EXAMPLES OFF CACHE BOOL "Do not build LunaSVG examples" FORCE)
   set(PLUTOVG_BUILD_EXAMPLES OFF CACHE BOOL "Do not build plutovg examples" FORCE)
@@ -161,7 +161,7 @@ target_link_libraries(xui_renderer PUBLIC xui_core PRIVATE xui_warnings)
 # Keep file decoding/rasterization separate from Renderer implementations. The
 # shared runtime still uploads ordinary RGBA textures through Renderer.
 add_library(xui_image STATIC src/render/image_decode.cpp)
-target_include_directories(xui_image PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/lib/std_image")
+target_include_directories(xui_image PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/libs/std_image")
 target_compile_definitions(xui_image PRIVATE XUI_ENABLE_IMAGE_SUPPORT=$<BOOL:${XUI_ENABLE_IMAGE_SUPPORT}>)
 target_link_libraries(xui_image PUBLIC xui_renderer PRIVATE xui_warnings)
 if(XUI_ENABLE_IMAGE_SUPPORT)

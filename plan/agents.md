@@ -10,7 +10,7 @@ Read this file before making changes. The repository's root [`AGENTS.md`](../AGE
 - Preserve the public facade and lower-level extension path. `xui::Xui` is the recommended entry point; custom renderers and platforms remain supported through their interfaces.
 - Unsupported syntax or widgets must produce a clear diagnostic. Do not silently turn unsupported nodes into native controls or claim cross-platform support without verification.
 
-See [`conventions.md`](conventions.md) for file-specific implementation patterns and [`architecture.md`](architecture.md) for the agent source map. The public interface contracts and data flow are in [`../doc/architecture.md`](../doc/architecture.md).
+See [`conventions.md`](conventions.md) for file-specific implementation patterns and [`architecture.md`](architecture.md) for the agent source map. The public interface contracts and data flow are in [`../docs/architecture.md`](../docs/architecture.md).
 
 ## Anti-regression checklist
 
@@ -46,5 +46,5 @@ For a change in a listed area, add or extend a focused regression test where pra
 
 - Update [`tracking.md`](tracking.md) with cause/findings, changes, decisions and trade-offs, verification evidence, status, and next steps.
 - Update [`plan.md`](plan.md) when verified progress, risks, milestones, priorities, or open questions change. Move an item to “works” only after the relevant verification.
-- Update user-facing guides under [`../doc/`](../doc/README.md), the root README, and examples when public behavior, syntax, setup, or feature coverage changes.
+- Update user-facing guides under [`../docs/`](../docs/README.md), the root README, and examples when public behavior, syntax, setup, or feature coverage changes.
 - Keep these agent rules and [`conventions.md`](conventions.md) current when project-wide practices or invariants change. The root `AGENTS.md` should remain a short pointer, not a second copy of these rules.

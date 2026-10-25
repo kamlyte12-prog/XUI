@@ -1,6 +1,6 @@
 # Agent architecture map
 
-This file helps agents locate implementation layers without duplicating the public contract guide. Read [`../doc/architecture.md`](../doc/architecture.md) for the authoritative data flow, lifecycle, renderer/platform contracts, and runtime limits. Project-wide invariants are in [`agents.md`](agents.md).
+This file helps agents locate implementation layers without duplicating the public contract guide. Read [`../docs/architecture.md`](../docs/architecture.md) for the authoritative data flow, lifecycle, renderer/platform contracts, and runtime limits. Project-wide invariants are in [`agents.md`](agents.md).
 
 ## Source map
 

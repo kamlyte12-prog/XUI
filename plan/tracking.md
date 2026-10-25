@@ -2,6 +2,15 @@
 
 This file records project changes, design decisions, trade-offs, current status, and next steps. It is updated as implementation work lands.
 
+## 2026-10-25 — Rename documentation and bundled dependency folders
+
+- Audit: project user guides lived in root `doc/`; bundled FreeType 2.15.0, HarfBuzz 15.0.0, LunaSVG 3.5.0, and stb_image lived in root `lib/`. References appeared in root CMake, the CI dependency cache key, README/CONTRIBUTING, user guides, and agent plan/history files. `examples/lib/glfw-3.5.1` is a separate vendored GLFW tree and remains unchanged.
+- Changes: renamed root `doc/` to `docs/` and root `lib/` to `libs/`. Updated all project-owned Markdown links and prose, CMake source/include/diagnostic paths, and CI cache inputs. The `.xui`/`.xss`, image, and font assets did not move. No framework source or public API changed.
+- Decision/trade-off: kept the example-local GLFW source in `examples/lib/`; this request concerns the root documentation and bundled dependency folders, and moving GLFW would be an unrelated dependency restructure.
+- Verification: fresh Windows MSVC/Ninja configure in `build/rename-check` succeeded against the renamed dependency source trees. The clean build compiled and linked `xui_tests`, `xui_glfw_demo`, and both backend adapters (**207 build steps**). Direct test run reports **204 passed, 0 failed**; CTest reports **1/1 passed**. All local Markdown links from root, `docs/`, and `plan/` resolve. `git diff --check` passes (Git only reports expected LF-to-CRLF normalization warnings).
+- Limits/current status: no visible UI or FPS profile was needed for this path-only restructure; Linux and macOS were not tested. Historical records now use the current `docs/`/`libs/` paths where they mention project directories. The repo still has third-party `examples/lib/` by design.
+- Next: no follow-up is required for the rename; continue platform verification on Linux/macOS as already tracked in the roadmap.
+
 ## Phase D documentation reference pass — 2026-10-24
 
 ### Audit and corrections
@@ -16,7 +25,7 @@ This file records project changes, design decisions, trade-offs, current status,
 - Expanded the widget guide's opening index into a grouped catalog with anchors to the per-object reference entries. Kept detailed attributes, states, value/event access, examples, and limitations in those existing entries rather than copying that content into a second file.
 - Added an `Applies to` column for each accepted canonical `.xss` property. It identifies broad runtime targets, widget-specific properties, synthetic-subpart caveats, and parser-accepted properties without standard runtime behavior. Existing state and composite-widget audits remain the detail source for special cases.
 - Added API comments to `xui::Xui`, `XuiOptions`, `XuiRunOptions`, and the public lower-level `UiRuntime` entry points. Font comments state the actual TrueType-outline support instead of implying all OTF outline formats work.
-- No architecture or runtime behavior changed. Code edits are documentation comments only; user-facing changes are in `doc/widgets.md`, `doc/xui-guide.md`, and `doc/styling-reference.md`.
+- No architecture or runtime behavior changed. Code edits are documentation comments only; user-facing changes are in `docs/widgets.md`, `docs/xui-guide.md`, and `docs/styling-reference.md`.
 - Trade-off: the styling support column groups common paint/text/layout targets to keep the full property table readable. Virtual subparts and exceptions remain in the existing composite-widget audit immediately below.
 
 ### Verification and status
@@ -37,7 +46,7 @@ This file records project changes, design decisions, trade-offs, current status,
 
 ### Changes and decisions
 
-- Bundled HarfBuzz 15.0.0 from `lib/harfbuzz-15.0.0` through CMake and linked its `harfbuzz` target to `xui_text` using the `xui::harfbuzz` interface target. HarfBuzz utilities, subset, raster/vector/GPU features and optional Graphite2/GLib/ICU/Cairo integrations are disabled. FreeType's own HarfBuzz integration stays disabled; the text layer calls bundled HarfBuzz directly.
+- Bundled HarfBuzz 15.0.0 from `libs/harfbuzz-15.0.0` through CMake and linked its `harfbuzz` target to `xui_text` using the `xui::harfbuzz` interface target. HarfBuzz utilities, subset, raster/vector/GPU features and optional Graphite2/GLib/ICU/Cairo integrations are disabled. FreeType's own HarfBuzz integration stays disabled; the text layer calls bundled HarfBuzz directly.
 - Added a per-`Font` HarfBuzz face/font over the font's owned bytes. Variable `wght` updates set the corresponding HarfBuzz variation along with `FT_Set_Var_Design_Coordinates`, so GPOS variation deltas and FreeType outlines use the same effective axis value.
 - `TextSystem` now shapes each left-to-right whitespace-delimited run with HarfBuzz and places glyph advances/offsets from the shaping result. Explicit whitespace remains under the existing wrap policy. `liga` and `clig` are disabled to preserve a simple editable-character/caret mapping. This is not an RTL/bidi or complex-script editing implementation.
 - Added parent `font-weight` to the runtime's inherited text style set, including build-time inheritance, state/theme re-resolution, live style updates, and picker editor inheritance. A child `.xss` rule still overrides the inherited value.
@@ -188,7 +197,7 @@ This file records project changes, design decisions, trade-offs, current status,
 - Windows MSVC/Ninja rebuilt `xui_glfw_demo`; the full default build completed and CTest passed **1/1** (test binary: **183 passed, 0 failed**).
 - The hidden GLFW menubar profile completed **3,066 frames / 6.25464 s / 490.196 FPS**. This verifies backend initialization and hidden-loop throughput only, not visible maximize behavior or input/resize latency.
 - Windows desktop automation was unavailable (“Computer Use native pipe is unavailable”), so a screenshot-backed maximize/restore/minimize/close check could not be completed. macOS/Linux builds and visible runs were also unavailable. Do not mark the visual issue fully verified until those runs are recorded.
-- The user-facing TitleBar platform caveats in `doc/widgets.md` now describe the Windows non-client handling and maximized work-area behavior.
+- The user-facing TitleBar platform caveats in `docs/widgets.md` now describe the Windows non-client handling and maximized work-area behavior.
 
 ## Recent-files submenu paint freeze — 2026-10-21
 
@@ -290,7 +299,7 @@ This file records project changes, design decisions, trade-offs, current status,
 
 ### Audit and findings
 
-- Re-read `plan.md`, the runtime widget materialization list, layout schema/solver, current showcase assets, GLFW callbacks, widget/layout guides, and the showcase asset test. Runtime supports the controls/containers enumerated in `doc/widgets.md`; `Tooltip` is an attached behavior, while `Grid` and `Stack` remain solver-level only.
+- Re-read `plan.md`, the runtime widget materialization list, layout schema/solver, current showcase assets, GLFW callbacks, widget/layout guides, and the showcase asset test. Runtime supports the controls/containers enumerated in `docs/widgets.md`; `Tooltip` is an attached behavior, while `Grid` and `Stack` remain solver-level only.
 - The prior showcase named most controls but mixed categories, repeated IDs (`density`, `save-key`, readouts), left several value changes without a visible value display, and did not demonstrate absolute positioning through `.xui`. The layout engine already enforced authored min/max floors for containers and Split panes, but showcase-level regression coverage for `.xui` and `.xss` floors was incomplete.
 
 ### Changes and decisions
@@ -321,15 +330,15 @@ This file records project changes, design decisions, trade-offs, current status,
 
 - Audited 40 Markdown files outside generated build/output and Git directories: Xui root/docs/plan files plus the bundled GLFW project's own documentation. No identical project-owned files were found. Most duplication was repeated setup, backend, conventions, and status summaries. GLFW Markdown remains third-party and out of scope for edits.
 - Moved the detailed root tracking history into this canonical `plan/tracking.md` file without dropping its historical entries. The root `tracking.md` now links here as a compatibility stub. Replaced the stacked, conflicting plan snapshots with the current structured roadmap in `plan/plan.md`; root `plan.md` is likewise a compatibility stub.
-- Kept `doc/architecture.md` as the user-facing architecture/backend guide. Replaced the former `plan/architecture.md` pointer with the agent source map and change boundaries, which link to the public guide rather than repeating its data-flow/interface content.
-- Shortened the root README into an overview and links. Configuration, dependency, CMake, and demo details moved to `doc/getting-started.md`. Contribution workflow remains in `CONTRIBUTING.md`; duplicated architecture/style/widget/performance instructions now point to the architecture guide and agent conventions.
-- Kept the project guide files in `doc/` as separate topic references and made `doc/README.md` list each. `plan/README.md` lists each agent-context file. No project Markdown was deleted: every project guide has a defined index/workflow role; root roadmap/tracking compatibility stubs protect existing inbound links. Vendored GLFW docs stay with the dependency and its docs build.
+- Kept `docs/architecture.md` as the user-facing architecture/backend guide. Replaced the former `plan/architecture.md` pointer with the agent source map and change boundaries, which link to the public guide rather than repeating its data-flow/interface content.
+- Shortened the root README into an overview and links. Configuration, dependency, CMake, and demo details moved to `docs/getting-started.md`. Contribution workflow remains in `CONTRIBUTING.md`; duplicated architecture/style/widget/performance instructions now point to the architecture guide and agent conventions.
+- Kept the project guide files in `docs/` as separate topic references and made `docs/README.md` list each. `plan/README.md` lists each agent-context file. No project Markdown was deleted: every project guide has a defined index/workflow role; root roadmap/tracking compatibility stubs protect existing inbound links. Vendored GLFW docs stay with the dependency and its docs build.
 - Updated stale documentation: ScrollView is now listed as runtime-supported in the `.xui` guide; the troubleshooting color-picker section now reflects alpha support; performance guidance describes the current live-resize hook and links to the tracker for measurements rather than repeating profile numbers.
 
 ### File disposition
 
 - **Moved:** the full root `tracking.md` history is now `plan/tracking.md`; the current roadmap content is canonical in `plan/plan.md`.
-- **Merged:** root README setup, dependency, build, and configuration details moved into `doc/getting-started.md`; repeated contribution guidance now links to canonical architecture and conventions guides. No unique content was intentionally discarded.
+- **Merged:** root README setup, dependency, build, and configuration details moved into `docs/getting-started.md`; repeated contribution guidance now links to canonical architecture and conventions guides. No unique content was intentionally discarded.
 - **Removed:** no project Markdown files were deleted. Root `plan.md` and `tracking.md` remain short compatibility pointers; the former `plan/architecture.md` pointer is now an agent-facing source map.
 
 ### Trade-offs and remaining gaps
@@ -341,14 +350,14 @@ This file records project changes, design decisions, trade-offs, current status,
 
 ### Current status and next steps
 
-- Canonical homes: user guides in `doc/`, agent rules and status/history in `plan/`, concise navigation in root `README.md`, contribution workflow in `CONTRIBUTING.md`.
-- Both `doc/README.md` and `plan/README.md` enumerate every Markdown file in their respective folders. No project Markdown file was deleted; the three former pointer files were repurposed as canonical plan/history and agent source-map files. Keep the history here and current status in `plan/plan.md`.
+- Canonical homes: user guides in `docs/`, agent rules and status/history in `plan/`, concise navigation in root `README.md`, contribution workflow in `CONTRIBUTING.md`.
+- Both `docs/README.md` and `plan/README.md` enumerate every Markdown file in their respective folders. No project Markdown file was deleted; the three former pointer files were repurposed as canonical plan/history and agent source-map files. Keep the history here and current status in `plan/plan.md`.
 
 ## Initial agent-context setup — 2026-10-16 (superseded by documentation consolidation below)
 
 ### Audit and decisions
 
-- The repository already had a root `plan.md`, a root `tracking.md`, and the current architecture guide at `doc/architecture.md`. Existing contribution notes, README sections, docs, and historical tracking entries link to those locations. No root `AGENTS.md` or `CLAUDE.md` existed.
+- The repository already had a root `plan.md`, a root `tracking.md`, and the current architecture guide at `docs/architecture.md`. Existing contribution notes, README sections, docs, and historical tracking entries link to those locations. No root `AGENTS.md` or `CLAUDE.md` existed.
 - Created a root `AGENTS.md` pointer and a `plan/` folder with `agents.md`, `conventions.md`, and an index. Added `plan/plan.md`, `plan/architecture.md`, and `plan/tracking.md` as links to the canonical files rather than moving or copying them. This preserves every historical link and avoids divergent duplicate plan/tracking content.
 - Updated the root README project tree/docs section and CONTRIBUTING entry point so agents can discover the rules. No framework code or runtime behavior changed.
 
@@ -467,7 +476,7 @@ This file records project changes, design decisions, trade-offs, current status,
 - Added border insets to layout's content-box calculation so child percentages and positions use the content area. Text layout now records per-line advances, treats literal tab as four actual space advances without drawing the control glyph, and TextArea inserts `tabSize` spaces on Tab (default 4, range 1–16); Tab on other controls remains focus traversal. Control characters received via text input are filtered. Caret/selection x uses the active line's shaped width so newline/trailing whitespace doesn't reset it.
 - ColorPicker uses one popup geometry model for paint, editor placement, and pointer hit testing. Defaults are 300×352 logical pixels (safe minimum 260×340), with a larger SV field, hue/alpha strips, format/preview row, aligned labels, and editable fields. XSS still styles surfaces and typography; internal hue/SV geometry remains a widget default.
 - Reworked `examples/showcase.xss` with a tokenized dark palette, visual hierarchy, consistent panel and field padding, row gaps/margins, and hover/focus/pressed/disabled states. The `.xui` comment and notes control now accurately demonstrate four-space Tab insertion.
-- Updated `doc/xui-guide.md`, `doc/xss-guide.md`, `doc/styling-reference.md`, `doc/widgets.md`, and `doc/performance.md`; `plan.md` records the phase, actual test count, and current measured profiles.
+- Updated `docs/xui-guide.md`, `docs/xss-guide.md`, `docs/styling-reference.md`, `docs/widgets.md`, and `docs/performance.md`; `plan.md` records the phase, actual test count, and current measured profiles.
 
 ### Trade-offs
 
@@ -520,7 +529,7 @@ This file records project changes, design decisions, trade-offs, current status,
 
 ### Decisions and trade-offs
 
-- Keybind capture excludes Tab (focus traversal) and F3 (FPS toggle) so global shortcuts stay intact; documented in `doc/widgets.md`.
+- Keybind capture excludes Tab (focus traversal) and F3 (FPS toggle) so global shortcuts stay intact; documented in `docs/widgets.md`.
 - DatePicker has no "today" marker (no wall clock in the runtime) and no hover highlight inside the popup; day selection commits and closes like ImGui-style pickers. PageUp/PageDown shift ±30 days rather than exact calendar months (documented).
 - Calendar/dates use civil-date math valid across the full proleptic Gregorian range; no locale — month/weekday names are English-only.
 - `SegmentedControl` selected fill and `Rating` pip colors derive from `fg`; there are no per-segment/per-pip sub-selectors yet (same virtual-target limitation as dropdown rows).
@@ -549,7 +558,7 @@ This file records project changes, design decisions, trade-offs, current status,
 
 - **Blinking caret**: `UiRuntime` now blinks the caret of focused, enabled, writable `TextBox`/`TextArea` fields on a 530 ms tick driven by the existing idle timer (`updateTimers`/`nextTimerDelay`), so an idle app with a focused field wakes at most ~2x/second and no other frame is touched. Blink resets to solid on typing, caret movement, deletion, paste, and focus gain (`resetCaretBlink()`); it is suppressed for read-only/disabled fields and stopped entirely when no editable field is focused. Picker popup editors blink through the same mechanism. Only the focused fields' rectangles get damage per blink.
 - **Whitespace visualization**: new `setWhitespaceVisible(bool)` debug API renders spaces as a middle dot (·, U+00B7) and tabs as a right arrow (→, U+2192) inside editable fields. Substitution is one-codepoint-to-one-codepoint and caret/selection prefixes are measured through the same `visualizeWhitespace()` mapping, so caret and selection stay aligned with the drawn glyphs. Password fields are excluded. The showcase demo exposes it as an "Show whitespace marks" checkbox.
-- **Tab decision (documented)**: Tab always moves keyboard focus; it never inserts a tab character. Textual tabs can still be pasted. This avoids conflicting keyboard semantics and matches the existing focus system; `doc/widgets.md` now states it.
+- **Tab decision (documented)**: Tab always moves keyboard focus; it never inserts a tab character. Textual tabs can still be pasted. This avoids conflicting keyboard semantics and matches the existing focus system; `docs/widgets.md` now states it.
 - **Demo polish**: added the whitespace-mark toggle to the Input tab with a tooltip. The existing stylesheet already provided a token-driven hierarchy with consistent radii/pads and full hover/focus/pressed/checked/readonly/disabled coverage; a larger visual redesign was deliberately not attempted in the same change as two runtime behavior features (verification is serialized, and the visual baseline is already cohesive).
 
 ### Trade-offs and limitations
@@ -584,7 +593,7 @@ This file records project changes, design decisions, trade-offs, current status,
 
 ### Coverage audit
 
-Runtime-supported and demoed: `Window`, `Column`, `Row`, `Panel`, `Split`, `CheckList`, `CheckItem`, `CheckBox`, `Switch`, `ToggleButton`, `RadioGroup`, `TextBox`, `TextArea`, `NumberField`, `SearchField`, `Tabs`/`Tab`, `Text`, `Label`, `Badge`, `Separator`/`Divider`, `Image`, `Spinner`, `Button`, `Slider`, `ProgressBar`, `Dropdown`, `ColorPicker`, `FpsCounter`, tooltips (property, multiple triggers/delays), plus the read-only and disabled variants. No supported widget is absent from the demo. Schema-only names (`Grid`, `ScrollView`, `Menu*`, `Modal`, `ListView`, `Table`, `Canvas`, …) remain unsupported and are listed in `doc/widgets.md`.
+Runtime-supported and demoed: `Window`, `Column`, `Row`, `Panel`, `Split`, `CheckList`, `CheckItem`, `CheckBox`, `Switch`, `ToggleButton`, `RadioGroup`, `TextBox`, `TextArea`, `NumberField`, `SearchField`, `Tabs`/`Tab`, `Text`, `Label`, `Badge`, `Separator`/`Divider`, `Image`, `Spinner`, `Button`, `Slider`, `ProgressBar`, `Dropdown`, `ColorPicker`, `FpsCounter`, tooltips (property, multiple triggers/delays), plus the read-only and disabled variants. No supported widget is absent from the demo. Schema-only names (`Grid`, `ScrollView`, `Menu*`, `Modal`, `ListView`, `Table`, `Canvas`, …) remain unsupported and are listed in `docs/widgets.md`.
 
 Premise corrections worth recording: this checkout has a GLFW + OpenGL 2.1 backend only (no separate Win32 adapter; `xui_hello` is the same sources on Windows), and the backend contracts are `xui::Renderer` / `xui::Platform`. The task context's "modal, scroll view, menu, list view" are not implemented; "image, separator, spinner" are and are now demoed.
 
@@ -664,7 +673,7 @@ Premise corrections worth recording: this checkout has a GLFW + OpenGL 2.1 backe
 - Added color string conversion in the shared UI runtime. Input and programmatic `setValue` accept `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, comma-separated `rgb()` / `rgba()`, `hsl()` / `hsla()`, and `hsv()` / `hsva()` with percentage saturation/lightness/value. Parsing rejects invalid strings without changing the last valid color. Named CSS colors and modern space-separated CSS syntax remain unsupported.
 - Preserved `Color` (RGBA float components) as the stable `value(id)` result. `controlText(id)` returns the active-format string. ColorPicker also accepts string values in `setValue` and string initial values in `.xui`.
 - Expanded the default popup with a saturation/value surface, hue strip, selected-position markers, optional alpha strip, editable text row, and cycling format label. `.xui` supports `popupSize` (with safe minimum dimensions), `format`, ordered pipe-separated `formats`, `precision` (0–4 decimal places), `alpha`, `showAlpha`, `showHue`, `showSaturationValue`, `showInputs`, and `showFormatSwitcher`. The editor validates/applies each complete valid value as it is typed; clipboard copy/paste routes through the existing `Platform` interface.
-- Updated `doc/widgets.md`, `doc/styling-reference.md`, and `doc/troubleshooting.md` to describe event cadence, popup hover separation, value API, supported color syntax, and current limitations. Updated `plan.md` from fresh build/test/profile results.
+- Updated `docs/widgets.md`, `docs/styling-reference.md`, and `docs/troubleshooting.md` to describe event cadence, popup hover separation, value API, supported color syntax, and current limitations. Updated `plan.md` from fresh build/test/profile results.
 - Added/extended runtime tests for RGB(A)/HSL parsing, invalid string rejection, picker text editing, and slider callbacks during pointer-down/drag without duplicate release callbacks.
 
 ### Decisions and trade-offs
@@ -973,7 +982,7 @@ Premise corrections worth recording: this checkout has a GLFW + OpenGL 2.1 backe
 
 ### Documentation added
 
-- Added `doc/README.md` as the documentation index.
+- Added `docs/README.md` as the documentation index.
 - Added focused guides: getting started/CMake/backend setup, `.xui` syntax/layout, `.xss` selectors/tokens/states, runtime UI object catalog, property reference, architecture/backend contracts, performance guidance, and troubleshooting.
 - Updated root `README.md` with a short doc overview and links, and root `architecture.md` with links to the current detailed guide.
 - Kept `tracking.md` at the repository root as requested by the project workflow.
@@ -984,11 +993,11 @@ Premise corrections worth recording: this checkout has a GLFW + OpenGL 2.1 backe
 - Documented the implemented runtime subset separately from schema-only names. This is more precise than calling every validator-accepted widget “available.”
 - Listed every `.xss` compiler property and marked runtime support/default behavior. The trade-off is that the reference includes implementation caveats alongside authoring instructions, but it avoids promising effects the UI does not currently render.
 - Included current platform-specific implementation as examples only; shared `.xui`/`.xss` and application logic remain backend-neutral. CMake builds the source target `xui_widgets`; an installed/exported package target is not yet provided.
-- Linked existing root `architecture.md` rather than duplicating its historical measurements; created `doc/architecture.md` as the current lifecycle and interface guide.
+- Linked existing root `architecture.md` rather than duplicating its historical measurements; created `docs/architecture.md` as the current lifecycle and interface guide.
 
 ### Current status and next steps
 
-- Status: all requested documentation areas have Markdown guides and are linked from `doc/README.md` and the root README. Examples match the current public facade and describe parser/runtime limitations.
+- Status: all requested documentation areas have Markdown guides and are linked from `docs/README.md` and the root README. Examples match the current public facade and describe parser/runtime limitations.
 - Verification: source/schema/style tables and bundled samples were audited directly. CTest passed (1/1 executable; 146 cases, 0 failures), including the shared example parse/runtime integration coverage. A local-link scan resolved links across all 12 root/doc Markdown files. No code or runtime behavior changed in this documentation pass; the visible app binaries were not rerun.
 - Next: keep the property/widget reference synchronized when runtime support expands; consider adding an install/export CMake target and automated parsing of documentation snippets when the package workflow is introduced.
 - Open question: should the broad schema-only widget vocabulary remain available for forward language validation, or should it be narrowed until those runtime controls are implemented?
@@ -998,7 +1007,7 @@ Premise corrections worth recording: this checkout has a GLFW + OpenGL 2.1 backe
 ### Audit and verification
 
 - Audited the current public facade (`xui::Xui`), renderer/platform interfaces, example CMake targets, runtime widget catalog, style/property reference, setup/docs, and prior verification notes.
-- Confirmed the simplified facade and `doc/` documentation set exist. The current runtime supports a documented subset; many schema-recognized widget names and several compiled style features still have no standard runtime behavior.
+- Confirmed the simplified facade and `docs/` documentation set exist. The current runtime supports a documented subset; many schema-recognized widget names and several compiled style features still have no standard runtime behavior.
 - Found no distinct native Win32 backend in current source/build definitions. Both Windows `xui_hello` and `xui_glfw_demo` are built from the GLFW platform and OpenGL renderer sources.
 - Freshly built `xui_hello`, `xui_glfw_demo`, and `xui_tests` in the Windows Visual Studio Release tree. The test executable passed **146 tests, 0 failures**.
 - Ran both rebuilt example binaries in `--profile` mode. `xui_hello`: 6,633 frames / 5.0006 s / 1,326.44 FPS. `xui_glfw_demo`: 6,598 frames / 5.00011 s / 1,319.57 FPS. These hidden, continuous, uncapped loop measurements show clean bounded exit and local throughput; they do not verify visible glyph quality, interaction latency, resize behavior, or cross-platform operation.
@@ -1012,7 +1021,7 @@ Premise corrections worth recording: this checkout has a GLFW + OpenGL 2.1 backe
 
 ### Decisions and trade-offs
 
-- Kept the plan as a separate root-level roadmap so the `doc/` folder remains user/developer reference material while `plan.md` records readiness and ordered work.
+- Kept the plan as a separate root-level roadmap so the `docs/` folder remains user/developer reference material while `plan.md` records readiness and ordered work.
 - Reported project structure and evidence from the current tree rather than treating the earlier project description as proof of a native Win32 backend.
 - Split short-term stability/performance verification from medium-term widgets and long-term tooling/platform expansion. This preserves focus on the historical severe regressions before feature breadth.
 - Listed effort as S/M/L/XL planning estimates and explicitly marked environment-dependent work and owner decisions as blockers; no delivery dates are implied.
@@ -1112,7 +1121,7 @@ Premise corrections worth recording: this checkout has a GLFW + OpenGL 2.1 backe
 - Added `.xui` padding to text measurement/painting offsets for controls that author padding structurally, while retaining `.xss` padding behavior when `.xui pad` is absent.
 - Moved the showcase's geometry, spacing, flex, and padding values from `.xss` into `.xui`; `.xss` now focuses on backgrounds, colors, borders, typography, radii, and interaction states. Added `grow: 1` to each tab page and the Split so the page content and panes fill their parent area.
 - Added layout IDs and a regression test that validates control sizes, tab page draw geometry, distinct row positions, split pane positions, and check item ordering at 1080x760. The same test exercises text input, checkbox, tab switching, button callback, dropdown selection, color selection, and checklist state using the authored bounds. Added a separate `.xss` 100% width regression test.
-- Updated `doc/xui-guide.md` and `doc/performance.md` to explain structural `.xui` layout, property support, percentage semantics, and flexible page sizing. Updated the root README example to put panel padding in `.xui`. Updated `plan.md` to reflect the new verification and known visible-testing gap.
+- Updated `docs/xui-guide.md` and `docs/performance.md` to explain structural `.xui` layout, property support, percentage semantics, and flexible page sizing. Updated the root README example to put panel padding in `.xui`. Updated `plan.md` to reflect the new verification and known visible-testing gap.
 
 ### Decisions and trade-offs
 
@@ -1149,7 +1158,7 @@ Premise corrections worth recording: this checkout has a GLFW + OpenGL 2.1 backe
 - Changed `examples/glfw_demo.cpp` to load the unified showcase by default, start with the FPS counter visible, retain F3 toggling, and read typed state by authored id from the runtime in callbacks. The former `--controls` alternate path was removed from the executable; focused `controls.xui` assets remain copied for reference/tests.
 - Updated CMake post-build asset copies for both GLFW example targets and added a test that parses, validates, builds, lays out the showcase, confirms its stateful authored IDs, and paints each of the three tab pages to non-empty draw geometry.
 - Adjusted the facade FPS-counter wait: the counter value changes once per second, so idle redraws now wait at 10 Hz and platform events still wake the loop promptly. `redrawContinuously` no longer incurs an artificial 120 Hz wait, making hidden continuous profile numbers reflect loop throughput. Trade-off: the idle overlay may refresh less often than the rendering loop when used in a non-continuous app; user input and resize still request redraws immediately.
-- Updated the README and `doc/README.md`, `doc/getting-started.md`, and `doc/widgets.md` to describe the default showcase and link the new sample. Updated `plan.md` from 149 to 150 tests and recorded the latest bounded profiles and verification limits.
+- Updated the README and `docs/README.md`, `docs/getting-started.md`, and `docs/widgets.md` to describe the default showcase and link the new sample. Updated `plan.md` from 149 to 150 tests and recorded the latest bounded profiles and verification limits.
 
 ### Verification
 
@@ -1181,7 +1190,7 @@ Premise corrections worth recording: this checkout has a GLFW + OpenGL 2.1 backe
 - Aligned overlay input ordering with paint order: the last painted open popup receives clicks first, tab headers receive clicks above normal tree content, and outside clicks dismiss popups before reaching the newly exposed target. Split gutters receive input only if no later-painted child surface covers them. Tooltip bubbles remain pointer-transparent.
 - Changed FPS sampling and display updates to 250 ms. The facade schedules at most four overlay redraws per second while an event-driven app is otherwise idle; ordinary input/resize still wakes it immediately. Continuous redraw/profile mode does not wait for or force a separate FPS redraw.
 - Removed unreferenced source assets `examples/hello.xui` and `examples/hello.xss`, plus stale generated copies in `build/verify-vs/examples` and its `Debug` output. Kept `cross_platform`, `controls`, and `showcase` because their current uses were confirmed in tests/docs/CMake/demo.
-- Expanded `doc/widgets.md` with `.xui` values, value/event semantics, `.xss` examples and states for TextBox, TextArea, Tabs/Tab, Dropdown, ColorPicker, and Tooltip. Added explicit stacking/hit-testing semantics and limitations. Updated `doc/architecture.md`, `doc/performance.md`, and `doc/styling-reference.md` for tree order, overlay order, pointer routing, the 250 ms FPS cadence, and unimplemented arbitrary `z-index`/general container clipping.
+- Expanded `docs/widgets.md` with `.xui` values, value/event semantics, `.xss` examples and states for TextBox, TextArea, Tabs/Tab, Dropdown, ColorPicker, and Tooltip. Added explicit stacking/hit-testing semantics and limitations. Updated `docs/architecture.md`, `docs/performance.md`, and `docs/styling-reference.md` for tree order, overlay order, pointer routing, the 250 ms FPS cadence, and unimplemented arbitrary `z-index`/general container clipping.
 - Added a regression fixture where an active tab-page button overlaps a dropdown beneath the tabs and verifies that the front button receives the event and the covered dropdown does not open. Strengthened tab coverage so a hidden page button cannot receive a click, and added an FPS scheduling deadline assertion.
 
 ### Decisions and trade-offs
@@ -1335,15 +1344,15 @@ Premise corrections worth recording: this checkout has a GLFW + OpenGL 2.1 backe
 
 ### Changes and decisions
 
-- Replaced the root README's duplicate table of contents and repeated setup/usage sections with a short project description and links to the canonical `doc/` and `plan/` indexes.
+- Replaced the root README's duplicate table of contents and repeated setup/usage sections with a short project description and links to the canonical `docs/` and `plan/` indexes.
 - Added a compact `xui::Xui` startup example using the current GLFW/OpenGL backend class names, with matching minimal `.xui` and `.xss` files. The sample expects the application's TrueType font at `font.ttf`; font files are not bundled in this repository.
-- Added the existing `doc/showcase.png` with a caption describing only visible showcase content, and linked its `.xui`, `.xss`, C++ entry point, and widget documentation.
-- Kept the fuller setup and backend build instructions in `doc/getting-started.md` rather than duplicating them in the root entry point.
+- Added the existing `docs/showcase.png` with a caption describing only visible showcase content, and linked its `.xui`, `.xss`, C++ entry point, and widget documentation.
+- Kept the fuller setup and backend build instructions in `docs/getting-started.md` rather than duplicating them in the root entry point.
 
 ### Verification and status
 
 - Inspected `include/xui/xui.hpp`, the GLFW demo and backend declarations, getting-started/architecture guides, and the screenshot. The methods, options, backend class names, and referenced files in the README match the current source tree.
-- Confirmed `doc/showcase.png` exists and visually shows the tabbed GLFW/OpenGL showcase, themed controls, a checklist, splitter panels, and the FPS/readout area.
+- Confirmed `docs/showcase.png` exists and visually shows the tabbed GLFW/OpenGL showcase, themed controls, a checklist, splitter panels, and the FPS/readout area.
 - A fresh compile could not be run in this environment because `cmake`, `cl`, and `msbuild` are not available on `PATH`. Existing prebuilt demo binaries are present, but they do not constitute a fresh verification of this README snippet. No framework code or build files were changed.
 - Current status: README content and internal links were source-checked; compile verification of the exact inline sample remains unconfirmed. The user can follow the linked getting-started build instructions to compile the bundled GLFW example.
 
@@ -1354,7 +1363,7 @@ Premise corrections worth recording: this checkout has a GLFW + OpenGL 2.1 backe
 - Added the recursive `DockTree` model and runtime `DockHost`/`DockSpace` plus `DockPanel` support. A host accepts direct panel children; panels can form nested edge splits, center tab groups, close, and float as overlays inside the host window. Splitter drag updates ratios live, panel layout honors explicit min/max and percent constraints, and Escape cancels an in-progress panel drag.
 - Added `.xui` `region`, `target`, `floating`, `closable`, `icon`, `preferredSize`, `gutter`, and `headerHeight` handling; common `minSize`/`maxSize` rules still apply. Added `DockPanelValue` retrieval/set and `dock`/`undock`/`resize`/`tabChange`/`close` handler routing.
 - Added XSS-resolved subparts `DockHeader`, `DockTab`, `DockCloseButton`, `DockSplitter`, and `DockPreview`, with hover/selected/pressed/dragging states. Added a Docking tab to `examples/showcase.xui` and matching theme rules in `examples/showcase.xss`; the GLFW app reflects dock state in a readout.
-- Added `doc/docking.md`, linked it from the docs index and widget/layout/architecture guides, and updated the runtime support list.
+- Added `docs/docking.md`, linked it from the docs index and widget/layout/architecture guides, and updated the runtime support list.
 - During integration, overlay hit-testing and paint initially considered dock hosts inside inactive showcase tabs. This stole pointer input from other pages and could draw hidden dock chrome. The dock paint, hit-test, cursor, and pointer-start passes now skip hosts whose tab ancestry is inactive.
 - Floating is in-app as requested. Recursive splits use a dedicated tree rather than ordinary `.xui` Split nodes. Initial placement uses `region` because `dock` names the runtime event. The model's move/split-drag paths do not allocate; dock topology changes may grow storage at drop time. Closed panels currently cannot be reopened through the value API.
 
@@ -1389,7 +1398,7 @@ Premise corrections worth recording: this checkout has a GLFW + OpenGL 2.1 backe
 - Moved `cross_platform.xui/.xss` and `controls.xui/.xss` from `examples/` to `tests/fixtures/`, as approved. Updated `XUI_TEST_FIXTURE_DIR`, runtime fixture loading, user guide links, and source-layout documentation. `showcase.xui/.xss` stay in `examples/` because the demo, runtime tests, README, and docs share them. Other small tests author markup inline in their owning C++ tests.
 - Moved the `XUI_BUILD_GLFW_EXAMPLE` option to the root CMake configuration so the optional backend/example build is discoverable alongside other project options. Examples add the backend subdirectory only after GLFW and OpenGL targets are available. No install/export rules existed for the backend adapters; none were added, so the stable installed/public include contract remains unchanged.
 - Searched the repository (excluding build outputs and vendored GLFW). All authored asset pairs have references: showcase is demo/tests/docs; cross-platform and controls are tests/docs. No unused `.xui` or `.xss` files were identified, so no assets were deleted. No `.xss` deletion was needed.
-- Updated the root README, `doc/README.md`, user architecture/getting-started/widget/XUI guides, `plan/architecture.md`, and this tracking entry for the new paths. The root plan notes the location split and uses the latest profile numbers.
+- Updated the root README, `docs/README.md`, user architecture/getting-started/widget/XUI guides, `plan/architecture.md`, and this tracking entry for the new paths. The root plan notes the location split and uses the latest profile numbers.
 
 ### Verification and status
 
@@ -1478,7 +1487,7 @@ Premise corrections worth recording: this checkout has a GLFW + OpenGL 2.1 backe
 - Added a distinct glow style path and animated paint interpolation for color/number values, state transitions, and keyframe playback. A hidden node does not tick; removing and later reapplying a keyframe animation starts it from the beginning.
 - Nested child nodes on `Button` now use a column layout and clear the separate label to avoid double painting. Added tests for intrinsic nested content and min/max constraints.
 - Nested showcase tabs exposed an ancestor-visibility bug: `isNodeVisible()` returned the selected status from the nearest `Tabs` instead of checking outer tab ancestors. It now rejects a non-selected page but continues the ancestor walk. This restored pointer targeting in all showcase sections and is covered by the existing showcase interaction test.
-- Added the eighth showcase section and styling examples for paint, fonts, auto sizing, transitions, and keyframes. Updated `doc/styling-reference.md`, `doc/xss-guide.md`, `doc/widgets.md`, and `doc/architecture.md`.
+- Added the eighth showcase section and styling examples for paint, fonts, auto sizing, transitions, and keyframes. Updated `docs/styling-reference.md`, `docs/xss-guide.md`, `docs/widgets.md`, and `docs/architecture.md`.
 
 ### Trade-offs and limitations
 
@@ -1510,7 +1519,7 @@ Premise corrections worth recording: this checkout has a GLFW + OpenGL 2.1 backe
 - Raised floating dock panels to the front when activated, ordered their paint by z-order, and added a default shadow for floating panel chrome. Added a `DockTree` overlap test proving `panelAt()` follows raise order.
 - `MenuBar` materializes as a styled horizontal client-area container, so menus can be authored with ordinary controls. Per the user's selected fallback, the native title bar remains. Dedicated Menu/MenuItem behavior, native decoration controls, drag-to-move window support, and menu-specific keyboard navigation are not included.
 - Added a client-area File/Edit/View menu row to the showcase using ordinary Dropdowns and a Help Button. Added `--profile-menubar` alongside the animation, transform, glow, and docking profiles. Added paused ProgressBar keyframes with Play Once, Loop, and Stop controls wired from demo events.
-- Updated the feature profiles in `examples/glfw_demo.cpp` and corrected stale animation claims in `doc/styling-reference.md` and `doc/troubleshooting.md`. Added menu and profile documentation to `doc/widgets.md` and `doc/performance.md`, animation event usage to `doc/animations-fonts-transforms.md`, and transform/animation data flow to `doc/architecture.md`; refreshed `plan/plan.md` with verification boundaries and remaining gaps.
+- Updated the feature profiles in `examples/glfw_demo.cpp` and corrected stale animation claims in `docs/styling-reference.md` and `docs/troubleshooting.md`. Added menu and profile documentation to `docs/widgets.md` and `docs/performance.md`, animation event usage to `docs/animations-fonts-transforms.md`, and transform/animation data flow to `docs/architecture.md`; refreshed `plan/plan.md` with verification boundaries and remaining gaps.
 
 ### Decisions and trade-offs
 
@@ -1552,13 +1561,13 @@ Premise corrections worth recording: this checkout has a GLFW + OpenGL 2.1 backe
 
 - Rechecked the reported startup message against the current Release demo executable. `xui_glfw_demo.exe --profile-glow` initialized and completed at **366.075 FPS**; `--profile-animation` initialized and completed at **554.182 FPS**. Both use the GLFW/OpenGL backend, so the current executable no longer reproduces renderer initialization failure.
 - The exact generic message is emitted by the older `Xui::attach()` path when its renderer does not expose a detailed error (or when the platform reports a zero-sized framebuffer). The current OpenGL renderer returns shader/context/buffer diagnostics through `lastError()`. The most likely cause is launching a stale executable or a different build tree; `build/final-release/examples/Release/xui_glfw_demo.exe` is the verified path in this checkout. There is no `xui_hello` target in the current CMake sources; older build directories may still contain that obsolete executable.
-- Corrected `doc/getting-started.md`, which incorrectly claimed Windows builds an `xui_hello` target. The current build target is `xui_glfw_demo`.
+- Corrected `docs/getting-started.md`, which incorrectly claimed Windows builds an `xui_hello` target. The current build target is `xui_glfw_demo`.
 - An incremental MSBuild refresh was attempted, but the process stopped producing output and was interrupted. Thus the profile results verify the existing Release binary, not a fresh rebuild in this follow-up. No source code changed in this follow-up.
 - Next step if the error remains: launch the current `xui_glfw_demo` target from a fresh build directory and copy the complete error text, including anything after the colon. A current OpenGL shader failure should now include its driver log.
 
 # 2026-10-23 — Build FreeType from the bundled source
 
-- Audit: `lib/freetype-2.15.0` is a complete FreeType 2.15.0 source tree. No prebuilt library files were present. The vcpkg manifest listed only FreeType; CI used vcpkg only to install FreeType for Windows. There is no root `CMakePresets.json` or `.gitmodules`.
+- Audit: `libs/freetype-2.15.0` is a complete FreeType 2.15.0 source tree. No prebuilt library files were present. The vcpkg manifest listed only FreeType; CI used vcpkg only to install FreeType for Windows. There is no root `CMakePresets.json` or `.gitmodules`.
 - Changes: replaced system package discovery with `add_subdirectory` for the bundled FreeType source and a stable `xui::freetype` interface target. The text library links that wrapper. The FreeType target is kept static. System zlib and optional bzip2, PNG, HarfBuzz, Brotli, and HVF integrations are disabled; FreeType keeps its internal zlib inflater.
 - Removed package-manager wiring for the one declared dependency: removed `vcpkg.json`, the Windows vcpkg install/toolchain steps, Linux `libfreetype-dev`, macOS Homebrew FreeType installation, and the stale setup instructions. GLFW's unrelated system requirements remain.
 - Decision: use source instead of platform-specific prebuilts. This keeps the dependency build consistent across Windows/macOS/Linux and avoids accidental system FreeType selection. Optional modules are disabled because Xui calls FreeType for variable `glyf` axis evaluation/outlines and does not use their services.
@@ -1588,7 +1597,7 @@ Premise corrections worth recording: this checkout has a GLFW + OpenGL 2.1 backe
 
 - Choice: implement the user-selected turn-based encounter, with combat actions driven by UI events. `Xui::run()` does not expose a per-frame application callback, so the sample does not add a parallel GL render loop or bypass the backend interfaces. The agreed scope is an event-driven game-UI sample; real-time simulation and per-frame HUD updates are out of scope.
 - Added `examples/game/` with `game.cpp`, `game.xui`, `game.xss`, a target-specific `CMakeLists.txt`, and `README.md`. Six authored pages cover Main Menu, Encounter, Paused, Settings, Inventory, and Results. The UI document owns widget structure; the stylesheet owns the theme, control states, and notice animations. C++ implements strike/heavy strike, guard, healing, difficulty, equipment bonuses, and state-to-widget updates through the existing typed value/event API.
-- Added `xui_game_demo` under the existing GLFW example option and copy rules for the game documents and the shared Roboto font. Root README and `doc/README.md` now link the sample. Added `turn_based_game_example_assets_parse_validate_and_build` to parse, validate, build, lay out, and check its authored control IDs in the null backend.
+- Added `xui_game_demo` under the existing GLFW example option and copy rules for the game documents and the shared Roboto font. Root README and `docs/README.md` now link the sample. Added `turn_based_game_example_assets_parse_validate_and_build` to parse, validate, build, lay out, and check its authored control IDs in the null backend.
 - The first build caught an unused local under warnings-as-errors. The asset test then caught malformed `.xui` property delimiters and button callbacks placed in the constructor parameter list instead of the widget property block. Fixed these at the example source; added a live `Hints: on/off` readout update alongside the combat hint.
 - Trade-off: the pause page is a tab, not a focus-trapping modal; there is no game canvas or sprite rendering; idle gameplay has no simulation loop. These choices exercise framework UI without introducing platform-specific rendering or changing the public run-loop API.
 - Verification: Windows MSVC Release build succeeded for `xui_tests` and `xui_game_demo`; the target links the GLFW/OpenGL backend libraries. The full test executable reports **199 tests, 0 failures**, including the new game asset/runtime case. `git diff --check` found no whitespace errors; its output contains existing LF-to-CRLF working-copy notices.
@@ -1626,7 +1635,7 @@ Premise corrections worth recording: this checkout has a GLFW + OpenGL 2.1 backe
 
 ## 2026-10-24 — Add optional stb_image and LunaSVG image loading
 
-- Audit: `lib/std_image/stb_image.h` is the bundled single-header decoder; `lib/lunasvg-3.5.0/` contains LunaSVG source plus plutovg. The `Image` runtime previously decoded only the project's custom PNG format via `readPng()`. The showcase generated a PNG from C++ at startup and its asset path depended on the working directory. Renderer already exposed RGBA8 texture creation, so image loading could remain in the shared resource layer without backend-specific rendering code.
+- Audit: `libs/std_image/stb_image.h` is the bundled single-header decoder; `libs/lunasvg-3.5.0/` contains LunaSVG source plus plutovg. The `Image` runtime previously decoded only the project's custom PNG format via `readPng()`. The showcase generated a PNG from C++ at startup and its asset path depended on the working directory. Renderer already exposed RGBA8 texture creation, so image loading could remain in the shared resource layer without backend-specific rendering code.
 - Changes: added `xui_image` as a separate target and `XUI_ENABLE_IMAGE_SUPPORT` (default ON). stb_image is limited to PNG/JPEG/BMP/TGA; LunaSVG and plutovg build as static CMake subprojects. `readImage()` returns straight-alpha top-left RGBA8 pixels and validates dimensions before allocation. `SvgImage` owns a parsed LunaSVG document and rasterizes aspect-preserving output on demand. Runtime images resolve relative paths from the entry `.xui` directory, use natural intrinsic dimensions for auto sizing, upload through `Renderer::createTexture`, and release textures when the renderer detaches. SVG raster output is reused until a 64-pixel physical-size bucket changes. Existing `readPng()`/`writePng()` remain unchanged for golden fixtures.
 - Demo: replaced the C++-generated PNG with checked-in `examples/xui-demo-image.svg`, featuring vector paths and linear/radial gradients. `showcase.xui` refers to the SVG; CMake copies it beside the executable with the `.xui` and `.xss` files.
 - Decisions/trade-offs: build-time optional support avoids making image dependencies mandatory for headless/minimal consumers. LunaSVG source is preferred over a system package for consistent implementation and to use the user-provided copy. Maximum decoded/raster dimensions are 16,384 pixels per side and 64M pixels total. SVG text, filters, masks, clip paths, and animation are explicitly not supported. Image alpha and texture behavior stay in the shared RGBA path; layout/style remain in `.xui`/`.xss` and renderer/platform interfaces remain unchanged.

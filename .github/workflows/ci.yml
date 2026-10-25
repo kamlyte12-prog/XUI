@@ -29,7 +29,7 @@ jobs:
             build/_deps/freetype
             build/_deps/harfbuzz
             build/_deps/lunasvg
-          key: xui-deps-${{ runner.os }}-${{ matrix.name }}-${{ hashFiles('CMakeLists.txt', 'lib/freetype-2.15.0/**', 'lib/harfbuzz-15.0.0/**', 'lib/lunasvg-3.5.0/**') }}
+          key: xui-deps-${{ runner.os }}-${{ matrix.name }}-${{ hashFiles('CMakeLists.txt', 'libs/freetype-2.15.0/**', 'libs/harfbuzz-15.0.0/**', 'libs/lunasvg-3.5.0/**') }}
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'

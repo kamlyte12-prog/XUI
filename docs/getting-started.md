@@ -4,12 +4,12 @@ This guide creates a small app with one `.xui` layout and one `.xss` stylesheet.
 
 ## Build Xui
 
-Xui uses CMake 3.25+, a C++23 compiler, and a C compiler for bundled FreeType and HarfBuzz. Their source is included under `lib/` and built as static dependencies by CMake; no system FreeType or HarfBuzz package is used. The GLFW source is also bundled. The GLFW example needs OpenGL development files and the platform window-system dependencies. On Ubuntu, install `libgl-dev xorg-dev libwayland-dev libxkbcommon-dev`; macOS uses its system Cocoa/OpenGL frameworks.
+Xui uses CMake 3.25+, a C++23 compiler, and a C compiler for bundled FreeType and HarfBuzz. Their source is included under `libs/` and built as static dependencies by CMake; no system FreeType or HarfBuzz package is used. The GLFW source is also bundled. The GLFW example needs OpenGL development files and the platform window-system dependencies. On Ubuntu, install `libgl-dev xorg-dev libwayland-dev libxkbcommon-dev`; macOS uses its system Cocoa/OpenGL frameworks.
 
 Keep the bundled FreeType source in this exact directory layout:
 
 ```text
-lib/
+libs/
 ├── freetype-2.15.0/
 │   ├── CMakeLists.txt
 │   ├── include/freetype/freetype.h
@@ -26,7 +26,7 @@ Xui disables FreeType's optional zlib, bzip2, PNG, HarfBuzz, Brotli, and HVF int
 Image decoding is optional at configure time and enabled by default. The expected bundled layout is:
 
 ```text
-lib/
+libs/
 ├── std_image/stb_image.h
 └── lunasvg-3.5.0/
     ├── CMakeLists.txt

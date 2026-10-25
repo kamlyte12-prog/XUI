@@ -2,7 +2,7 @@
 
 Xui is an experimental C++23 UI framework. `.xui` files describe widget structure and layout; `.xss` files describe appearance. Applications connect those files to implementations of `xui::Renderer` and `xui::Platform`.
 
-The bundled interactive example uses GLFW and OpenGL. Start with the [user documentation index](doc/README.md) for setup, file formats, widgets, and troubleshooting. Agent instructions, architecture notes, and the roadmap are in [`plan/`](plan/README.md); coding agents should read [`AGENTS.md`](AGENTS.md) first.
+The bundled interactive example uses GLFW and OpenGL. Start with the [user documentation index](docs/README.md) for setup, file formats, widgets, and troubleshooting. Agent instructions, architecture notes, and the roadmap are in [`plan/`](plan/README.md); coding agents should read [`AGENTS.md`](AGENTS.md) first.
 
 ## Getting started
 
@@ -65,13 +65,13 @@ Button.primary {
 }
 ```
 
-For a complete build setup and asset instructions, see [Getting started](doc/getting-started.md). The sample uses the current `xui::Xui` facade; custom backends can implement the same [`Renderer`](doc/architecture.md#implement-xuirenderer) and [`Platform`](doc/architecture.md#implement-xuiplatform) interfaces.
+For a complete build setup and asset instructions, see [Getting started](docs/getting-started.md). The sample uses the current `xui::Xui` facade; custom backends can implement the same [`Renderer`](docs/architecture.md#implement-xuirenderer) and [`Platform`](docs/architecture.md#implement-xuiplatform) interfaces.
 
 ## Showcase
 
-![Xui GLFW/OpenGL showcase](doc/showcase.png)
+![Xui GLFW/OpenGL showcase](docs/showcase.png)
 
-The screenshot shows the themed showcase window with a tabbed layout, checklist, splitter, and live value readouts. The complete demo is defined in [`showcase.xui`](examples/showcase.xui) and [`showcase.xss`](examples/showcase.xss), and wired by [`glfw_demo.cpp`](examples/glfw_demo.cpp). See the [widget reference](doc/widgets.md) for supported controls and their behavior.
+The screenshot shows the themed showcase window with a tabbed layout, checklist, splitter, and live value readouts. The complete demo is defined in [`showcase.xui`](examples/showcase.xui) and [`showcase.xss`](examples/showcase.xss), and wired by [`glfw_demo.cpp`](examples/glfw_demo.cpp). See the [widget reference](docs/widgets.md) for supported controls and their behavior.
 
 ## Game UI example
 
@@ -79,7 +79,7 @@ The screenshot shows the themed showcase window with a tabbed layout, checklist,
 
 ## Project links
 
-- [Documentation index](doc/README.md): setup, `.xui`, `.xss`, widget and style references, architecture, performance, and troubleshooting.
+- [Documentation index](docs/README.md): setup, `.xui`, `.xss`, widget and style references, architecture, performance, and troubleshooting.
 - [Project plan](plan/plan.md): current status, risks, and roadmap.
 - [Change tracking](plan/tracking.md): implementation decisions and verification history.
 - [Contributing](CONTRIBUTING.md)

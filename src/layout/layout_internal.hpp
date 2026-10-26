@@ -38,5 +38,6 @@ namespace xui {
 	struct LayoutTree::GridItem {
 		u32 node = 0; i32 col = 0, row = 0; u32 cs = 1, rs = 1;
 		f32 ml = 0, mt = 0, mr = 0, mb = 0;
+		bool explicitCell = false;
 	};
 }

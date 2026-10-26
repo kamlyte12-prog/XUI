@@ -167,6 +167,37 @@ namespace xui {
 			return true;
 		}
 
+		bool parseGridTracks(std::string_view source, GridTrack* tracks, u8& count, std::string& error) {
+			count = 0;
+			std::size_t begin = 0;
+			while (begin <= source.size()) {
+				const std::size_t end = source.find('|', begin);
+				std::string_view token = source.substr(begin, end == std::string_view::npos ? source.size() - begin : end - begin);
+				while (!token.empty() && std::isspace(static_cast<unsigned char>(token.front()))) token.remove_prefix(1);
+				while (!token.empty() && std::isspace(static_cast<unsigned char>(token.back()))) token.remove_suffix(1);
+				if (token.empty()) { error = "Grid track list contains an empty track"; return false; }
+				if (count >= kMaxTracks) { error = "Grid supports at most 8 explicit tracks per axis"; return false; }
+				if (token == "auto" || token == "Auto") tracks[count] = GridTrack::autoTrack();
+				else {
+					const bool fraction = token.size() > 2 && token.substr(token.size() - 2) == "fr";
+					const bool pixels = token.size() > 2 && token.substr(token.size() - 2) == "px";
+					const std::size_t numberLength = token.size() - (fraction || pixels ? 2 : 0);
+					std::string numberText(token.substr(0, numberLength));
+					char* parsedEnd = nullptr;
+					const f32 value = std::strtof(numberText.c_str(), &parsedEnd);
+					if (parsedEnd != numberText.c_str() + numberText.size() || !std::isfinite(value) || value < 0.f || (fraction && value <= 0.f)) {
+						error = "Grid tracks must be `auto`, non-negative pixel sizes, or positive `fr` weights";
+						return false;
+					}
+					tracks[count] = fraction ? GridTrack::fr(value) : GridTrack::px(value);
+				}
+				++count;
+				if (end == std::string_view::npos) break;
+				begin = end + 1;
+			}
+			return count != 0;
+		}
+
 		Color hsv(f32 hue, f32 saturation, f32 value) {
 			hue -= std::floor(hue);
 			const f32 h = hue * 6.f, c = value * saturation, x = c * (1.f - std::fabs(std::fmod(h, 2.f) - 1.f)), m = value - c;
@@ -745,6 +776,8 @@ namespace xui {
 		node.separator = typeIs(source.type, *m_strings, "Separator") || typeIs(source.type, *m_strings, "Divider");
 		node.spinner = typeIs(source.type, *m_strings, "Spinner");
 		node.image = typeIs(source.type, *m_strings, "Image");
+		node.iconWidget = typeIs(source.type, *m_strings, "Icon");
+		node.treeView = typeIs(source.type, *m_strings, "TreeView");
 		node.datePicker = typeIs(source.type, *m_strings, "DatePicker");
 		node.segmented = typeIs(source.type, *m_strings, "SegmentedControl");
 		node.stepper = typeIs(source.type, *m_strings, "Stepper");
@@ -759,6 +792,12 @@ namespace xui {
 		if (typeIs(source.type, *m_strings, "Window") || typeIs(source.type, *m_strings, "Column") ||
 			typeIs(source.type, *m_strings, "Panel") || typeIs(source.type, *m_strings, "CheckList") || node.dockPanel) {
 			node.layout = m_layout.create(LayoutKind::Column);
+		}
+		else if (typeIs(source.type, *m_strings, "Grid")) {
+			node.layout = m_layout.create(LayoutKind::Grid);
+		}
+		else if (typeIs(source.type, *m_strings, "Stack")) {
+			node.layout = m_layout.create(LayoutKind::Stack);
 		}
 		else if (node.dockHost) node.layout = m_layout.create(LayoutKind::Stack);
 		else if (typeIs(source.type, *m_strings, "Row") || typeIs(source.type, *m_strings, "Toolbar") ||
@@ -780,7 +819,7 @@ namespace xui {
 		else if (node.tab) {
 			node.layout = m_layout.create(LayoutKind::Column);
 		}
-		else if (typeIs(source.type, *m_strings, "Text") || node.button || node.checkItem || node.checkBox || node.slider || node.progressBar || node.fpsCounter || node.dropdown || node.colorPicker || node.textBox || node.textArea || node.radioGroup || node.switchToggle || node.toggleButton || node.label || node.badge || node.separator || node.spinner || node.image || node.datePicker || node.segmented || node.stepper || node.rating || node.breadcrumb || node.keybindField || node.menu || node.menuItem) {
+		else if (typeIs(source.type, *m_strings, "Text") || node.button || node.checkItem || node.checkBox || node.slider || node.progressBar || node.fpsCounter || node.dropdown || node.colorPicker || node.textBox || node.textArea || node.radioGroup || node.switchToggle || node.toggleButton || node.label || node.badge || node.separator || node.spinner || node.image || node.iconWidget || node.treeView || node.datePicker || node.segmented || node.stepper || node.rating || node.breadcrumb || node.keybindField || node.menu || node.menuItem) {
 			node.layout = m_layout.create(LayoutKind::Leaf);
 		}
 		else {
@@ -818,6 +857,7 @@ namespace xui {
 				if (m_strings->view(arg.name) == "title") node.text.assign(literal(document, *m_strings, arg.expr));
 		}
 		if (node.image && source.argCount) node.imageSource.assign(literal(document, *m_strings, document.args[source.argFirst].expr));
+		if (node.iconWidget && source.argCount) node.iconName.assign(literal(document, *m_strings, document.args[source.argFirst].expr));
 		for (const XArg& arg : document.argsOf(source)) {
 			const std::string_view name = m_strings->view(arg.name);
 			if (name == "checked" && arg.expr < document.exprs.size())
@@ -966,6 +1006,49 @@ namespace xui {
 				else node.imageFit = 1;   // Contain is the default
 			}
 			else if (node.image && name == "source" && prop.role == XPropRole::Value) node.imageSource.assign(value);
+			else if (node.iconWidget && name == "name" && prop.role == XPropRole::Value) node.iconName.assign(value);
+			else if (node.treeView && name == "items" && prop.role == XPropRole::Value) {
+				auto trim = [](std::string_view text) {
+					while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front()))) text.remove_prefix(1);
+					while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back()))) text.remove_suffix(1);
+					return text;
+				};
+				std::size_t itemStart = 0;
+				while (true) {
+					const std::size_t itemEnd = value.find('|', itemStart);
+					std::string normalized(trim(value.substr(itemStart, itemEnd == std::string_view::npos ? value.size() - itemStart : itemEnd - itemStart)));
+					if (normalized.empty()) { error = "TreeView items must not contain an empty path"; return false; }
+					std::replace(normalized.begin(), normalized.end(), '\\', '/');
+					i32 parentEntry = -1;
+					std::string prefix;
+					std::size_t segmentStart = 0;
+					while (segmentStart < normalized.size()) {
+						const std::size_t segmentEnd = normalized.find('/', segmentStart);
+						const std::string_view segment(normalized.data() + segmentStart,
+							(segmentEnd == std::string::npos ? normalized.size() : segmentEnd) - segmentStart);
+						if (segment.empty() || segment == "." || segment == "..") { error = "TreeView paths must use non-empty relative name segments"; return false; }
+						if (!prefix.empty()) prefix += '/';
+						prefix.append(segment);
+						u32 entryIndex = 0xFFFFFFFFu;
+						for (u32 i = 0; i < node.treeEntries.size(); ++i)
+							if (node.treeEntries[i].path == prefix) { entryIndex = i; break; }
+						if (entryIndex == 0xFFFFFFFFu) {
+							Node::TreeEntry entry;
+							entry.path = prefix; entry.label.assign(segment); entry.parent = parentEntry;
+							entry.depth = parentEntry < 0 ? 0u : node.treeEntries[static_cast<u32>(parentEntry)].depth + 1u;
+							entryIndex = static_cast<u32>(node.treeEntries.size());
+							node.treeEntries.push_back(std::move(entry));
+							if (parentEntry >= 0) node.treeEntries[static_cast<u32>(parentEntry)].hasChildren = true;
+						}
+						parentEntry = static_cast<i32>(entryIndex);
+						if (segmentEnd == std::string::npos) break;
+						segmentStart = segmentEnd + 1;
+					}
+					if (itemEnd == std::string_view::npos) break;
+					itemStart = itemEnd + 1;
+				}
+			}
+			else if (node.treeView && name == "selected" && prop.role == XPropRole::Value) node.treeSelection.assign(value);
 			else if (node.progressBar && name == "indeterminate" && prop.role == XPropRole::Value && prop.expr < document.exprs.size())
 				node.indeterminate = document.exprs[prop.expr].kind == XExprKind::Bool && document.exprs[prop.expr].bval;
 			else if ((name == "readOnly" || name == "password") && prop.role == XPropRole::Value && prop.expr < document.exprs.size()) {
@@ -1139,6 +1222,35 @@ namespace xui {
 			error = "unsupported value for .xui layout property '" + std::string(property) + "'";
 			return false;
 			};
+		if (typeIs(source.type, *m_strings, "Grid")) {
+			auto readTracks = [&](std::string_view property, u32 expressionIndex, const XExpr& expression, GridTrack* tracks, u8& count) {
+				const std::string_view sourceText = literal(document, *m_strings, expressionIndex);
+				if (expression.kind != XExprKind::String && expression.kind != XExprKind::Name) {
+					error = "Grid " + std::string(property) + " must be a quoted track list such as `\"120px|1fr\"`";
+					return false;
+				}
+				std::string trackError;
+				if (!parseGridTracks(sourceText, tracks, count, trackError)) {
+					error = "invalid Grid " + std::string(property) + ": " + trackError;
+					return false;
+				}
+				return true;
+			};
+			for (const XArg& arg : document.argsOf(source)) {
+				const std::string_view name = arg.name.v ? m_strings->view(arg.name) : std::string_view("columns");
+				if (name == "columns" && arg.expr < document.exprs.size() &&
+					!readTracks("columns", arg.expr, document.exprs[arg.expr], authoredLayout.cols, authoredLayout.colCount)) return false;
+			}
+			for (const XProp& prop : document.propsOf(source)) {
+				if (prop.role != XPropRole::Value || prop.expr >= document.exprs.size()) continue;
+				const std::string_view name = m_strings->view(prop.name);
+				if (name == "rows" && !readTracks("rows", prop.expr, document.exprs[prop.expr], authoredLayout.rows, authoredLayout.rowCount)) return false;
+			}
+			if (authoredLayout.colCount == 0) {
+				error = "Grid requires a non-empty columns track list";
+				return false;
+			}
+		}
 		auto parseGap = [&](const XExpr& expression, std::string_view property) {
 			if (expression.kind == XExprKind::Size) {
 				authoredLayout.gap = { std::max(0.f, expression.num), std::max(0.f, expression.num2) };
@@ -1148,6 +1260,7 @@ namespace xui {
 			if (!layoutPixels(expression, value)) return failLayout(property);
 			const f32 gap = std::max(0.f, value);
 			if (typeIs(source.type, *m_strings, "Row")) authoredLayout.gap.x = gap;
+			else if (typeIs(source.type, *m_strings, "Grid")) authoredLayout.gap = { gap, gap };
 			else authoredLayout.gap.y = gap;
 			return true;
 			};
@@ -1204,7 +1317,7 @@ namespace xui {
 				else if (value == "Stretch") alignValue = Align::Stretch;
 				else return failLayout(name);
 				const bool container = typeIs(source.type, *m_strings, "Window") || typeIs(source.type, *m_strings, "Column") ||
-					typeIs(source.type, *m_strings, "Row") || typeIs(source.type, *m_strings, "Panel") ||
+					typeIs(source.type, *m_strings, "Row") || typeIs(source.type, *m_strings, "Grid") || typeIs(source.type, *m_strings, "Stack") || typeIs(source.type, *m_strings, "Panel") ||
 					typeIs(source.type, *m_strings, "CheckList") || typeIs(source.type, *m_strings, "Tab") ||
 					(node.button && !document.childrenOf(source).empty()) || node.dockPanel || node.dockHost;
 				if (container) authoredLayout.alignItems = alignValue;
@@ -1236,8 +1349,43 @@ namespace xui {
 				else if (name == "right") authoredLayout.right = value;
 				else authoredLayout.bottom = value;
 			}
-			else if (name == "gap" && typeIs(source.type, *m_strings, "CheckList")) {
+			else if (name == "gridColumn" || name == "gridRow" || name == "columnSpan" || name == "rowSpan") {
+				if (expression.kind != XExprKind::Number || !std::isfinite(expression.num) || std::floor(expression.num) != expression.num)
+					return failLayout(name);
+				if (name == "gridColumn" || name == "gridRow") {
+					if (expression.num < 0.f || expression.num > 1024.f) return failLayout(name);
+					if (name == "gridColumn") authoredLayout.gridCol = static_cast<i32>(expression.num);
+					else authoredLayout.gridRow = static_cast<i32>(expression.num);
+				}
+				else {
+					if (expression.num < 1.f || expression.num > kMaxTracks) return failLayout(name);
+					if (name == "columnSpan") authoredLayout.colSpan = static_cast<u8>(expression.num);
+					else authoredLayout.rowSpan = static_cast<u8>(expression.num);
+				}
+			}
+			else if (name == "gap" && (typeIs(source.type, *m_strings, "CheckList") || typeIs(source.type, *m_strings, "Grid"))) {
 				if (!parseGap(expression, name)) return false;
+			}
+		}
+		if (parentIndex != 0xFFFFFFFFu && parentIndex < m_nodes.size() &&
+			typeIs(m_nodes[parentIndex].type, *m_strings, "Grid") &&
+			((authoredLayout.gridCol >= 0) != (authoredLayout.gridRow >= 0))) {
+			error = "Grid child placement must specify both gridColumn and gridRow, or neither for auto-placement";
+			return false;
+		}
+		if (node.treeView) {
+			if (!document.childrenOf(source).empty()) { error = "TreeView uses slash-separated paths in its items property and does not accept child widgets"; return false; }
+			if (node.treeEntries.empty()) { error = "TreeView requires at least one path in its items property"; return false; }
+			if (!node.treeSelection.empty() && std::none_of(node.treeEntries.begin(), node.treeEntries.end(),
+				[&](const Node::TreeEntry& entry) { return entry.path == node.treeSelection; })) {
+				error = "TreeView selected value must match an item path"; return false;
+			}
+		}
+		if (node.iconWidget) {
+			static constexpr std::string_view icons[] = { "add", "check", "chevron-down", "chevron-right", "close", "file", "folder", "home", "menu", "minus", "search" };
+			if (std::find(std::begin(icons), std::end(icons), node.iconName) == std::end(icons)) {
+				error = "Icon name must be one of: add, check, chevron-down, chevron-right, close, file, folder, home, menu, minus, search";
+				return false;
 			}
 		}
 		if (node.dockPanel && parentIndex < m_nodes.size()) authoredLayout.padding.t += m_nodes[parentIndex].dockHeaderHeight;
@@ -1268,7 +1416,7 @@ namespace xui {
 			if (!field.unit.empty()) { field.text += " "; field.text += field.unit; }
 			field.caret = field.text.size();
 		}
-		if (m_nodes[runtimeIndex].button || m_nodes[runtimeIndex].checkItem || m_nodes[runtimeIndex].checkBox || m_nodes[runtimeIndex].scrollView || m_nodes[runtimeIndex].slider || m_nodes[runtimeIndex].dropdown || m_nodes[runtimeIndex].colorPicker || m_nodes[runtimeIndex].textBox || m_nodes[runtimeIndex].textArea || m_nodes[runtimeIndex].tabs ||
+		if (m_nodes[runtimeIndex].button || m_nodes[runtimeIndex].checkItem || m_nodes[runtimeIndex].checkBox || m_nodes[runtimeIndex].scrollView || m_nodes[runtimeIndex].slider || m_nodes[runtimeIndex].dropdown || m_nodes[runtimeIndex].colorPicker || m_nodes[runtimeIndex].textBox || m_nodes[runtimeIndex].textArea || m_nodes[runtimeIndex].tabs || m_nodes[runtimeIndex].treeView ||
 			m_nodes[runtimeIndex].switchToggle || m_nodes[runtimeIndex].toggleButton || m_nodes[runtimeIndex].radioGroup ||
 			m_nodes[runtimeIndex].segmented || m_nodes[runtimeIndex].stepper || m_nodes[runtimeIndex].rating || m_nodes[runtimeIndex].breadcrumb || m_nodes[runtimeIndex].keybindField || m_nodes[runtimeIndex].datePicker) m_interactiveNodes.push_back(runtimeIndex);
 		if (m_nodes[runtimeIndex].split) m_splitNodes.push_back(runtimeIndex);
@@ -2665,6 +2813,84 @@ namespace xui {
 				else painter.line({ rect.x + rect.w * 0.5f, rect.y }, { rect.x + rect.w * 0.5f, rect.bottom() }, 1.f, lineColor);
 				painter.popOpacity(); continue;
 			}
+			if (node.iconWidget) {
+				const Color ink = color(node.style, PropId::Fg, Color::fromRGBA8(0x242424FFu));
+				const f32 side = std::max(1.f, std::min(rect.w, rect.h) - 4.f);
+				const f32 x = rect.x + (rect.w - side) * 0.5f, y = rect.y + (rect.h - side) * 0.5f;
+				const f32 l = side * 0.22f, r = side * 0.78f, t = side * 0.22f, b = side * 0.78f;
+				auto line = [&](f32 x0, f32 y0, f32 x1, f32 y1) { painter.line({ x + x0, y + y0 }, { x + x1, y + y1 }, std::max(1.5f, side * 0.1f), ink); };
+				auto stroke = [&](Rect box, f32 radius = 2.f) { RectStyle shape; shape.border = ink; shape.borderWidth = std::max(1.f, side * 0.08f); shape.radius = CornerRadii::all(radius); painter.roundRect(box, shape); };
+				if (node.iconName == "add") { line(side * .5f, t, side * .5f, b); line(l, side * .5f, r, side * .5f); }
+				else if (node.iconName == "minus") line(l, side * .5f, r, side * .5f);
+				else if (node.iconName == "close") { line(l, t, r, b); line(r, t, l, b); }
+				else if (node.iconName == "check") { line(l, side * .52f, side * .44f, b); line(side * .44f, b, r, t); }
+				else if (node.iconName == "menu") { line(l, t, r, t); line(l, side * .5f, r, side * .5f); line(l, b, r, b); }
+				else if (node.iconName == "chevron-right" || node.iconName == "chevron-down") {
+					if (node.iconName == "chevron-right") { line(side * .4f, t, side * .65f, side * .5f); line(side * .65f, side * .5f, side * .4f, b); }
+					else { line(l, side * .4f, side * .5f, side * .65f); line(side * .5f, side * .65f, r, side * .4f); }
+				}
+				else if (node.iconName == "search") {
+					const f32 diameter = side * .52f;
+					stroke({ x + l, y + t, diameter, diameter }, diameter * .5f);
+					line(l + diameter * .76f, t + diameter * .76f, r, b);
+				}
+				else if (node.iconName == "folder") {
+					line(l, t + side * .08f, side * .48f, t + side * .08f);
+					line(side * .48f, t + side * .08f, side * .58f, t + side * .23f);
+					line(side * .58f, t + side * .23f, r, t + side * .23f);
+					line(r, t + side * .23f, r - side * .05f, b);
+					line(r - side * .05f, b, l, b); line(l, b, l, t + side * .08f);
+				}
+				else if (node.iconName == "file") {
+					line(l + side * .08f, t, r - side * .15f, t);
+					line(r - side * .15f, t, r, t + side * .15f);
+					line(r, t + side * .15f, r, b); line(r, b, l + side * .08f, b);
+					line(l + side * .08f, b, l + side * .08f, t);
+					line(r - side * .15f, t, r - side * .15f, t + side * .15f);
+					line(r - side * .15f, t + side * .15f, r, t + side * .15f);
+				}
+				else if (node.iconName == "home") {
+					const Vec2 roof[] = { { x + l, y + side * .48f }, { x + side * .5f, y + t }, { x + r, y + side * .48f } };
+					painter.polyline(roof, 3, std::max(1.5f, side * .1f), ink);
+					line(l + side * .08f, side * .45f, l + side * .08f, b);
+					line(l + side * .08f, b, r - side * .08f, b);
+					line(r - side * .08f, b, r - side * .08f, side * .45f);
+				}
+				painter.popOpacity(); continue;
+			}
+			if (node.treeView) {
+				const LayoutStyle& layout = m_layout.style(node.layout);
+				const f32 fontSize = node.style.has(PropId::FontSize) ? number(node.style.get(PropId::FontSize), 0, 14.f) : 14.f;
+				const f32 rowHeight = std::max(22.f, fontSize * 1.65f);
+				const f32 left = rect.x + layout.border.l + layout.padding.l;
+				const f32 top = rect.y + layout.border.t + layout.padding.t;
+				const f32 right = rect.right() - layout.border.r - layout.padding.r;
+				const Color ink = color(node.style, PropId::Fg, Color::fromRGBA8(0x242424FFu));
+				visibleTreeEntries(node, m_treeRowsScratch);
+				painter.pushClip(rect);
+				for (u32 row = 0; row < m_treeRowsScratch.size(); ++row) {
+					const Node::TreeEntry& entry = node.treeEntries[m_treeRowsScratch[row]];
+					const Rect rowRect{ left, top + rowHeight * f32(row), std::max(0.f, right - left), rowHeight };
+					const bool selected = entry.path == node.treeSelection;
+					const bool hovered = static_cast<i32>(row) == node.treeHover;
+					if (selected || hovered) painter.fillRect(rowRect, ink.withAlpha(selected ? 0.14f : 0.07f), CornerRadii::all(3.f));
+					const f32 indent = f32(entry.depth) * 16.f;
+					if (entry.hasChildren) {
+						const f32 cx = left + indent + 9.f, cy = rowRect.y + rowRect.h * .5f;
+						if (entry.expanded) {
+							painter.line({ cx - 3.f, cy - 1.5f }, { cx, cy + 1.5f }, 1.5f, ink);
+							painter.line({ cx, cy + 1.5f }, { cx + 3.f, cy - 1.5f }, 1.5f, ink);
+						}
+						else {
+							painter.line({ cx - 1.5f, cy - 3.f }, { cx + 1.5f, cy }, 1.5f, ink);
+							painter.line({ cx + 1.5f, cy }, { cx - 1.5f, cy + 3.f }, 1.5f, ink);
+						}
+					}
+					drawLabel(entry.label, rowRect, node.font, node.style, ink, indent + 22.f, false);
+				}
+				painter.popClip();
+				painter.popOpacity(); continue;
+			}
 			if (node.spinner) {
 				const Color tick = color(node.style, PropId::Fg, Color::fromRGBA8(0x60A5FAFFu));
 				const f32 radiusOuter = std::max(2.f, std::min(rect.w, rect.h) * 0.5f - 2.f);
@@ -3575,6 +3801,22 @@ namespace xui {
 				addDamage(node.pickerEditor ? pickerEditorRect(node) : m_layout.absRect(node.layout));
 			}
 		}
+		for (u32 i = 0; i < m_nodes.size(); ++i) {
+			Node& tree = m_nodes[i];
+			if (!tree.treeView) continue;
+			i32 hovered = -1;
+			const Rect rect = m_layout.absRect(tree.layout);
+			if (target == i && rect.contains(point)) {
+				visibleTreeEntries(tree, m_treeRowsScratch);
+				const LayoutStyle& layout = m_layout.style(tree.layout);
+				const f32 fontSize = tree.style.has(PropId::FontSize) ? number(tree.style.get(PropId::FontSize), 0, 14.f) : 14.f;
+				const f32 rowHeight = std::max(22.f, fontSize * 1.65f);
+				const f32 contentY = rect.y + layout.border.t + layout.padding.t;
+				const i32 ordinal = static_cast<i32>((point.y - contentY) / rowHeight);
+				if (ordinal >= 0 && static_cast<u32>(ordinal) < m_treeRowsScratch.size()) hovered = ordinal;
+			}
+			if (tree.treeHover != hovered) { tree.treeHover = hovered; changed = true; addDamage(rect); }
+		}
 		for (u32 index : m_interactiveNodes) {
 			Node& node = m_nodes[index];
 			if (node.slider && node.pressed && !node.disabled && isNodeVisible(index)) {
@@ -3642,6 +3884,7 @@ namespace xui {
 		bool changed = menuPointerMove(m_pointerPosition);
 		for (u32 i = 0; i < m_nodes.size(); ++i) {
 			Node& node = m_nodes[i];
+			if (node.treeView && node.treeHover >= 0) { node.treeHover = -1; addDamage(m_layout.absRect(node.layout)); changed = true; }
 			if (node.hovered) {
 				node.hovered = false;
 				if (!node.focused) node.tooltipDismissed = false;
@@ -3727,7 +3970,7 @@ namespace xui {
 			}
 			const bool clickable = node.button || node.checkItem || node.checkBox || node.switchToggle || node.toggleButton ||
 				node.dropdown || node.colorPicker || node.datePicker || node.segmented || node.rating || node.breadcrumb ||
-				node.stepper || node.keybindField || node.radioGroup || node.tabs;
+				node.stepper || node.keybindField || node.radioGroup || node.tabs || node.treeView;
 			return clickable ? CursorShape::Hand : CursorShape::Arrow;
 		}
 		return CursorShape::Arrow;
@@ -4049,6 +4292,31 @@ namespace xui {
 			}
 		}
 		if (target && !target->disabled) {
+			if (target->treeView) {
+				const Rect rect = m_layout.absRect(target->layout);
+				const LayoutStyle& layout = m_layout.style(target->layout);
+				const f32 fontSize = target->style.has(PropId::FontSize) ? number(target->style.get(PropId::FontSize), 0, 14.f) : 14.f;
+				const f32 rowHeight = std::max(22.f, fontSize * 1.65f);
+				const f32 contentX = rect.x + layout.border.l + layout.padding.l;
+				const f32 contentY = rect.y + layout.border.t + layout.padding.t;
+				visibleTreeEntries(*target, m_treeRowsScratch);
+				const i32 row = static_cast<i32>((point.y - contentY) / rowHeight);
+				if (row >= 0 && static_cast<u32>(row) < m_treeRowsScratch.size()) {
+					auto& entry = target->treeEntries[m_treeRowsScratch[static_cast<u32>(row)]];
+					const f32 disclosureRight = contentX + f32(entry.depth) * 16.f + 18.f;
+					if (entry.hasChildren && point.x < disclosureRight) {
+						entry.expanded = !entry.expanded;
+						m_layout.markContentChanged(target->layout);
+						addDamage(rect);
+					}
+					else if (target->treeSelection != entry.path) {
+						target->treeSelection = entry.path;
+						addDamage(rect);
+						if (target->pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(target->pressHandler));
+					}
+				}
+				return true;
+			}
 			const bool shouldPress = target->button || target->checkItem || target->checkBox || target->slider ||
 				target->dropdown || target->colorPicker || target->textBox || target->textArea || target->switchToggle || target->toggleButton || target->datePicker;
 			for (Node& node : m_nodes) if (&node != target && node.pressed) {
@@ -4745,13 +5013,13 @@ namespace xui {
 			if (rect.empty() || !rect.contains(inverseTransformPoint(node.paintTransform, point))) continue;
 
 			const bool interactive = node.button || node.checkItem || node.checkBox || node.slider || node.dropdown ||
-				node.colorPicker || node.textBox || node.textArea || node.tabs ||
+				node.colorPicker || node.textBox || node.textArea || node.tabs || node.treeView ||
 				node.switchToggle || node.toggleButton || node.radioGroup ||
 				node.segmented || node.stepper || node.rating || node.breadcrumb || node.keybindField || node.datePicker;
 			const bool structuralBlocker = typeIs(node.type, *m_strings, "Window") || typeIs(node.type, *m_strings, "Text") ||
 				typeIs(node.type, *m_strings, "Panel") || typeIs(node.type, *m_strings, "Split") ||
 				typeIs(node.type, *m_strings, "CheckList") || typeIs(node.type, *m_strings, "Tab") ||
-				node.progressBar || node.fpsCounter || node.label || node.badge || node.spinner || node.image || node.dockHost || node.dockPanel;
+				node.progressBar || node.fpsCounter || node.label || node.badge || node.spinner || node.image || node.iconWidget || node.treeView || node.dockHost || node.dockPanel;
 			const bool styledBlocker = node.style.has(PropId::Bg);
 			// Node storage follows paint order: descendants and later siblings are on top.
 			// Transparent Row/Column containers pass input through; painted containers block
@@ -4777,6 +5045,7 @@ namespace xui {
 		if (node.pressed) states |= stateBit(State::Pressed);
 		if (node.focused) states |= stateBit(State::Focus);
 		if (node.checked) states |= stateBit(State::Checked) | stateBit(State::Selected);
+		if (node.treeView && !node.treeSelection.empty()) states |= stateBit(State::Selected);
 		if (node.disabled) states |= stateBit(State::Disabled);
 		else states |= stateBit(State::Enabled);
 		if ((node.textBox || node.textArea) && node.readOnly) states |= stateBit(State::ReadOnly);
@@ -5006,6 +5275,7 @@ namespace xui {
 
 	std::string_view UiRuntime::controlText(std::string_view id) const {
 		for (const Node& node : m_nodes) if ((node.dropdown || node.colorPicker || node.textBox || node.textArea || typeIs(node.type, *m_strings, "Text") || node.label || node.badge || node.stepper || node.datePicker || node.keybindField) && node.id.v && m_strings->view(node.id) == id) return node.text;
+		for (const Node& node : m_nodes) if (node.treeView && node.id.v && m_strings->view(node.id) == id) return node.treeSelection;
 		for (const Node& node : m_nodes) if ((node.radioGroup || node.segmented || node.breadcrumb) && node.id.v && m_strings->view(node.id) == id && node.selectedOption < node.options.size()) return node.options[node.selectedOption];
 		return {};
 	}
@@ -5029,6 +5299,7 @@ namespace xui {
 				return UiValue{ std::move(value) };
 			}
 			if (node.menu) return UiValue{ node.menuSelectedItem };
+			if (node.treeView) return UiValue{ node.treeSelection };
 			if (node.menuItem) return UiValue{ node.text };
 			if (node.checkList) {
 				CheckListValue selected;
@@ -5071,6 +5342,19 @@ namespace xui {
 					if (notify && changed && node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
 				}
 				return changed;
+			}
+			if (node.treeView) {
+				const std::string* selectedPath = std::get_if<std::string>(&valueToSet);
+				if (!selectedPath) return false;
+				if (!selectedPath->empty() && std::none_of(node.treeEntries.begin(), node.treeEntries.end(),
+					[&](const Node::TreeEntry& entry) { return entry.path == *selectedPath; })) return false;
+				changed = node.treeSelection != *selectedPath;
+				if (changed) {
+					node.treeSelection = *selectedPath;
+					addDamage(m_layout.absRect(node.layout));
+					if (notify && node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
+				}
+				return true;
 			}
 			if (node.menuItem) {
 				// Checking/unchecking through the value API; activation is event-driven.
@@ -5272,6 +5556,16 @@ namespace xui {
 		return static_cast<UiRuntime*>(context)->measure(node, constraint);
 	}
 
+	void UiRuntime::visibleTreeEntries(const Node& tree, std::vector<u32>& rows) const {
+		rows.clear();
+		for (u32 i = 0; i < tree.treeEntries.size(); ++i) {
+			bool visible = true;
+			for (i32 parent = tree.treeEntries[i].parent; parent >= 0; parent = tree.treeEntries[static_cast<u32>(parent)].parent)
+				if (!tree.treeEntries[static_cast<u32>(parent)].expanded) { visible = false; break; }
+			if (visible) rows.push_back(i);
+		}
+	}
+
 	Size UiRuntime::measure(NodeId node, Constraint constraint) const {
 		const Node* runtimeNode = findNode(node);
 		if (!runtimeNode) return {};
@@ -5301,6 +5595,20 @@ namespace xui {
 		if (runtimeNode->spinner) return { 18.f, 18.f };
 		if (runtimeNode->image) return runtimeNode->imageIntrinsicW > 0.f && runtimeNode->imageIntrinsicH > 0.f
 			? Size{ runtimeNode->imageIntrinsicW, runtimeNode->imageIntrinsicH } : Size{ 96.f, 64.f };
+		if (runtimeNode->iconWidget) return { 20.f, 20.f };
+		if (runtimeNode->treeView) {
+			std::vector<u32> rows;
+			visibleTreeEntries(*runtimeNode, rows);
+			const f32 fontSize = runtimeNode->style.has(PropId::FontSize) ? number(runtimeNode->style.get(PropId::FontSize), 0, 14.f) : 14.f;
+			const f32 rowHeight = std::max(22.f, fontSize * 1.65f);
+			f32 widest = 120.f;
+			if (m_text && runtimeNode->font.valid()) for (u32 index : rows) {
+				const Node::TreeEntry& item = runtimeNode->treeEntries[index];
+				const f32 textWidth = m_text->layout(runtimeNode->font, item.label, fontSize * dpiScale).width / dpiScale;
+				widest = std::max(widest, f32(item.depth) * 16.f + textWidth + 30.f);
+			}
+			return { widest, std::max(rowHeight, rowHeight * f32(rows.size())) };
+		}
 		// Empty controls still need a useful preferred size. Without these defaults, an auto-sized
 		// Slider/ProgressBar or an empty placeholder field measured to 0x0 until the app authored
 		// explicit dimensions. Keep these as content-box sizes; LayoutTree adds XUI/XSS padding and borders.

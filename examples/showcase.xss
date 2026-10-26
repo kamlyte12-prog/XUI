@@ -50,6 +50,15 @@ Tab {
 ScrollView.page-scroll { resting: { bg: color.surface, border: 1px solid color.outline, radius: 8px, pad: 1px, scrollbar-size: 10px, scrollbar-visibility: auto, scroll-behavior: smooth, scroll-speed: 42, scroll-track: color.canvas, scroll-thumb: #405773 } hover: { scroll-thumb: #587493 } pressed: { scroll-thumb: color.accent } }
 Column.page { resting: { bg: color.surface, pad: 16px, gap: 12px, border: 1px solid color.outline, radius: 8px } }
 Panel.demo-panel { resting: { bg: color.surface-raised, fg: color.text, pad: 12px, border: 1px solid color.outline-soft, radius: 8px } }
+Grid.grid-demo { resting: { bg: color.surface-raised, border: 1px solid color.outline-soft, radius: 8px } }
+Text.grid-cell, Button.grid-cell { resting: { bg: color.surface, fg: color.text, pad: 6px, align: Center, border: 1px solid color.outline-soft, radius: 5px } }
+Button.grid-cell { hover: { bg: color.surface-hover } active: { bg: color.accent } }
+Text.fixed-cell { resting: { fg: color.muted } }
+Button.spanning-cell { resting: { bg: color.accent-hover } }
+Stack.stack-demo { resting: { bg: color.canvas, border: 1px solid color.outline-soft, radius: 8px } }
+Panel.stack-backdrop { resting: { bg: color.surface-raised, border: 1px solid color.outline, radius: 7px } }
+Text.stack-caption { resting: { fg: color.text, font-weight: 600, align: Center } }
+Badge.stack-badge { resting: { bg: color.accent, fg: color.canvas, align: Center, radius: 5px } }
 Panel.sizing-card { resting: { bg: color.surface-raised, border: 1px solid color.outline-soft, radius: 7px, pad: 8px } }
 Panel.min-card { resting: { min-size: 220px 64px } }
 Panel.style-floor { resting: { size: 170px 64px, min-size: 200px 64px, bg: #243956 } }
@@ -116,6 +125,9 @@ Image.raster-image { resting: { radius: 8px } }
 Image.svg-image { resting: { radius: 8px } }
 Label.inline-label, Label.chrome-label { resting: { fg: color.text, font-size: 13px } }
 Badge.badge { resting: { bg: color.accent, fg: color.canvas, pad: 5px, radius: 5px, font-size: 11px, font-weight: 650, align: Center } }
+TreeView.tree-view { resting: { bg: color.surface, fg: color.text, border: 1px solid color.border, radius: 8px, pad: 6px, font-size: 13px }
+  hover: { border: 1px solid color.accent } disabled: { opacity: 0.5 } }
+Icon.demo-icon { resting: { fg: color.accent } }
 Spinner.spinner { resting: { fg: color.accent } disabled: { fg: color.disabled, opacity: 0.42 } }
 FpsCounter.fps { resting: { bg: color.surface-raised, fg: color.text, font-size: 12px, pad: 6px, border: 1px solid color.outline, radius: 6px } }
 Toolbar.chrome, StatusBar.chrome { resting: { bg: color.surface-raised, fg: color.text, pad: 6px 8px, border: 1px solid color.outline, radius: 6px, gap: 8px, align: Center } }

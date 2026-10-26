@@ -682,6 +682,85 @@ Button.hug { resting: { size: auto, pad: 12px, min-width: 90px, max-width: 240px
 	CHECK(button.h >= child.h + 20.f);
 }
 
+TEST(ui_runtime_grid_materializes_tracks_and_child_spans) {
+	constexpr std::string_view xuiSource = R"(
+Window(size: 420x220) {
+  Grid("100px|1fr")[id: "grid", rows: "54px|auto", gap: 8px, pad: 10px, width: 100%, height: 180px] {
+    Text("Fixed column")[id: "fixed", gridColumn: 0, gridRow: 0]
+    Button(label: "Flexible column")[id: "flexible", gridColumn: 1, gridRow: 0]
+    Text("Spans both columns")[id: "span", gridColumn: 0, gridRow: 1, columnSpan: 2]
+    Text("Auto placement skips occupied cells")[id: "automatic"]
+  }
+}
+)";
+	StringInterner strings; UiAssetBundle assets; std::string error;
+	CHECK(loadUiAssets(xuiSource, "", strings, assets, error));
+	if (!error.empty()) { std::cerr << "grid assets: " << error << '\n'; return; }
+	TextSystem text; UiRuntime ui;
+	CHECK(ui.build(assets.document, assets.styles, strings, text, {}, error));
+	if (!error.empty()) { std::cerr << "grid build: " << error << '\n'; return; }
+	ui.layout(420.f, 220.f);
+	const Rect grid = ui.bounds({ 1, 1 });
+	const Rect fixed = ui.bounds({ 2, 1 });
+	const Rect flexible = ui.bounds({ 3, 1 });
+	const Rect spanning = ui.bounds({ 4, 1 });
+	const Rect automatic = ui.bounds({ 5, 1 });
+	CHECK(fixed.x >= grid.x + 9.f);
+	CHECK(flexible.x > fixed.x + fixed.w + 5.f);
+	CHECK(flexible.w > fixed.w);
+	CHECK(spanning.y > fixed.y + fixed.h);
+	CHECK(spanning.w >= flexible.x + flexible.w - fixed.x - 1.f);
+	CHECK(automatic.y > spanning.bottom());
+}
+
+TEST(ui_runtime_grid_rejects_invalid_track_definitions) {
+	for (const std::string_view tracks : { "0fr|auto", "12px||1fr", "1px|2px|3px|4px|5px|6px|7px|8px|9px" }) {
+		const std::string xui = "Window(size: 200x100) { Grid(\"" + std::string(tracks) + "\") { Text(\"cell\") } }";
+		StringInterner strings; UiAssetBundle assets; std::string error;
+		CHECK(loadUiAssets(xui, "", strings, assets, error));
+		if (!error.empty()) { CHECK(false); continue; }
+		TextSystem text; UiRuntime ui;
+		CHECK(!ui.build(assets.document, assets.styles, strings, text, {}, error));
+		CHECK(error.find("Grid") != std::string::npos);
+	}
+	constexpr std::string_view partialPlacement = R"(Window(size: 200x100) { Grid("1fr|1fr") { Text("cell")[gridColumn: 0] } })";
+	StringInterner strings; UiAssetBundle assets; std::string error;
+	CHECK(loadUiAssets(partialPlacement, "", strings, assets, error));
+	if (!error.empty()) return;
+	TextSystem text; UiRuntime ui;
+	CHECK(!ui.build(assets.document, assets.styles, strings, text, {}, error));
+	CHECK(error.find("both gridColumn and gridRow") != std::string::npos);
+}
+
+TEST(ui_runtime_stack_materializes_overlay_layout_and_frontmost_hit) {
+	constexpr std::string_view xuiSource = R"(
+Window(size: 280x150) {
+  Stack[id: "layers", width: 100%, height: 100%, pad: 8px] {
+    Button(label: "Under layer")[id: "under", press: onUnder]
+    Button(label: "Front layer")[id: "front", press: onFront]
+  }
+}
+)";
+	StringInterner strings; UiAssetBundle assets; std::string error;
+	CHECK(loadUiAssets(xuiSource, "", strings, assets, error));
+	if (!error.empty()) { std::cerr << "stack assets: " << error << '\n'; return; }
+	TextSystem text; UiRuntime ui;
+	CHECK(ui.build(assets.document, assets.styles, strings, text, {}, error));
+	if (!error.empty()) { std::cerr << "stack build: " << error << '\n'; return; }
+	ui.layout(280.f, 150.f);
+	const Rect under = ui.bounds({ 2, 1 }), front = ui.bounds({ 3, 1 });
+	CHECK(under.x == front.x && under.y == front.y && under.w == front.w && under.h == front.h);
+	CHECK(under.w > 0.f && under.h > 0.f);
+	std::vector<std::string> events;
+	ui.setEventHandler([](void* context, std::string_view name) {
+		static_cast<std::vector<std::string>*>(context)->emplace_back(name);
+		}, &events);
+	const Vec2 point{ front.x + front.w * 0.5f, front.y + front.h * 0.5f };
+	CHECK(ui.pointerDown(point)); CHECK(ui.pointerUp(point));
+	CHECK_EQ(events.size(), 1u);
+	CHECK(events.back() == "onFront");
+}
+
 TEST(ui_runtime_xss_hover_transition_interpolates_without_idle_timer) {
 	constexpr std::string_view xuiSource = R"(Window(size: 240x120) { Button[id: "animated", width: 160px, height: 48px] })";
 	constexpr std::string_view xssSource = R"(
@@ -2334,4 +2413,72 @@ Window(size: 260x140) {
 	ui.pointerDown(fieldCenter);
 	ui.keyDown(Key::Up);
 	if (const auto value = ui.value("nf")) { const auto* number = std::get_if<f64>(&*value); CHECK(number && *number == 6.0); }
+}
+
+TEST(ui_runtime_tree_view_expansion_selection_values_and_icon_paint) {
+	constexpr std::string_view xuiSource = R"(
+Window(size: 360x240) {
+  Column(gap: 8px) {
+    TreeView[id: "files", items: "Project/src/runtime.cpp|Project/docs/widgets.md|Project/README.md",
+             selected: "Project/src/runtime.cpp", change: onTreeChange, width: 240px]
+    Icon(name: "search")[id: "search-icon", width: 28px, height: 28px]
+  }
+}
+)";
+	StringInterner strings;
+	auto document = parseXui(xuiSource, "tree-icon.xui", strings);
+	auto styles = compileXss(R"(
+TreeView { resting: { bg: #ffffff, fg: #202020, pad: 4px, font-size: 14px } }
+Icon { resting: { fg: #1473e6 } }
+)", "tree-icon.xss", strings);
+	CHECK(document.has_value()); CHECK(styles.has_value());
+	if (!document || !styles) return;
+	TextSystem text; UiRuntime ui; std::string error;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error));
+	if (!error.empty()) { std::printf("  build error: %s\n", error.c_str()); return; }
+	ui.layout(360.f, 240.f);
+	u32 changes = 0;
+	ui.setEventHandler([](void* context, std::string_view name) {
+		if (name == "onTreeChange") ++*static_cast<u32*>(context);
+	}, &changes);
+
+	CHECK_EQ(std::string(ui.controlText("files")), std::string("Project/src/runtime.cpp"));
+	const Rect tree = UiRuntimeFontWeightProbe::bounds(ui, "files");
+	CHECK(tree.w >= 240.f);
+	CHECK(ui.setValue("files", std::string("Project/docs/widgets.md"), true));
+	CHECK_EQ(changes, 1u);
+	CHECK_EQ(std::string(ui.controlText("files")), std::string("Project/docs/widgets.md"));
+	CHECK(!ui.setValue("files", std::string("Project/missing.txt")));
+
+	// A label click selects its full path, while a disclosure click changes retained layout size.
+	const f32 rowHeight = 23.1f; // max(22, font-size * 1.65), for the authored 14px font.
+	ui.pointerDown({ tree.x + 70.f, tree.y + rowHeight * 5.5f });
+	ui.pointerUp({ tree.x + 70.f, tree.y + rowHeight * 5.5f });
+	CHECK_EQ(std::string(ui.controlText("files")), std::string("Project/README.md"));
+	CHECK_EQ(changes, 2u);
+	const f32 beforeCollapse = UiRuntimeFontWeightProbe::bounds(ui, "files").h;
+	ui.pointerDown({ tree.x + 10.f, tree.y + rowHeight * 0.5f });
+	ui.pointerUp({ tree.x + 10.f, tree.y + rowHeight * 0.5f });
+	ui.layout(360.f, 240.f);
+	const f32 afterCollapse = UiRuntimeFontWeightProbe::bounds(ui, "files").h;
+	CHECK(afterCollapse < beforeCollapse);
+	CHECK_EQ(std::string(ui.controlText("files")), std::string("Project/README.md"));
+
+	// Icons use geometry in the backend-neutral draw list and need no font glyph mapping.
+	Painter painter; painter.begin(360, 240, 1.f);
+	ui.paint(painter);
+	const DrawList frame = painter.finish();
+	CHECK(frame.nVerts > 0);
+
+	// Malformed path separators must be diagnosed, not silently discarded.
+	StringInterner invalidStrings;
+	auto invalidDocument = parseXui(R"(Window { TreeView[items: "Project/src|"] })", "bad-tree.xui", invalidStrings);
+	CHECK(invalidDocument.has_value());
+	if (invalidDocument) {
+		auto invalidStyles = compileXss("", "empty.xss", invalidStrings);
+		TextSystem invalidText; UiRuntime invalidUi; std::string diagnostic;
+		CHECK(invalidStyles.has_value());
+		if (invalidStyles) CHECK(!invalidUi.build(*invalidDocument, *invalidStyles, invalidStrings, invalidText, {}, diagnostic));
+		CHECK(diagnostic.find("empty path") != std::string::npos);
+	}
 }

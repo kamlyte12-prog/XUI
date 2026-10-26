@@ -45,6 +45,9 @@ Badge { resting: { bg: #f0f0f0, fg: #424242, border: 1px solid #e1e1e1, radius: 
 Toolbar, StatusBar { resting: { bg: #f0f0f0, fg: #424242, border: 1px solid #e1e1e1, radius: 4px, pad: 8px, gap: 8px } }
 FpsCounter { resting: { bg: #ffffff, fg: #616161, border: 1px solid #e1e1e1, radius: 4px, pad: 4px 8px, font-size: 12px } }
 Image { resting: { bg: #f0f0f0, fg: #616161, border: 1px solid #d1d1d1, radius: 4px } }
+Icon { resting: { fg: #424242 } disabled: { opacity: 0.45 } }
+TreeView { resting: { bg: #ffffff, fg: #242424, border: 1px solid #d1d1d1, radius: 4px, pad: 4px, font-size: 14px }
+  hover: { border: 1px solid #8a8886 } disabled: { opacity: 0.45 } }
 Spinner { resting: { fg: #0f6cbd } disabled: { opacity: 0.45 } }
 Separator, Divider { resting: { fg: #d1d1d1 } }
 Breadcrumb { resting: { fg: #424242 } hover: { fg: #0f6cbd } selected: { fg: #0f6cbd } disabled: { opacity: 0.45 } }

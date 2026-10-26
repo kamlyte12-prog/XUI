@@ -136,6 +136,10 @@ namespace {
 				setText(app, "trail-readout", "Path: " + path);
 			}
 		}
+		else if (name == "onTreeChange") {
+			if (const auto value = valueAs<std::string>(app, "file-tree"))
+				setText(app, "tree-selection-readout", value->empty() ? "Selected: (none)" : "Selected: " + *value);
+		}
 		else if (name == "onScrollChanged") {
 			if (const auto offset = valueAs<xui::Vec2>(app, "vertical-scroll")) {
 				app.runtime().setValue("scroll-position-readout", "Vertical offset: " +

@@ -309,25 +309,64 @@ namespace xui {
 		const Edges insetEdges = contentInsets(st);
 		const u32 ncols = std::min<u32>(kMaxTracks, std::max<u32>(1, st.colCount));
 		const std::size_t ibase = m_gridItems.size();
-		// 1. place children (auto-placement is a simple row-major cursor; explicit cells are honoured, overlap is allowed)
+		// 1. Place explicit cells first so row-major auto-placement can skip them. Explicit
+		// cells may overlap each other; automatic cells choose the next unoccupied area.
 		i32 cc = 0, cr = 0, maxRow = -1;
 		for (u32 c = m_first[i]; c != kNone; c = m_next[c]) {
 			const LayoutStyle& cs = m_style[c];
 			if (cs.position == Position::Absolute) continue;
 			GridItem g; g.node = c; g.cs = std::min<u32>(std::max<u32>(1, cs.colSpan), ncols); g.rs = std::max<u32>(1, cs.rowSpan);
 			g.ml = cs.margin.l; g.mt = cs.margin.t; g.mr = cs.margin.r; g.mb = cs.margin.b;
-			if (cs.gridCol >= 0 || cs.gridRow >= 0) {
-				g.col = cs.gridCol >= 0 ? cs.gridCol : 0; g.row = cs.gridRow >= 0 ? cs.gridRow : cr;
-			}
-			else {
-				if (cc + i32(g.cs) > i32(ncols)) { cc = 0; ++cr; }
-				g.col = cc; g.row = cr; cc += i32(g.cs);
-				if (cc >= i32(ncols)) { cc = 0; ++cr; }
-			}
+			g.explicitCell = cs.gridCol >= 0 && cs.gridRow >= 0;
+			if (!g.explicitCell) continue;
+			g.col = cs.gridCol; g.row = cs.gridRow;
 			g.col = std::min<i32>(g.col, i32(ncols - g.cs));
 			maxRow = std::max<i32>(maxRow, g.row + i32(g.rs) - 1);
 			m_gridItems.push_back(g);
 		}
+		const std::size_t occupancyBase = m_scratchU.size();
+		m_scratchU.resize(occupancyBase + std::size_t(std::max(0, maxRow + 1)), 0u);
+		auto markOccupied = [&](const GridItem& item) {
+			const u32 mask = ((u32{ 1 } << item.cs) - 1u) << u32(item.col);
+			const std::size_t required = occupancyBase + std::size_t(item.row + i32(item.rs));
+			if (m_scratchU.size() < required) m_scratchU.resize(required, 0u);
+			for (i32 row = item.row; row < item.row + i32(item.rs); ++row)
+				m_scratchU[occupancyBase + std::size_t(row)] |= mask;
+		};
+		for (std::size_t k = ibase; k < m_gridItems.size(); ++k) markOccupied(m_gridItems[k]);
+		for (u32 c = m_first[i]; c != kNone; c = m_next[c]) {
+			const LayoutStyle& cs = m_style[c];
+			if (cs.position == Position::Absolute || (cs.gridCol >= 0 && cs.gridRow >= 0)) continue;
+			GridItem g; g.node = c; g.cs = std::min<u32>(std::max<u32>(1, cs.colSpan), ncols); g.rs = std::max<u32>(1, cs.rowSpan);
+			g.ml = cs.margin.l; g.mt = cs.margin.t; g.mr = cs.margin.r; g.mb = cs.margin.b;
+			if (cs.gridCol >= 0 || cs.gridRow >= 0) {
+				g.col = cs.gridCol >= 0 ? cs.gridCol : 0; g.row = cs.gridRow >= 0 ? cs.gridRow : cr;
+				g.col = std::min<i32>(g.col, i32(ncols - g.cs));
+			}
+			else {
+				for (;;) {
+					if (cc + i32(g.cs) > i32(ncols)) { cc = 0; ++cr; }
+					g.col = cc; g.row = cr;
+					const u32 mask = ((u32{ 1 } << g.cs) - 1u) << u32(g.col);
+					const std::size_t required = occupancyBase + std::size_t(g.row + i32(g.rs));
+					if (m_scratchU.size() < required) m_scratchU.resize(required, 0u);
+					bool occupied = false;
+					for (i32 row = g.row; row < g.row + i32(g.rs); ++row)
+						if (m_scratchU[occupancyBase + std::size_t(row)] & mask) { occupied = true; break; }
+					if (!occupied) break;
+					++cc;
+				}
+				const u32 mask = ((u32{ 1 } << g.cs) - 1u) << u32(g.col);
+				for (i32 row = g.row; row < g.row + i32(g.rs); ++row)
+					m_scratchU[occupancyBase + std::size_t(row)] |= mask;
+				cc += i32(g.cs);
+				if (cc >= i32(ncols)) { cc = 0; ++cr; }
+			}
+			if (cs.gridCol >= 0 || cs.gridRow >= 0) markOccupied(g);
+			maxRow = std::max<i32>(maxRow, g.row + i32(g.rs) - 1);
+			m_gridItems.push_back(g);
+		}
+		m_scratchU.resize(occupancyBase);
 		const std::size_t nItems = m_gridItems.size() - ibase;
 		const u32 nrows = static_cast<u32>(std::max<i32>(maxRow + 1, i32(st.rowCount)));
 		// scratch layout: colSize[ncols] rowSize[nrows] colMax[ncols] rowMax[nrows]

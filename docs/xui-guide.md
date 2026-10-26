@@ -76,7 +76,7 @@ ScrollView[id: "results", vertical: true, horizontal: false, scrollSpeed: 42,
 
 Use `ui.runtime().scrollTo("results", {0, 120})` for direct positioning or `scrollIntoView("target", true)` to reveal a descendant. See the [ScrollView widget reference](widgets.md#scrollview) for nested input routing, clipping, keyboard behavior, and current limitations.
 
-The common validator accepts generic names including `id`, `class`, `key`, `slot`, `part`, `grow`, `shrink`, `visible`, `disabled`, `tooltip`, `tooltipShowDelay`, `tooltipHideDelay`, `tooltipTrigger`, `tooltipHideOnClick`, `tooltipDisabled`, `align`, `justify`, `pad`, `margin`, `size`, `minSize`, `maxSize`, `width`, `height`, `minWidth`, `maxWidth`, `minHeight`, `maxHeight`, and `opacity`. `part` is valid only inside a component definition. Tooltip timing/trigger are behavior properties in `.xui`; bubble appearance belongs to `.xss`. The runtime applies structural geometry properties from `.xui`; Row/Column also accept a named `gap` constructor argument, and CheckList accepts `gap` as a property. `.xui` values override the same `.xss` layout defaults. `visible` and `.xui opacity` are still not implemented as runtime state/paint behavior; use `.xss opacity` for visual opacity.
+The common validator accepts generic names including `id`, `class`, `key`, `slot`, `part`, `grow`, `shrink`, `gridColumn`, `gridRow`, `columnSpan`, `rowSpan`, `visible`, `disabled`, `tooltip`, `tooltipShowDelay`, `tooltipHideDelay`, `tooltipTrigger`, `tooltipHideOnClick`, `tooltipDisabled`, `align`, `justify`, `pad`, `margin`, `size`, `minSize`, `maxSize`, `width`, `height`, `minWidth`, `maxWidth`, `minHeight`, `maxHeight`, and `opacity`. `part` is valid only inside a component definition. Tooltip timing/trigger are behavior properties in `.xui`; bubble appearance belongs to `.xss`. The runtime applies structural geometry properties from `.xui`; Row/Column also accept a named `gap` constructor argument, Grid accepts track templates and cell placement, and CheckList accepts `gap` as a property. `.xui` values override the same `.xss` layout defaults. `visible` and `.xui opacity` are still not implemented as runtime state/paint behavior; use `.xss opacity` for visual opacity.
 
 ## Supported layout containers
 
@@ -88,13 +88,45 @@ The current `UiRuntime` implements these containers:
 | `TitleBar` | Horizontal top-menu container that replaces the native title bar (requires `Window[platformTopMenu: false]`). Drag, double-click maximize, and caption buttons are framework-owned. |
 | `Column` | Flex-like vertical flow. Use `.xss gap`, `pad`, and child `grow` to arrange content. |
 | `Row` | Flex-like horizontal flow. |
+| `Grid` | Fixed, content-sized, and fractional row/column tracks; supports explicit placement and spans. |
+| `Stack` | Overlays children in one content box with per-child alignment. |
 | `Panel` | Styled vertical container. It is not independently dockable or draggable. |
 | `CheckList` | Vertical list container for `CheckItem` children. |
 | `Split` | Two or more panes with a draggable gutter. `direction: Horizontal` puts panes side by side; `Vertical` stacks them. |
 | `ScrollView` | Bounded scrolling container with viewport clipping, nested wheel routing, keyboard scrolling, and scroll-into-view support. See the [widget reference](widgets.md#scrollview). |
 | `DockHost` / `DockSpace` | Recursive docking workspace that accepts direct `DockPanel` children. See the [docking guide](docking.md). |
 
-The layout library also has lower-level `Grid` and `Stack` solvers, but the ordinary `.xui` runtime does not yet materialize them. Absolute positioning is available on runtime nodes through `.xui position: Absolute` and `left`/`top`/`right`/`bottom` insets. Consult the [widget reference](widgets.md#schema-recognized-runtime-unsupported-objects) before relying on a parser-recognized object.
+`Icon` and `TreeView` are supported leaf widgets rather than layout containers. `Icon` paints one named symbol; `TreeView` owns its own path-based rows and selection state. See the [widget reference](widgets.md#icon) for their authoring and interaction rules.
+
+Absolute positioning is available on runtime nodes through `.xui position: Absolute` and `left`/`top`/`right`/`bottom` insets. Consult the [widget reference](widgets.md#schema-recognized-runtime-unsupported-objects) before relying on a parser-recognized object.
+
+### Grid tracks and placement
+
+`Grid` defines its column tracks as a quoted, pipe-separated constructor value. `px` tracks (or unitless pixel values) reserve a fixed logical size, `auto` tracks fit their content, and positive `fr` weights divide remaining space. Optional `rows` uses the same grammar; rows beyond the explicit list use implicit `auto` tracks. Set `gap` to one value for both axes or a pair for horizontal and vertical spacing. Set both `gridColumn` and `gridRow` on a child to place it in a zero-based cell; omit both for row-major auto-placement into the next unoccupied cells. `columnSpan` and `rowSpan` accept values from 1 through 8 and cover adjacent cells. Explicitly assigned cells may overlap intentionally.
+
+```xui
+Grid("120px|1fr|2fr")[rows: "auto|40px", gap: 8px, pad: 10px] {
+  Text("Fixed column")[gridColumn: 0, gridRow: 0]
+  Button(label: "Flexible columns")[gridColumn: 1, gridRow: 0, columnSpan: 2]
+  Text("Auto-placed into the next available cell")
+}
+```
+
+Track templates and cell placement are structural layout in `.xui`. Use `.xss gap`, `pad`, `min-size`, `max-size`, and other ordinary layout style properties for reusable defaults; an authored `.xui` value takes precedence. The explicit track limit is eight per axis. See the [Grid widget reference](widgets.md#grid) and the [showcase layout page](../examples/showcase.xui).
+
+### Stack overlays
+
+`Stack` lays its in-flow children into the same content box. The container's `align` supplies the default placement on both axes (`Stretch`, `Start`, `Center`, or `End`); a child's own `align` overrides that placement. Stretch is the default. Give overlays explicit sizes when they should not fill the box. Children paint in document order, so later children appear above earlier ones and receive pointer hits first. Overlap is the purpose of Stack; use `Row`, `Column`, or `Grid` for non-overlapping flow.
+
+```xui
+Stack[width: 100%, height: 120px, pad: 8px] {
+  Panel[class: "backdrop", width: 100%, height: 100%]
+  Text("Centered")[class: "caption", width: 180px, height: 32px, align: Center]
+  Badge("Corner label")[class: "badge", width: 120px, height: 28px, align: End]
+}
+```
+
+Use `.xss` for layer colors, borders, and typography. Size limits and padding apply to the Stack container through the ordinary layout properties.
 
 ### Sizing and alignment
 

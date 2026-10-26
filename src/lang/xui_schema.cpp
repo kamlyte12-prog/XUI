@@ -14,7 +14,7 @@ namespace xui {
 		std::sort(v.begin(), v.end()); return v;
 	}
 	const std::vector<std::string_view>& XuiSchema::genericProps() {
-		static const std::vector<std::string_view> g = { "id", "class", "key", "slot", "part", "grow", "shrink", "visible", "disabled", "tooltip",
+		static const std::vector<std::string_view> g = { "id", "class", "key", "slot", "part", "grow", "shrink", "gridColumn", "gridRow", "columnSpan", "rowSpan", "visible", "disabled", "tooltip",
 			"tooltipShowDelay", "tooltipHideDelay", "tooltipTrigger", "tooltipHideOnClick", "tooltipDisabled",
 			"align", "justify", "position", "left", "top", "right", "bottom", "pad", "margin", "size", "minSize", "maxSize", "width", "height",
 			"minWidth", "maxWidth", "minHeight", "maxHeight", "opacity" };

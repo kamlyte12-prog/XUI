@@ -61,6 +61,23 @@ Window[platformTopMenu: false] {
               }
             }
 
+            Text("Grid tracks: fixed, fractional, and spanning cells")[class: "section-title"]
+            Text("Grid uses a quoted `|`-separated track list. Place children with zero-based gridColumn/gridRow; spans cover adjacent tracks.")[class: "help"]
+            Grid("120px|1fr|2fr")[class: "grid-demo", rows: "42px|42px", gap: 8px, width: 100%, height: 104px, pad: 8px] {
+              Text("120px")[class: "grid-cell fixed-cell", gridColumn: 0, gridRow: 0]
+              Text("1fr")[class: "grid-cell", gridColumn: 1, gridRow: 0]
+              Text("2fr")[class: "grid-cell", gridColumn: 2, gridRow: 0]
+              Button(label: "Span 2 tracks")[class: "grid-cell spanning-cell", gridColumn: 1, gridRow: 1, columnSpan: 2]
+            }
+
+            Text("Stack overlays and per-child alignment")[class: "section-title"]
+            Text("Stack layers share one content box. Children paint in document order; later interactive children receive hits first.")[class: "help"]
+            Stack[class: "stack-demo", width: 100%, height: 112px, pad: 8px] {
+              Panel[class: "stack-backdrop", width: 100%, height: 100%]
+              Text("Centered overlay")[class: "stack-caption", width: 220px, height: 32px, align: Center]
+              Badge("Bottom-right layer")[class: "stack-badge", width: 132px, height: 28px, align: End]
+            }
+
             Text("Flow, alignment, and distribution")[class: "section-title"]
             Panel[class: "demo-panel", width: 100%, pad: 12px, minSize: 0x108] {
               Column(gap: 12px)[width: 100%] {
@@ -293,6 +310,17 @@ Window[platformTopMenu: false] {
               Spinner[class: "spinner", width: 24px, height: 24px]
               Spinner[disabled: true, class: "spinner disabled-spinner", width: 24px, height: 24px]
               FpsCounter[class: "fps fps-secondary", width: 280px, height: 30px]
+            }
+            Text("TreeView builds expandable folders from slash-separated item paths. Click a label to select it; click a chevron to collapse or expand.")[class: "help"]
+            TreeView[id: "file-tree", items: "Project/src/ui/runtime.cpp|Project/src/layout/layout_solve.cpp|Project/include/xui/ui/runtime.hpp|Project/docs/widgets.md", selected: "Project/src/ui/runtime.cpp", change: onTreeChange, class: "tree-view", width: 100%]
+            Text("Selected: Project/src/ui/runtime.cpp")[id: "tree-selection-readout", class: "value-readout", width: 100%, height: 30px]
+            Row(gap: 10px, align: Center)[class: "icon-samples", width: 100%, height: 34px] {
+              Icon(name: "home")[class: "demo-icon", width: 24px, height: 24px, tooltip: "Home symbol"]
+              Icon(name: "folder")[class: "demo-icon", width: 24px, height: 24px, tooltip: "Folder symbol"]
+              Icon(name: "file")[class: "demo-icon", width: 24px, height: 24px, tooltip: "File symbol"]
+              Icon(name: "search")[class: "demo-icon", width: 24px, height: 24px, tooltip: "Search symbol"]
+              Icon(name: "add")[class: "demo-icon", width: 24px, height: 24px, tooltip: "Add symbol"]
+              Icon(name: "close")[class: "demo-icon", width: 24px, height: 24px, tooltip: "Close symbol"]
             }
             Toolbar[id: "demo-toolbar", class: "chrome toolbar", width: 100%, height: 42px] {
               Label("Toolbar")[class: "chrome-label"]

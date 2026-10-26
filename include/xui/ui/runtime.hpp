@@ -198,6 +198,12 @@ namespace xui {
 			Easing easing;
 		};
 		struct Node {
+			struct TreeEntry {
+				std::string path, label;
+				i32 parent = -1;
+				u32 depth = 0;
+				bool hasChildren = false, expanded = true;
+			};
 			NodeId layout;
 			StrId type, id, pressHandler;
 			u32 parentIndex = 0xFFFFFFFFu;
@@ -233,7 +239,8 @@ namespace xui {
 			bool fpsCounter = false, showFrameTime = true, disabled = false;
 			bool radioGroup = false, switchToggle = false, toggleButton = false;
 			bool numberField = false, searchField = false, numberBounded = false;
-			bool label = false, badge = false, separator = false, spinner = false, image = false;
+			bool label = false, badge = false, separator = false, spinner = false, image = false, iconWidget = false;
+			bool treeView = false;
 			bool datePicker = false, segmented = false, stepper = false, rating = false, breadcrumb = false, keybindField = false;
 			bool indeterminate = false;
 			bool dockHost = false, dockPanel = false, dockClosable = true, dockClosed = false;
@@ -270,6 +277,9 @@ namespace xui {
 			TextureHandle imageTexture;
 			Image imagePixels;
 			std::string imageSource, unit;
+			std::string iconName, treeSelection;
+			std::vector<TreeEntry> treeEntries;
+			i32 treeHover = -1;
 			u32 numberPrecision = 0;   // 0 formats with %g (shortest round-trip style)
 			f32 stepValue = 1.f;
 			f32 spinnerPhase = 0.f;    // radians; advanced by the timer tick
@@ -308,6 +318,7 @@ namespace xui {
 
 		static Size measureLeaf(void* context, NodeId node, Constraint constraint);
 		Size measure(NodeId node, Constraint constraint) const;
+		void visibleTreeEntries(const Node& tree, std::vector<u32>& rows) const;
 		bool buildNode(const Document& document, u32 index, u32 parentIndex, std::string& error);
 		void applyLayoutStyle(Node& node);
 		void updateSlider(Node& node, Vec2 point);
@@ -378,6 +389,7 @@ namespace xui {
 
 		LayoutTree m_layout;
 		std::vector<Node> m_nodes;
+		std::vector<u32> m_treeRowsScratch;
 		std::vector<u32> m_interactiveNodes;
 		std::vector<u32> m_splitNodes;
 		std::vector<u32> m_titleBars;

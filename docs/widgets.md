@@ -10,10 +10,10 @@ Use this table to find the detailed behavior and limitations below. Names in the
 
 | Group | Runtime objects |
 | --- | --- |
-| Window and layout | [`Window`](#window), [`TitleBar`](#titlebar), [`Column`](#column-and-row), [`Row`](#column-and-row), [`Panel`](#panel), [`Split`](#split), [`DockHost`](#dockhost-and-dockpanel), [`DockPanel`](#dockhost-and-dockpanel), [`DockSpace`](#dockhost-and-dockpanel) (alias), [`ScrollView`](#scrollview), [`Toolbar`](#toolbar-and-statusbar), [`StatusBar`](#toolbar-and-statusbar), [`MenuBar`](#toolbar-and-statusbar) (horizontal container) |
-| Text and display | [`Text`](#text), [`Label`](#label), [`Badge`](#badge), [`Image`](#image), [`FpsCounter`](#fpscounter), [`ProgressBar`](#progressbar), [`Spinner`](#spinner), [`Separator`](#separator-and-divider), [`Divider`](#separator-and-divider) (alias) |
+| Window and layout | [`Window`](#window), [`TitleBar`](#titlebar), [`Column`](#column-and-row), [`Row`](#column-and-row), [`Grid`](#grid), [`Stack`](#stack), [`Panel`](#panel), [`Split`](#split), [`DockHost`](#dockhost-and-dockpanel), [`DockPanel`](#dockhost-and-dockpanel), [`DockSpace`](#dockhost-and-dockpanel) (alias), [`ScrollView`](#scrollview), [`Toolbar`](#toolbar-and-statusbar), [`StatusBar`](#toolbar-and-statusbar), [`MenuBar`](#toolbar-and-statusbar) (horizontal container) |
+| Text and display | [`Text`](#text), [`Label`](#label), [`Badge`](#badge), [`Icon`](#icon), [`Image`](#image), [`FpsCounter`](#fpscounter), [`ProgressBar`](#progressbar), [`Spinner`](#spinner), [`Separator`](#separator-and-divider), [`Divider`](#separator-and-divider) (alias) |
 | Buttons and input | [`Button`](#button), [`CheckBox`](#checkbox), [`CheckList`](#checklist), [`CheckItem`](#checkitem), [`Switch`](#switch), [`ToggleButton`](#togglebutton), [`RadioGroup`](#radiogroup), [`TextBox`](#textbox), [`TextArea`](#textarea), [`NumberField`](#numberfield), [`SearchField`](#searchfield), [`Slider`](#slider) |
-| Selection and popup controls | [`Tabs`](#tabs-and-tab), [`Tab`](#tabs-and-tab), [`Dropdown`](#dropdown), [`Menu`](#menu-and-menuitem), [`MenuItem`](#menu-and-menuitem), [`ColorPicker`](#colorpicker), [`SegmentedControl`](#segmentedcontrol), [`Stepper`](#stepper), [`Rating`](#rating), [`Breadcrumb`](#breadcrumb), [`KeybindField`](#keybindfield), [`DatePicker`](#datepicker) |
+| Selection and popup controls | [`TreeView`](#treeview), [`Tabs`](#tabs-and-tab), [`Tab`](#tabs-and-tab), [`Dropdown`](#dropdown), [`Menu`](#menu-and-menuitem), [`MenuItem`](#menu-and-menuitem), [`ColorPicker`](#colorpicker), [`SegmentedControl`](#segmentedcontrol), [`Stepper`](#stepper), [`Rating`](#rating), [`Breadcrumb`](#breadcrumb), [`KeybindField`](#keybindfield), [`DatePicker`](#datepicker) |
 
 Tooltip is attached to another widget with its `tooltip` property; it is an overlay behavior, not a standalone node in the runtime catalog. See [Tooltips](#tooltips).
 
@@ -47,6 +47,36 @@ Row[class: "toolbar"] {
 ```
 
 `Toolbar` and `StatusBar` are runtime-supported aliases for horizontal flow containers; they do not paint a native chrome surface. `Divider` is an alias for `Separator`. These aliases are included in the showcase so applications can use semantic names while `.xss` styles the child controls and their layout.
+
+### `Grid`
+
+Grid lays children into columns and rows. Its constructor takes a quoted `|`-separated column list; `rows` is an optional property using the same grammar. A track is `auto`, a fixed logical size such as `120px` (the `px` suffix is optional), or a positive fractional weight such as `2fr`. Remaining implicit rows use `auto`. Each axis supports up to eight explicit tracks. `gap` sets both axis gaps with one value or horizontal/vertical gaps with a pair.
+
+Children auto-place row by row into the next unoccupied cell when neither coordinate is supplied. To place a child explicitly, provide both zero-based `gridColumn` and `gridRow`; providing only one is an error. `columnSpan` and `rowSpan` range from 1 to 8 and cover adjacent cells. Explicit cell placement may overlap if coordinates are repeated.
+
+```xui
+Grid("120px|1fr|2fr")[rows: "auto|40px", gap: 8px, pad: 10px] {
+  Text("Fixed")[gridColumn: 0, gridRow: 0]
+  Button(label: "Wide action")[gridColumn: 1, gridRow: 0, columnSpan: 2]
+  Text("Auto-placed")
+}
+```
+
+The grid template and cell coordinates belong to `.xui`. `.xss` can supply reusable `gap`, padding, borders, colors, and explicit size constraints; `.xui` geometry overrides stylesheet defaults. Invalid track tokens, empty tracks, and more than eight explicit tracks produce a runtime build error.
+
+### `Stack`
+
+Stack intentionally overlays in-flow children in one content box. Its `align` value positions each child on both axes; a child's `align` overrides the container. The default is `Stretch`, so give overlay children explicit sizes when they should not fill the box. Children paint in document order, and the later visible child receives pointer hits first. This is useful for badges on cards, labels over images, and layered panels. It is not a substitute for normal flow: overlapping is expected.
+
+```xui
+Stack[class: "preview", width: 360px, height: 120px, pad: 8px] {
+  Panel[class: "preview-background", width: 100%, height: 100%]
+  Text("Overlay title")[class: "preview-title", width: 180px, height: 32px, align: Center]
+  Button(label: "Action")[class: "preview-action", width: 100px, height: 32px, align: End]
+}
+```
+
+The Stack layout uses ordinary `.xui` sizing, min/max, padding, and child margins. `.xss` controls each layer's surface, text, and state appearance. The showcase's Layout page includes a background, centered caption, and lower-right badge.
 
 ### Preferred sizes for auto-sized widgets
 
@@ -345,6 +375,28 @@ A short text leaf for counts and status words: `Badge("New")` or `Badge[text: "3
 Badge.tag { resting: { bg: #2563eb, fg: #ffffff, size: auto 22px, pad: 7px 2px, radius: 11px, font-size: 12px, align: Center } }
 ```
 
+### `Icon`
+
+A small, backend-neutral vector symbol. The current built-in names are `add`, `check`, `chevron-down`, `chevron-right`, `close`, `file`, `folder`, `home`, `menu`, `minus`, and `search`. The icon uses the widget's `.xss` `fg`, opacity, transform, and authored size; it does not depend on a platform icon font. Unknown names fail runtime construction with the supported-name list.
+
+```xui
+Row(gap: 8px, align: Center) {
+  Icon(name: "search")[class: "toolbar-icon", width: 20px, height: 20px]
+  Text("Search")[class: "toolbar-label"]
+}
+```
+
+### `TreeView`
+
+A selectable, expandable hierarchy authored as a pipe-separated list of slash-separated paths. Each path creates missing ancestors; folders start expanded. Clicking a chevron toggles a folder, and clicking a label selects that path. The `selected` property and `value(id)`/`setValue(id, string)` use the full path, such as `Project/src/runtime.cpp`. Attach `change` to observe selection changes. For long trees, put the auto-sized TreeView in a `ScrollView` so the scroll container owns clipping and scrolling.
+
+```xui
+TreeView[id: "files", items: "Project/src/ui/runtime.cpp|Project/docs/widgets.md",
+         selected: "Project/src/ui/runtime.cpp", change: onFileSelected]
+```
+
+The current version uses one TreeView style for its surface and rows; row-height follows `font-size`. Per-row classes, lazy loading, multi-selection, drag/drop, and keyboard tree navigation are not implemented. Paths are static after build; use the application value API to read/change the selected path.
+
 ### `Separator` and `Divider`
 
 Aliases for the same control: a thin line drawn in the control's `fg`. The intrinsic size is 12x1; inside a `Column` the default cross-axis stretch spans the container width, and inside a `Row` give it an explicit `size` (for example `size: 1px 32px` draws a vertical divider). Orientation follows the painted aspect: a region wider than tall draws horizontally.
@@ -503,7 +555,7 @@ Button.primary {
 CheckItem.check-item { resting: { fg: #f8fafc, size: 260px 36px } hover: { bg: #263752 } checked: { fg: #60a5fa } }
 ```
 
-The full property/value table is in the [styling reference](styling-reference.md). The [showcase](../examples/showcase.xui) and [stylesheet](../examples/showcase.xss) group runtime-supported objects into named sections, including docking. They include disabled/state examples, attached tooltips, and interactive values reflected in neighboring text. The showcase asset/runtime test parses and lays out each section; visible interactive appearance still requires a desktop smoke test. `Grid` and `Stack` remain lower-level layout solvers rather than `.xui` runtime containers. The [cross-platform sample](../tests/fixtures/cross_platform.xui) and [controls sample](../tests/fixtures/controls.xui) are test fixtures that also serve as focused format references.
+The full property/value table is in the [styling reference](styling-reference.md). The [showcase](../examples/showcase.xui) and [stylesheet](../examples/showcase.xss) group runtime-supported objects into named sections, including docking, Grid tracks, and Stack overlays. They include disabled/state examples, attached tooltips, and interactive values reflected in neighboring text. The showcase asset/runtime test parses and lays out each section; visible interactive appearance still requires a desktop smoke test. The [cross-platform sample](../tests/fixtures/cross_platform.xui) and [controls sample](../tests/fixtures/controls.xui) are test fixtures that also serve as focused format references.
 
 ## Mode pickers, values, and navigation
 
@@ -589,7 +641,7 @@ Limitations: inertial/momentum scrolling, touch/gesture input, scrollbar corner 
 
 ## Schema-recognized, runtime-unsupported objects
 
-The current core schema also recognizes names that are not materialized by `UiRuntime::build()`: `Grid`, `Stack`, `Popover`, `Modal`, `ContextMenu`, `Tooltip`, `IconButton`, `RangeSlider`, `ComboBox`, `Icon`, `TreeView`, `ListView`, `Table`, `Canvas`, `HUD`, `Crosshair`, `RadialMenu`, `HealthBar`, and `DamageNumber`. (`DockSpace` aliases the runtime `DockHost`; `Toolbar`, `StatusBar`, and `MenuBar` are horizontal containers; `Menu`/`MenuItem` are the runtime [popup menu](#menu-and-menuitem).) `MenuBar` remains a plain client-area row of ordinary controls; the custom draggable top menu is the [`TitleBar`](#titlebar) widget together with `Window[platformTopMenu: false]`. A dedicated command-menu model and menu keyboard navigation are not implemented.
+The current core schema also recognizes names that are not materialized by `UiRuntime::build()`: `Popover`, `Modal`, `ContextMenu`, `Tooltip`, `IconButton`, `RangeSlider`, `ComboBox`, `ListView`, `Table`, `Canvas`, `HUD`, `Crosshair`, `RadialMenu`, `HealthBar`, and `DamageNumber`. (`DockSpace` aliases the runtime `DockHost`; `Toolbar`, `StatusBar`, and `MenuBar` are horizontal containers; `Menu`/`MenuItem` are the runtime [popup menu](#menu-and-menuitem).) `MenuBar` remains a plain client-area row of ordinary controls; the custom draggable top menu is the [`TitleBar`](#titlebar) widget together with `Window[platformTopMenu: false]`. A dedicated command-menu model and menu keyboard navigation are not implemented.
 
 ```xui
 MenuBar[class: "client-menu"] {

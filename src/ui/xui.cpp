@@ -233,14 +233,22 @@ namespace xui {
 		}
 		m_runtime.setEventHandler(m_eventHandler, m_eventContext);
 		m_attached = true;
+		m_primarySurface = m_renderer->primarySurface();
+		reconcileFloatingPanels();
 		m_error.clear();
 		return true;
 	}
 
 	int Xui::run(XuiRunOptions options) {
 		if (!m_attached || !m_renderer || !m_platform) { setError("Call attach() before run()."); return 1; }
+		auto anyWindowVisible = [&]() {
+			if (m_platform->windowVisible(m_window)) return true;
+			return std::any_of(m_floatingSurfaces.begin(), m_floatingSurfaces.end(), [&](const FloatingPanelSurface& surface) {
+				return m_platform->windowVisible(surface.window);
+			});
+		};
 		bool running = true, redraw = true;
-		bool wasVisible = m_platform->windowVisible(m_window);
+		bool wasVisible = anyWindowVisible();
 		m_runtime.setAnimationsPaused(!wasVisible);
 		const auto start = Clock::now();
 		m_lastTick = start;
@@ -251,9 +259,60 @@ namespace xui {
 			bool resized = false;
 			Event event;
 			while (m_platform->pumpEvents(event)) {
+				bool consumed = false;
+				FloatingPanelSurface* floating = nullptr;
+				for (FloatingPanelSurface& candidate : m_floatingSurfaces)
+					if (candidate.window == event.window) { floating = &candidate; break; }
+				if (floating) {
+					if (event.type == EventType::Quit || event.type == EventType::CloseRequest) {
+						const auto value = m_runtime.value(floating->id);
+						if (value) if (const auto* dock = std::get_if<DockPanelValue>(&*value)) {
+							DockPanelValue inApp = *dock;
+							inApp.floating = true;
+							m_runtime.setDockPanelNativeSurface(floating->id, false);
+							m_runtime.setValue(floating->id, inApp);
+						}
+						const std::size_t index = static_cast<std::size_t>(floating - m_floatingSurfaces.data());
+						destroyFloatingPanel(index); redraw = true; continue;
+					}
+					if (event.type == EventType::Resize || event.type == EventType::DpiChange) {
+						if (auto value = m_runtime.value(floating->id)) if (auto* dock = std::get_if<DockPanelValue>(&*value)) {
+							DockPanelValue resizedValue = *dock;
+							const Vec2 logicalSize = m_platform->windowSizeLogical(floating->window);
+							resizedValue.bounds.w = logicalSize.x; resizedValue.bounds.h = logicalSize.y;
+							m_runtime.setValue(floating->id, resizedValue);
+						}
+						redraw = true; continue;
+					}
+					if (event.type == EventType::MouseDown && event.button == MouseButton::Left &&
+						event.y < m_runtime.dockPanelHeaderHeight(floating->id)) {
+						const Vec2 windowPos = m_platform->windowPositionLogical(floating->window);
+						floating->dragOffset = { event.screenX - windowPos.x, event.screenY - windowPos.y };
+						floating->dragging = true;
+						m_draggingFloatingPanel = floating->id;
+						consumed = true;
+					}
+					const Rect panelRect = m_runtime.dockPanelRect(floating->id);
+					event.x += panelRect.x; event.y += panelRect.y;
+				}
+				if (!m_draggingFloatingPanel.empty() && event.type == EventType::MouseMove) {
+					auto dragged = std::find_if(m_floatingSurfaces.begin(), m_floatingSurfaces.end(), [&](const FloatingPanelSurface& candidate) { return candidate.id == m_draggingFloatingPanel; });
+					if (dragged != m_floatingSurfaces.end()) {
+						m_platform->setWindowPositionLogical(dragged->window, { event.screenX - dragged->dragOffset.x, event.screenY - dragged->dragOffset.y });
+						redraw = true;
+					}
+					consumed = true;
+				}
+				if (!m_draggingFloatingPanel.empty() && event.type == EventType::MouseUp && event.button == MouseButton::Left) {
+					Vec2 mainClient{};
+					if (m_platform->screenToClient(m_window, { event.screenX, event.screenY }, mainClient))
+						m_runtime.redockPanelAt(m_draggingFloatingPanel, mainClient);
+					m_draggingFloatingPanel.clear(); redraw = true; consumed = true;
+				}
+				if (consumed) { reconcileFloatingPanels(); continue; }
 				switch (event.type) {
 				case EventType::Quit:
-				case EventType::CloseRequest: running = false; break;
+				case EventType::CloseRequest: if (!event.window.valid() || event.window == m_window) running = false; break;
 				case EventType::MouseMove:
 					redraw |= m_runtime.pointerMove({ event.x, event.y });
 					m_platform->setCursor(m_runtime.cursorAt({ event.x, event.y }));
@@ -293,9 +352,10 @@ namespace xui {
 				case EventType::Tick: redraw = true; break;
 				default: break;
 				}
+				reconcileFloatingPanels();
 			}
 			if (!running) break;
-			const bool visible = m_platform->windowVisible(m_window);
+			const bool visible = anyWindowVisible();
 			if (visible != wasVisible) {
 				m_runtime.setAnimationsPaused(!visible);
 				wasVisible = visible;
@@ -319,7 +379,6 @@ namespace xui {
 			if (visible && (options.redrawContinuously || m_runtime.fpsCounterEnabled())) redraw = true;
 			if (visible) redraw |= m_runtime.updateTimers();
 
-			const Vec2 logical = m_platform->windowSizeLogical(m_window);
 			const Vec2i pixels = m_platform->windowSizePixels(m_window);
 			const f32 dpi = m_platform->dpiScale(m_window);
 			if (pixels.x > 0 && pixels.y > 0 &&
@@ -328,7 +387,7 @@ namespace xui {
 				m_widthPixels = u32(pixels.x); m_heightPixels = u32(pixels.y);
 				redraw = true;
 			}
-			if (visible && redraw && pixels.x > 0 && pixels.y > 0) {
+			if (visible && redraw) {
 				renderFrame();
 				redraw = false;
 			}
@@ -370,26 +429,108 @@ namespace xui {
 		const Vec2 logical = m_platform->windowSizeLogical(m_window);
 		const Vec2i pixels = m_platform->windowSizePixels(m_window);
 		const f32 dpi = m_platform->dpiScale(m_window);
-		if (pixels.x <= 0 || pixels.y <= 0) return;
-		if (u32(pixels.x) != m_widthPixels || u32(pixels.y) != m_heightPixels) {
-			m_renderer->resize(u32(pixels.x), u32(pixels.y), dpi);
-			m_widthPixels = u32(pixels.x); m_heightPixels = u32(pixels.y);
-		}
 		m_text.beginFrame();
 		m_runtime.setDrawBatchCount(m_painter.stats().drawCalls);
-		// Image intrinsic size is discovered during its first paint. If that changes auto sizing,
-		// resolve layout once more and repaint before presenting the frame.
-		for (u8 pass = 0; pass < 2; ++pass) {
-			m_runtime.layout(logical.x, logical.y, dpi);
-			m_painter.begin(u32(pixels.x), u32(pixels.y), dpi);
-			m_runtime.paint(m_painter, dpi);
-			if (!m_runtime.takeImageLayoutInvalidation()) break;
+		bool presented = false;
+		if (pixels.x > 0 && pixels.y > 0) {
+			m_platform->makeGlCurrent(m_window);
+			m_renderer->makeSurfaceCurrent(m_primarySurface);
+			if (u32(pixels.x) != m_widthPixels || u32(pixels.y) != m_heightPixels) {
+				if (!m_renderer->resizeSurface(m_primarySurface, u32(pixels.x), u32(pixels.y), dpi))
+					m_renderer->resize(u32(pixels.x), u32(pixels.y), dpi);
+				m_widthPixels = u32(pixels.x); m_heightPixels = u32(pixels.y);
+			}
+			// Image intrinsic size is discovered during first paint; resolve layout again if needed.
+			for (u8 pass = 0; pass < 2; ++pass) {
+				m_runtime.layout(logical.x, logical.y, dpi);
+				m_painter.begin(u32(pixels.x), u32(pixels.y), dpi);
+				m_runtime.paint(m_painter, dpi);
+				if (!m_runtime.takeImageLayoutInvalidation()) break;
+			}
+			const DrawList draw = m_painter.finish();
+			m_renderer->beginFrame({ u32(pixels.x), u32(pixels.y), dpi, Color{0.04f, 0.05f, 0.08f, 1}, m_stats.frames });
+			m_renderer->submit(draw);
+			m_renderer->endFrame(); m_renderer->present(); m_platform->swapBuffers(m_window);
+			presented = true;
 		}
-		const DrawList draw = m_painter.finish();
-		m_renderer->beginFrame({ u32(pixels.x), u32(pixels.y), dpi, Color{0.04f, 0.05f, 0.08f, 1}, m_stats.frames });
-		m_renderer->submit(draw);
-		m_renderer->endFrame(); m_renderer->present(); m_platform->swapBuffers(m_window);
-		++m_stats.frames;
+		for (FloatingPanelSurface& floating : m_floatingSurfaces) {
+			const Vec2 logicalSize = m_platform->windowSizeLogical(floating.window);
+			const Vec2i surfacePixels = m_platform->windowSizePixels(floating.window);
+			const f32 surfaceDpi = m_platform->dpiScale(floating.window);
+			if (!m_platform->windowVisible(floating.window) || logicalSize.x <= 0 || logicalSize.y <= 0 || surfacePixels.x <= 0 || surfacePixels.y <= 0) continue;
+			m_platform->makeGlCurrent(floating.window);
+			if (!m_renderer->makeSurfaceCurrent(floating.surface)) continue;
+			m_renderer->resizeSurface(floating.surface, u32(surfacePixels.x), u32(surfacePixels.y), surfaceDpi);
+			const Rect panelRect = m_runtime.dockPanelRect(floating.id);
+			m_painter.begin(u32(surfacePixels.x), u32(surfacePixels.y), surfaceDpi);
+			m_painter.pushTransform(Mat3::translate(-panelRect.x, -panelRect.y));
+			m_painter.pushClip(panelRect);
+			m_runtime.paintDockPanel(m_painter, surfaceDpi, floating.id);
+			m_painter.popClip(); m_painter.popTransform();
+			const DrawList panelDraw = m_painter.finish();
+			m_renderer->beginFrame({ u32(surfacePixels.x), u32(surfacePixels.y), surfaceDpi, Color{0.04f, 0.05f, 0.08f, 1}, m_stats.frames });
+			m_renderer->submit(panelDraw); m_renderer->endFrame(); m_renderer->present(); m_platform->swapBuffers(floating.window);
+			presented = true;
+		}
+		m_platform->makeGlCurrent(m_window);
+		m_renderer->makeSurfaceCurrent(m_primarySurface);
+		if (presented) ++m_stats.frames;
+	}
+
+	void Xui::reconcileFloatingPanels() {
+		if (!m_platform || !m_renderer || !m_window.valid()) return;
+		const std::vector<std::string> ids = m_runtime.dockPanelIds();
+		for (const std::string& id : ids) {
+			const auto panelValue = m_runtime.value(id);
+			const DockPanelValue* dock = panelValue ? std::get_if<DockPanelValue>(&*panelValue) : nullptr;
+			const auto existing = std::find_if(m_floatingSurfaces.begin(), m_floatingSurfaces.end(), [&](const FloatingPanelSurface& surface) { return surface.id == id; });
+			if (!dock || !dock->osWindow || !dock->floating) {
+				if (existing != m_floatingSurfaces.end()) destroyFloatingPanel(static_cast<std::size_t>(existing - m_floatingSurfaces.begin()));
+				m_runtime.setDockPanelNativeSurface(id, false);
+				continue;
+			}
+			if (existing != m_floatingSurfaces.end()) continue;
+			const Rect panelRect = m_runtime.dockPanelRect(id);
+			if (panelRect.empty()) continue;
+			WindowDesc desc;
+			desc.title = m_runtime.dockPanelTitle(id); desc.width = std::max(160u, u32(std::lround(panelRect.w)));
+			desc.height = std::max(100u, u32(std::lround(panelRect.h)));
+			desc.minWidth = 120; desc.minHeight = 80; desc.glContext = m_options.glContext;
+			desc.shareContextWith = m_window; desc.visible = true; desc.decorations = true;
+			const WindowHandle secondary = m_platform->createWindow(desc);
+			if (!secondary.valid()) continue;
+			const Vec2 mainOrigin = m_platform->windowClientScreenOrigin(m_window);
+			const Vec2 outerPosition = m_platform->windowPositionLogical(secondary);
+			const Vec2 clientOrigin = m_platform->windowClientScreenOrigin(secondary);
+			m_platform->setWindowPositionLogical(secondary, {
+				mainOrigin.x + panelRect.x - (clientOrigin.x - outerPosition.x),
+				mainOrigin.y + panelRect.y - (clientOrigin.y - outerPosition.y) });
+			m_platform->makeGlCurrent(secondary);
+			const Vec2i size = m_platform->windowSizePixels(secondary);
+			const RenderSurfaceHandle surface = m_renderer->createSurface({ u32(std::max(0, size.x)), u32(std::max(0, size.y)),
+				m_platform->dpiScale(secondary), m_platform->nativeWindowHandle(secondary) });
+			const bool surfaceUsable = surface.valid() && m_renderer->makeSurfaceCurrent(surface);
+			m_platform->makeGlCurrent(m_window);
+			if (!surfaceUsable) {
+				if (surface.valid()) m_renderer->destroySurface(surface);
+				m_platform->destroyWindow(secondary); continue;
+			}
+			m_floatingSurfaces.push_back({ id, secondary, surface });
+			m_platform->setLiveResizeHook(secondary, renderFrameThunk, this);
+			m_runtime.setDockPanelNativeSurface(id, true);
+		}
+	}
+
+	void Xui::destroyFloatingPanel(std::size_t index) {
+		if (index >= m_floatingSurfaces.size()) return;
+		FloatingPanelSurface surface = std::move(m_floatingSurfaces[index]);
+		m_platform->setLiveResizeHook(surface.window, nullptr, nullptr);
+		m_platform->makeGlCurrent(m_window);
+		m_renderer->makeSurfaceCurrent(m_primarySurface);
+		m_renderer->destroySurface(surface.surface);
+		m_platform->destroyWindow(surface.window);
+		m_runtime.setDockPanelNativeSurface(surface.id, false);
+		m_floatingSurfaces.erase(m_floatingSurfaces.begin() + static_cast<std::ptrdiff_t>(index));
 	}
 
 	void Xui::setEventHandler(UiEventFn handler, void* context) {
@@ -417,6 +558,7 @@ namespace xui {
 		m_tickIntervalMs = 0;
 		m_tickDeadline = {};
 		m_runtime.setRenderer(nullptr);
+		while (!m_floatingSurfaces.empty()) destroyFloatingPanel(m_floatingSurfaces.size() - 1);
 		m_runtime.setPlatformWindow(nullptr, WindowHandle{});
 		if (m_platform && m_window.valid()) m_platform->setLiveResizeHook(m_window, nullptr, nullptr);
 		if (m_rendererReady && m_text.atlas()->ready()) m_text.atlas()->shutdown();
@@ -427,6 +569,7 @@ namespace xui {
 		if (m_platformReady && m_platform) m_platform->shutdown();
 		m_platformReady = false;
 		m_attached = false;
+		m_primarySurface = {};
 		m_renderer = nullptr; m_platform = nullptr;
 	}
 

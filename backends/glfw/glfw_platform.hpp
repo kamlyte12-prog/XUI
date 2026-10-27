@@ -17,6 +17,10 @@ public:
 	xui::Vec2i windowSizePixels(xui::WindowHandle) const override;
 	xui::f32 dpiScale(xui::WindowHandle) const override;
 	bool windowVisible(xui::WindowHandle) const override;
+	xui::Vec2 windowClientScreenOrigin(xui::WindowHandle) const override;
+	xui::Vec2 windowPositionLogical(xui::WindowHandle) const override;
+	bool setWindowPositionLogical(xui::WindowHandle, xui::Vec2) override;
+	bool screenToClient(xui::WindowHandle, xui::Vec2, xui::Vec2&) const override;
 	bool pumpEvents(xui::Event&) override;
 	void waitEvents(xui::f64 timeoutSec) override;
 	xui::f64 time() const override;

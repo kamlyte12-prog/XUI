@@ -61,6 +61,7 @@ namespace xui {
 		bool repeat = false;               ///< KeyDown auto-repeat
 		WindowHandle window;               ///< originating window
 		f32 x = 0, y = 0;                  ///< mouse: logical px, origin top-left of the client area
+		f32 screenX = 0, screenY = 0;       ///< mouse: logical desktop coordinates when supported
 		f32 dx = 0, dy = 0;                ///< MouseMove deltas / Wheel scroll deltas (notch units, dy>0 = away)
 		f32 w = 0, h = 0;                  ///< Resize: new logical size. DpiChange: old dpi scale
 		f32 scale = 1;                     ///< DpiChange: new dpi scale
@@ -78,6 +79,7 @@ namespace xui {
 		bool resizable = true;
 		bool visible = true;
 		bool glContext = false;            ///< ask the platform for an OpenGL context on this window (WGL/GLFW)
+		WindowHandle shareContextWith{};    ///< optional existing window whose GL resources this context shares
 		bool alwaysOnTop = false;
 		/// Native decorations (title bar, caption buttons, frame). False asks for a borderless
 		/// window so the application can draw its own chrome (see the TitleBar widget). A backend
@@ -109,6 +111,14 @@ namespace xui {
 		/// Whether a window can currently be seen. Minimized/hidden windows may pause visual timers.
 		/// Platforms without visibility state can keep the default and report true.
 		virtual bool windowVisible(WindowHandle) const { return true; }
+		/// Screen-space client origin and position/size controls for native floating windows.
+		/// Defaults keep older backends source-compatible and report unsupported geometry.
+		virtual Vec2 windowClientScreenOrigin(WindowHandle) const { return {}; }
+		virtual Vec2 windowPositionLogical(WindowHandle) const { return {}; }
+		virtual bool setWindowPositionLogical(WindowHandle, Vec2) { return false; }
+		/// Map a desktop logical-pixel point to a window's client coordinates. Returns false if
+		/// the backend cannot provide this mapping (native-window docking then stays disabled).
+		virtual bool screenToClient(WindowHandle, Vec2, Vec2&) const { return false; }
 
 		/// Pop the next queued event. Returns false when the queue is empty.
 		virtual bool pumpEvents(Event& out) = 0;

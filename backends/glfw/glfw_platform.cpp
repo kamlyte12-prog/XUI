@@ -49,7 +49,9 @@ WindowHandle GlfwPlatform::createWindow(const WindowDesc& d) {
 		glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
 		glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
 	}
-	GLFWwindow* native = glfwCreateWindow(static_cast<int>(d.width), static_cast<int>(d.height), std::string(d.title).c_str(), nullptr, nullptr);
+	GLFWwindow* shared = d.shareContextWith.valid() ? (find(d.shareContextWith) ? find(d.shareContextWith)->native : nullptr) : nullptr;
+	if (d.shareContextWith.valid() && !shared) return {};
+	GLFWwindow* native = glfwCreateWindow(static_cast<int>(d.width), static_cast<int>(d.height), std::string(d.title).c_str(), nullptr, shared);
 	if (!native) return {};
 	const WindowHandle handle{ static_cast<u32>(m_windows.size()), 1 };
 	m_windows.push_back({ native, handle, this });
@@ -91,6 +93,25 @@ bool GlfwPlatform::windowVisible(WindowHandle h) const {
 	return window && window->native &&
 		glfwGetWindowAttrib(window->native, GLFW_VISIBLE) == GLFW_TRUE &&
 		glfwGetWindowAttrib(window->native, GLFW_ICONIFIED) != GLFW_TRUE;
+}
+Vec2 GlfwPlatform::windowPositionLogical(WindowHandle h) const {
+	int x = 0, y = 0; if (const auto* rec = find(h)) glfwGetWindowPos(rec->native, &x, &y); return { f32(x), f32(y) };
+}
+Vec2 GlfwPlatform::windowClientScreenOrigin(WindowHandle h) const {
+	const Window* rec = find(h); if (!rec || !rec->native) return {};
+	int x = 0, y = 0, left = 0, top = 0, right = 0, bottom = 0;
+	glfwGetWindowPos(rec->native, &x, &y);
+	glfwGetWindowFrameSize(rec->native, &left, &top, &right, &bottom);
+	return { f32(x + left), f32(y + top) };
+}
+bool GlfwPlatform::setWindowPositionLogical(WindowHandle h, Vec2 position) {
+	Window* rec = find(h); if (!rec || !rec->native) return false;
+	glfwSetWindowPos(rec->native, static_cast<int>(std::lround(position.x)), static_cast<int>(std::lround(position.y)));
+	return true;
+}
+bool GlfwPlatform::screenToClient(WindowHandle h, Vec2 point, Vec2& client) const {
+	if (!find(h)) return false;
+	const Vec2 origin = windowClientScreenOrigin(h); client = { point.x - origin.x, point.y - origin.y }; return true;
 }
 void GlfwPlatform::setLiveResizeHook(WindowHandle h, void (*fn)(void*), void* context) {
 	if (Window* w = find(h)) { w->liveResizeFn = fn; w->liveResizeContext = context; }
@@ -263,7 +284,11 @@ void GlfwPlatform::onSize(GLFWwindow* w, int width, int height) {
 		if (r->liveResizeFn) r->liveResizeFn(r->liveResizeContext);
 	}
 }
-void GlfwPlatform::onCursor(GLFWwindow* w, double x, double y) { Event e{}; e.type = EventType::MouseMove; e.x = f32(x); e.y = f32(y); push(w, e); }
+void GlfwPlatform::onCursor(GLFWwindow* w, double x, double y) {
+	Event e{}; e.type = EventType::MouseMove; e.x = f32(x); e.y = f32(y);
+	if (Window* r = record(w)) { const Vec2 origin = r->owner->windowClientScreenOrigin(r->handle); e.screenX = origin.x + e.x; e.screenY = origin.y + e.y; }
+	push(w, e);
+}
 void GlfwPlatform::onCursorEnter(GLFWwindow* w, int entered) {
 	Event e{};
 	e.type = entered == GLFW_TRUE ? EventType::MouseEnter : EventType::MouseLeave;
@@ -271,18 +296,23 @@ void GlfwPlatform::onCursorEnter(GLFWwindow* w, int entered) {
 		double x = 0, y = 0;
 		glfwGetCursorPos(w, &x, &y);
 		e.x = f32(x); e.y = f32(y);
+		if (Window* r = record(w)) { const Vec2 origin = r->owner->windowClientScreenOrigin(r->handle); e.screenX = origin.x + e.x; e.screenY = origin.y + e.y; }
 	}
 	push(w, e);
 }
 void GlfwPlatform::onScroll(GLFWwindow* w, double dx, double dy) {
 	Event e{}; e.type = EventType::Wheel; e.dx = f32(dx); e.dy = f32(dy);
-	double x = 0, y = 0; glfwGetCursorPos(w, &x, &y); e.x = f32(x); e.y = f32(y); push(w, e);
+	double x = 0, y = 0; glfwGetCursorPos(w, &x, &y); e.x = f32(x); e.y = f32(y);
+	if (Window* r = record(w)) { const Vec2 origin = r->owner->windowClientScreenOrigin(r->handle); e.screenX = origin.x + e.x; e.screenY = origin.y + e.y; }
+	push(w, e);
 }
 void GlfwPlatform::onMouse(GLFWwindow* w, int button, int action, int mods) {
 	Event e{}; e.type = action == GLFW_PRESS ? EventType::MouseDown : EventType::MouseUp;
 	e.button = button == GLFW_MOUSE_BUTTON_RIGHT ? MouseButton::Right : button == GLFW_MOUSE_BUTTON_MIDDLE ? MouseButton::Middle : MouseButton::Left;
 	e.mods = (mods & GLFW_MOD_SHIFT ? static_cast<u8>(Mod::Shift) : 0) | (mods & GLFW_MOD_CONTROL ? static_cast<u8>(Mod::Ctrl) : 0) | (mods & GLFW_MOD_ALT ? static_cast<u8>(Mod::Alt) : 0);
-	double x = 0, y = 0; glfwGetCursorPos(w, &x, &y); e.x = f32(x); e.y = f32(y); push(w, e);
+	double x = 0, y = 0; glfwGetCursorPos(w, &x, &y); e.x = f32(x); e.y = f32(y);
+	if (Window* r = record(w)) { const Vec2 origin = r->owner->windowClientScreenOrigin(r->handle); e.screenX = origin.x + e.x; e.screenY = origin.y + e.y; }
+	push(w, e);
 }
 Key GlfwPlatform::mapKey(int k) {
 	if (k >= GLFW_KEY_A && k <= GLFW_KEY_Z) return static_cast<Key>('A' + k - GLFW_KEY_A);

@@ -102,7 +102,16 @@ namespace xui {
 		/// One full layout/paint/present pass. Also invoked by the platform's live-resize hook so
 		/// interactive resize (a modal loop inside pumpEvents on Windows) redraws every step.
 		void renderFrame();
+		void reconcileFloatingPanels();
+		void destroyFloatingPanel(std::size_t index);
 		static void renderFrameThunk(void* context) { static_cast<Xui*>(context)->renderFrame(); }
+		struct FloatingPanelSurface {
+			std::string id;
+			WindowHandle window;
+			RenderSurfaceHandle surface;
+			bool dragging = false;
+			Vec2 dragOffset{};
+		};
 
 		XuiOptions m_options;
 		StringInterner m_strings;
@@ -115,6 +124,9 @@ namespace xui {
 		Renderer* m_renderer = nullptr;
 		Platform* m_platform = nullptr;
 		WindowHandle m_window;
+		RenderSurfaceHandle m_primarySurface{};
+		std::vector<FloatingPanelSurface> m_floatingSurfaces;
+		std::string m_draggingFloatingPanel;
 		UiEventFn m_eventHandler = nullptr;
 		void* m_eventContext = nullptr;
 		XuiTickFn m_tickHandler = nullptr;

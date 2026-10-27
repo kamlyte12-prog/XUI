@@ -6,6 +6,8 @@
 
 namespace xui {
 
+	using RenderSurfaceHandle = Handle<struct RenderSurfaceTag>;
+
 	enum class TextureFormat : u8 { A8, RGBA8 };   ///< A8: glyph coverage. RGBA8: straight-alpha colour.
 	struct TextureDesc {
 		u32 width = 0, height = 0;
@@ -18,6 +20,11 @@ namespace xui {
 		f32 dpiScale = 1.f;
 		void* nativeWindow = nullptr;              ///< backend-specific (GLFW: GLFWwindow*), unused by headless backends
 		bool vsync = true;
+	};
+	struct RenderSurfaceDesc {
+		u32 width = 0, height = 0;             ///< backbuffer size, physical px
+		f32 dpiScale = 1.f;
+		void* nativeWindow = nullptr;           ///< native window/context supplied by Platform
 	};
 	struct FrameInfo {
 		u32 width = 0, height = 0;                 ///< physical px
@@ -43,6 +50,15 @@ namespace xui {
 		virtual bool init(const RendererDesc&) = 0;
 		virtual void shutdown() = 0;
 		virtual void resize(u32 w, u32 h, f32 dpiScale) = 0;
+
+		/// Optional multi-surface extension. The surface created by init() remains the default
+		/// surface; backends that support additional targets return a valid handle here. Frame
+		/// operations continue to target whichever surface makeSurfaceCurrent() selected.
+		virtual RenderSurfaceHandle createSurface(const RenderSurfaceDesc&) { return {}; }
+		virtual RenderSurfaceHandle primarySurface() const { return { 0, 1 }; }
+		virtual void destroySurface(RenderSurfaceHandle) {}
+		virtual bool makeSurfaceCurrent(RenderSurfaceHandle) { return false; }
+		virtual bool resizeSurface(RenderSurfaceHandle, u32, u32, f32) { return false; }
 
 		virtual TextureHandle createTexture(const TextureDesc&) = 0;
 		virtual void          updateTexture(TextureHandle, const void* pixels, Recti region) = 0;

@@ -55,6 +55,8 @@ namespace {
 		if (name == "onChange") ++static_cast<u32*>(context)[1];
 	}
 	void recordDock(void* context, std::string_view) { ++*static_cast<u32*>(context); }
+	struct DockPressProbe { std::string last; };
+	void recordDockPress(void* context, std::string_view name) { static_cast<DockPressProbe*>(context)->last = name; }
 	struct CheckListProbe { UiRuntime* runtime = nullptr; u32 calls = 0; CheckListValue selected; };
 	void recordCheckList(void* context, std::string_view name) {
 		auto& probe = *static_cast<CheckListProbe*>(context);
@@ -504,6 +506,7 @@ Window(title: "Dock test", size: 640x420) {
     }
   }
 }
+
 )";
 		constexpr std::string_view xssSource = R"(
 DockHost.workspace { resting: { bg: #111827, pad: 4px, min-size: 480px 320px } }
@@ -565,6 +568,175 @@ DockPreview { resting: { bg: #5386d866, border: 1px solid #69a7ff, radius: 4px }
 		restore.floating = false; restore.targetPanel = "editor"; restore.region = DockZone::Center; restore.active = true;
 		CHECK(ui.setValue("console", restore));
 		CHECK(!std::get<DockPanelValue>(*ui.value("console")).floating);
+	}
+
+	TEST(ui_runtime_os_window_float_policy_paints_one_panel_and_can_redock_by_drop_point) {
+		constexpr std::string_view xuiSource = R"(
+Window(size: 640x420) {
+  DockHost[id: "workspace", width: 100%, height: 100%] {
+    DockPanel(title: "Editor")[id: "editor", region: "Center", floatMode: "os-window"] { Text("Editor body") }
+    DockPanel(title: "Inspector")[id: "inspector", region: "Right", target: "editor"] { Text("Inspector body") }
+  }
+}
+)";
+		constexpr std::string_view xssSource = R"(
+DockPanel { resting: { bg: #223344, fg: #ffffff } }
+DockHost { resting: { bg: #101820 } }
+)";
+		StringInterner strings;
+		UiAssetBundle assets;
+		std::string error;
+		CHECK(loadUiAssets(xuiSource, xssSource, strings, assets, error));
+		TextSystem text;
+		UiRuntime ui;
+		CHECK(ui.build(assets.document, assets.styles, strings, text, {}, error));
+		ui.layout(640, 420);
+		const auto editorValue = ui.value("editor");
+		CHECK(editorValue.has_value());
+		const auto* editor = editorValue ? std::get_if<DockPanelValue>(&*editorValue) : nullptr;
+		CHECK(editor != nullptr);
+		if (!editor) return;
+		CHECK(editor->osWindow);
+		CHECK_EQ(ui.dockPanelIds().size(), 2u);
+		DockPanelValue floating = *editor;
+		floating.floating = true;
+		CHECK(ui.setValue("editor", floating));
+		ui.layout(640, 420);
+		ui.setDockPanelNativeSurface("editor", true);
+		Painter mainPainter;
+		mainPainter.begin(640, 420, 1.f);
+		ui.paint(mainPainter, 1.f);
+		const DrawList mainDraw = mainPainter.finish();
+		Painter panelPainter;
+		const Rect panelRect = ui.dockPanelRect("editor");
+		CHECK(!panelRect.empty());
+		panelPainter.begin(static_cast<u32>(panelRect.w), static_cast<u32>(panelRect.h), 1.f);
+		panelPainter.pushTransform(Mat3::translate(-panelRect.x, -panelRect.y));
+		panelPainter.pushClip(panelRect);
+		ui.paintDockPanel(panelPainter, 1.f, "editor");
+		panelPainter.popClip(); panelPainter.popTransform();
+		const DrawList panelDraw = panelPainter.finish();
+		CHECK(mainDraw.nIdx > 0);
+		CHECK(panelDraw.nIdx > 0);
+		const Rect targetRect = ui.dockPanelRect("inspector");
+		CHECK(ui.redockPanelAt("editor", { targetRect.x + targetRect.w * 0.5f, targetRect.y + targetRect.h * 0.5f }));
+		const auto redocked = ui.value("editor");
+		CHECK(redocked && !std::get<DockPanelValue>(*redocked).floating);
+	}
+
+	TEST(ui_runtime_floating_panel_raise_matches_content_paint_and_hit_order) {
+		constexpr std::string_view xuiSource = R"(
+Window(size: 480x320) {
+  DockHost[id: "host", width: 100%, height: 100%, gutter: 4px, headerHeight: 28px] {
+    DockPanel(title: "Back")[id: "back", floating: true, preferredSize: 260x200] {
+      Button[id: "back-button", class: "back-button", label: "Back action", width: 190px, height: 56px, press: onBack]
+    }
+    DockPanel(title: "Front")[id: "front", floating: true, preferredSize: 260x200] {
+      Button[id: "front-button", class: "front-button", label: "Front action", width: 190px, height: 56px, press: onFront]
+    }
+  }
+})";
+		constexpr std::string_view xssSource = R"(
+DockHost { resting: { pad: 0px } }
+DockPanel { resting: { pad: 0px, border: 0px solid #00000000 } }
+Button.back-button { resting: { bg: #cc3333, fg: #ffffff } }
+Button.front-button { resting: { bg: #33aa55, fg: #ffffff } }
+)";
+		StringInterner strings;
+		auto document = parseXui(xuiSource, "dock-z-order.xui", strings);
+		auto styles = compileXss(xssSource, "dock-z-order.xss", strings);
+		CHECK(document.has_value()); CHECK(styles.has_value());
+		if (!document || !styles) return;
+		SoftRenderer renderer; CHECK(renderer.init({ 480, 320, 1.f, nullptr, false }));
+		TextSystem text; UiRuntime ui; std::string error;
+		CHECK(ui.build(*document, *styles, strings, text, {}, error)); if (!error.empty()) return;
+		ui.layout(480.f, 320.f);
+		auto place = [&](std::string_view id, Rect bounds) {
+			DockPanelValue value = std::get<DockPanelValue>(*ui.value(id));
+			value.floating = true; value.bounds = bounds;
+			CHECK(ui.setValue(id, value));
+		};
+		place("back", { 70.f, 45.f, 270.f, 220.f });
+		place("front", { 100.f, 65.f, 270.f, 220.f });
+		ui.layout(480.f, 320.f);
+		// The earlier-authored panel remains partially exposed, so clicking its title raises it.
+		CHECK(ui.pointerDown({ 78.f, 52.f }));
+		ui.pointerUp({ 78.f, 52.f });
+
+		const Rect backButton = UiRuntimeFontWeightProbe::bounds(ui, "back-button");
+		const Rect frontButton = UiRuntimeFontWeightProbe::bounds(ui, "front-button");
+		const f32 left = std::max(backButton.x, frontButton.x);
+		const f32 top = std::max(backButton.y, frontButton.y);
+		const f32 right = std::min(backButton.right(), frontButton.right());
+		const f32 bottom = std::min(backButton.bottom(), frontButton.bottom());
+		CHECK(right > left && bottom > top);
+		if (right <= left || bottom <= top) return;
+		const Vec2 overlap{ (left + right) * .5f, (top + bottom) * .5f };
+		Painter painter; painter.begin(480, 320, 1.f); ui.paint(painter);
+		const DrawList drawList = painter.finish();
+		renderer.beginFrame({ 480, 320, 1.f, Color{ 0, 0, 0, 1 }, 1 });
+		renderer.submit(drawList); renderer.endFrame();
+		const Image image = renderer.snapshot();
+		const std::size_t pixel = (static_cast<std::size_t>(static_cast<u32>(overlap.y)) * image.width + static_cast<u32>(overlap.x)) * 4;
+		CHECK(image.rgba[pixel] > image.rgba[pixel + 1]);
+		DockPressProbe probe; ui.setEventHandler(recordDockPress, &probe);
+		CHECK(ui.pointerDown(overlap)); ui.pointerUp(overlap);
+		CHECK_EQ(probe.last, std::string("onBack"));
+	}
+
+	TEST(ui_runtime_floating_panel_tracks_pointer_and_keeps_header_in_host) {
+		constexpr std::string_view xuiSource = R"(
+Window(size: 480x360) {
+  DockHost[id: "host", width: 100%, height: 100%, headerHeight: 28px] {
+    DockPanel(title: "Floating")[id: "floating", floating: true, preferredSize: 180x140] {
+      Button[id: "oversized", label: "Must be clipped", width: 420px, height: 90px]
+    }
+  }
+})";
+		constexpr std::string_view xssSource = R"(
+DockHost { resting: { pad: 0px } }
+DockPanel { resting: { pad: 0px, border: 0px solid #00000000 } }
+Button { resting: { bg: #cc3333, fg: #ffffff } }
+)";
+		StringInterner strings;
+		auto document = parseXui(xuiSource, "dock-float-clip.xui", strings);
+		auto styles = compileXss(xssSource, "dock-float-clip.xss", strings);
+		CHECK(document.has_value()); CHECK(styles.has_value());
+		if (!document || !styles) return;
+		TextSystem text; UiRuntime ui; std::string error;
+		CHECK(ui.build(*document, *styles, strings, text, {}, error));
+		if (!error.empty()) return;
+		ui.layout(480.f, 360.f);
+		DockPanelValue initial = std::get<DockPanelValue>(*ui.value("floating"));
+		initial.floating = true; initial.bounds = { 40.f, 40.f, 180.f, 140.f };
+		CHECK(ui.setValue("floating", initial));
+		ui.layout(480.f, 360.f);
+		DockPressProbe probe; ui.setEventHandler(recordDockPress, &probe);
+		ui.pointerDown({ 450.f, 100.f }); ui.pointerUp({ 450.f, 100.f });
+		CHECK(probe.last.empty());
+		CHECK(ui.pointerDown({ 50.f, 50.f }));
+		CHECK(ui.pointerMove({ 210.f, 160.f }));
+		auto moved = std::get<DockPanelValue>(*ui.value("floating"));
+		CHECK(moved.bounds.x == 200.f && moved.bounds.y == 150.f);
+		SoftRenderer renderer; CHECK(renderer.init({ 480, 360, 1.f, nullptr, false }));
+		Painter painter; painter.begin(480, 360, 1.f); ui.paint(painter);
+		renderer.beginFrame({ 480, 360, 1.f, Color{ 0.04f, 0.05f, 0.08f, 1 }, 1 });
+		renderer.submit(painter.finish()); renderer.endFrame();
+		const Image clippedImage = renderer.snapshot();
+		const u8* outsidePixel = clippedImage.px(450, 200);
+		const u8* insidePixel = clippedImage.px(250, 200);
+		CHECK(insidePixel && insidePixel[0] > insidePixel[1] * 2);
+		CHECK(outsidePixel && outsidePixel[0] <= outsidePixel[1] + 20);
+		CHECK(ui.pointerMove({ 1000.f, 1000.f }));
+		moved = std::get<DockPanelValue>(*ui.value("floating"));
+		const Rect hostBounds = UiRuntimeFontWeightProbe::bounds(ui, "host");
+		CHECK(moved.bounds.x == std::max(0.f, hostBounds.w - moved.bounds.w));
+		CHECK(moved.bounds.y == std::max(0.f, hostBounds.h - 28.f));
+		// The panel remains reachable after a pointer moves past every host edge.
+		ui.pointerUp({ 1000.f, 1000.f });
+		moved = std::get<DockPanelValue>(*ui.value("floating"));
+		CHECK(moved.bounds.x == std::max(0.f, hostBounds.w - moved.bounds.w));
+		CHECK(moved.bounds.y == std::max(0.f, hostBounds.h - 28.f));
 	}
 
 	std::string readExample(std::string_view filename) {

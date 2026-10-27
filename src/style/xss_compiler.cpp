@@ -63,9 +63,10 @@ Tooltip { resting: { bg: #292929, fg: #ffffff, border: 1px solid #292929, radius
 TitleBar { resting: { bg: #f5f5f5, fg: #242424, pad: 4px, gap: 4px } }
 TitleButton { resting: { fg: #424242, radius: 4px } hover: { bg: #e5e5e5 } pressed: { bg: #d6d6d6 } }
 DockHost { resting: { bg: #f5f5f5, fg: #242424, radius: 6px, pad: 4px } }
-DockPanel { resting: { bg: #ffffff, fg: #242424, pad: 8px } }
-DockHeader { resting: { bg: #f0f0f0, fg: #424242, pad: 8px, radius: 4px } hover: { bg: #e5e5e5 } }
-DockTab { resting: { bg: #f5f5f5, fg: #616161, pad: 6px } hover: { bg: #ebebeb } selected: { bg: #ffffff, fg: #0f6cbd } }
+DockPanel { resting: { bg: #ffffff, fg: #242424, border: 1px solid #d1d1d1, radius: 6px, pad: 8px, shadow: 0px 4px 14px 0px #00000024 } }
+DockHeader { resting: { bg: #f0f0f0, fg: #424242, border: 1px solid #e1e1e1, radius: 4px, pad: 8px }
+  hover: { bg: #ebebeb } selected: { fg: #0f6cbd, font-weight: 600 } }
+DockTab { resting: { bg: #f5f5f5, fg: #616161, pad: 6px } hover: { bg: #ebebeb } selected: { bg: #ffffff, fg: #0f6cbd, font-weight: 600 } }
 DockCloseButton { resting: { fg: #616161 } hover: { bg: #c42b1c, fg: #ffffff } }
 DockSplitter { resting: { bg: #d1d1d1 } hover: { bg: #0f6cbd } pressed: { bg: #115ea3 } }
 DockPreview { resting: { bg: #0f6cbd44, border: 1px solid #0f6cbd, radius: 4px } }

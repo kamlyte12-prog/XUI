@@ -1,6 +1,6 @@
 # Docking panels
 
-`DockHost` organizes direct-child `DockPanel` nodes into recursive split regions, center tab groups, and floating overlays inside the same window. Docking behavior lives in `UiRuntime`; rendering and input continue through the existing `Painter`, `Renderer`, and `Platform` contracts.
+`DockHost` organizes direct-child `DockPanel` nodes into recursive split regions, center tab groups, and floating panels. Docking behavior lives in `UiRuntime`; rendering and input continue through the `Painter`, `Renderer`, and `Platform` contracts.
 
 ## Authoring
 
@@ -25,7 +25,7 @@ Window(title: "Workspace", size: 900x600) {
 }
 ```
 
-`DockSpace` is accepted as an alias for `DockHost`. Host attributes are `gutter` and `headerHeight`. Panel attributes are `title`, `region`, `target`, `floating`, `closable`, `icon`, and `preferredSize`; normal layout attributes such as `minSize`, `maxSize`, and `.xss` `min-size`/`max-size` also apply. Percent min/max constraints resolve against the current host content box. Split allocation respects panel floors and ceilings; when a host is smaller than the sum of its minimums, the panels keep their minimums and can extend beyond the host bounds.
+`DockSpace` is accepted as an alias for `DockHost`. Host attributes are `gutter` and `headerHeight`. Panel attributes are `title`, `region`, `target`, `floating`, `floatMode`, `closable`, `icon`, and `preferredSize`; normal layout attributes such as `minSize`, `maxSize`, and `.xss` `min-size`/`max-size` also apply. `floatMode` is either `"in-app"` (the default) or `"os-window"`. It is a behavioral `.xui` property, not a style. Percent min/max constraints resolve against the current host content box. Split allocation respects panel floors and ceilings; when a host is smaller than the sum of their minimums, panels keep their minimums and can extend beyond host bounds.
 
 Panel children use the ordinary layout system. The runtime reserves the host's header height above each DockPanel's content. The `.xui` file owns initial placement and child structure; `.xss` owns all chrome appearance.
 
@@ -33,11 +33,21 @@ Panel children use the ordinary layout system. The runtime reserves the host's h
 
 - Click a tab to activate it. Drag a tab or title header to rearrange a panel.
 - Drop near an active group's left/right/top/bottom edge to create a nested split; drop in the center to add the panel to that group's tabs.
-- During a valid drag, a `.xss`-styled preview shows the target area. The pointer-up location decides the result: releasing outside the host creates an in-app floating panel, even if the last pointer-move still showed an in-host preview. Releasing on an invalid area inside the host or pressing Escape cancels the move.
+- During a valid drag, a `.xss`-styled preview shows the target area. Releasing outside the host floats the panel; `floatMode` selects in-app or native-window hosting. Releasing on an invalid area inside the host or pressing Escape cancels the move.
 - Drag split gutters to resize the two adjacent regions. Panel min/max constraints clamp the available ratio.
 - Closable panels are removed from the tree when their close button is pressed. There is no built-in reopen command; applications can hide the close button or manage panel visibility outside the current docking value API.
 
-Floating panels stay inside the application's existing native window. They are positioned relative to the DockHost and share its event loop and backend. Separate native windows are not created.
+In-app floating panels stay inside the main window. Their title bar follows pointer movement continuously, and the panel is clamped to the DockHost content area so its title bar remains reachable. Child paint and hit testing use the same panel bounds.
+
+With `floatMode: "os-window"`, releasing a panel outside its host creates a separate GLFW window and OpenGL render surface that shares the primary context. The panel keeps the same retained nodes, authored IDs, values, event handlers, and styles. Its native window can be moved and resized; drag the in-client DockPanel header back over a dock group to redock it. Closing the native window returns the panel to an in-app floating panel. The host must remain in the same `Xui` instance. A custom backend must implement `Platform::createWindow` with `WindowDesc.shareContextWith`, screen/client coordinate methods, and the optional Renderer surface methods; if it does not provide a usable surface, Xui leaves the panel in-app.
+
+## Stacking and default appearance
+
+Panel bodies and controls follow the DockTree stack order: docked regions paint first, then in-app floating panels from back to front. Pointer hit testing uses the same front-most floating panel, so a raised panel's controls receive input above panels beneath it. Dock headers, tab strips, splitter handles, and drag previews paint in the docking overlay after panel content; popup controls retain their existing overlay priority.
+
+The built-in Fluent 2-inspired defaults give DockPanel a thin neutral outline and a soft shadow only while it is floating. Dock headers use a selected accent and heavier text; inactive tabs use muted foregrounds, and splitters accent on hover/drag. These are normal `.xss` rules (`DockPanel`, `DockHeader`, `DockTab`, `DockCloseButton`, `DockSplitter`, `DockPreview`) and can be overridden by application styles. Header and tab rules resolve background, foreground, border, radius, opacity, padding, font family/size/weight, and text alignment through the regular cascade. Hover, selected, pressed, disabled, and dragging states are supplied where applicable. Close affordances and the drop preview have their own selectors. `DockHeader:selected` applies to the active single-panel or floating header; `DockTab:selected` applies to the active tab in a tab group.
+
+The current benchmark target reports CPU microseconds for idle layout, drag preview, splitter movement, painting, tab switching, undock/re-dock value operations, and close input on prebuilt runtimes. These values isolate runtime work; they do not represent displayed FPS or GPU/presentation cost. Visible drag, resize, and interaction frame pacing still needs a desktop smoke run.
 
 ## Styling
 
@@ -68,7 +78,7 @@ DockSplitter { resting: { bg: #33465f }
 DockPreview { resting: { bg: #69a7ff55, border: 1px solid #69a7ff, radius: 5px } }
 ```
 
-Dock chrome uses the same XSS palette/theme resolution as the rest of the runtime. Color, foreground, border, radius, padding, and font properties apply to the corresponding subpart. Layout rules such as `min-size` belong to the host/panel selector, not the synthetic chrome subparts.
+Dock chrome uses the same XSS palette/theme resolution as the rest of the runtime. `align` controls the title label's horizontal alignment; `font-family`, `font-size`, and `font-weight` control its face; `fg`, `bg`, `border`, `radius`, `opacity`, and `pad` control the subpart appearance. Layout rules such as `min-size` belong to the host/panel selector, not the synthetic chrome subparts.
 
 ## Values and events
 
@@ -86,5 +96,5 @@ Panel event properties are `dock`, `undock`, `resize`, `tabChange`, and `close`.
 
 - A DockHost currently accepts only DockPanel as a direct child. Nesting comes from recursive split regions, not nested DockHost widgets.
 - Pointer movement updates the docking tree and relayouts only that host subtree; it does not rebuild the authored document. Dragging and splitter movement avoid allocations in the model hot path.
-- The runtime does not provide keyboard docking commands, drag payloads between separate hosts, floating-window chrome outside the host overlay, persistence/serialization, or restoration of closed panels.
+- The runtime does not provide keyboard docking commands, drag payloads between separate hosts, persistence/serialization, or restoration of closed panels. Native tear-off is implemented for the GLFW/OpenGL adapters. The Windows Release GLFW demo launched its five-second docking profile at 357.573 FPS, and headless tests cover surface-scoped painting and redocking state; native tear-off, movement, resize, close, and redock interactions have not been visually exercised. The screenshot's 4 FPS remains unreproduced. Linux/macOS native behavior and mixed-DPI monitor dragging have not been verified. A backend without surface support falls back to in-app floating.
 - Automated tests cover tree topology, min/max clamping, nested splits, tabs, floating, hit interactions, and API restoration. Visible drag preview, cursor, native resize coexistence, and >60 FPS during user-driven docking still require a desktop smoke test; do not infer those claims from unit tests alone.

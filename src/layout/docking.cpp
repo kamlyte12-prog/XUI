@@ -366,15 +366,15 @@ namespace xui {
 
     u32 DockTree::activePanel(u32 key) const { const u32 group = groupForPanel(key); return group == kNone ? kNone : activePanelInGroup(group); }
 
-    u32 DockTree::panelAt(Vec2 point) const {
+    u32 DockTree::panelAt(Vec2 point, u32 excludePanel) const {
         const Panel* front = nullptr;
         for (const Panel& panel : m_panelData)
-            if (!panel.closed && panel.floating && panel.bounds.contains(point) && (!front || panel.zOrder > front->zOrder)) front = &panel;
+            if (panel.key != excludePanel && !panel.closed && panel.floating && panel.bounds.contains(point) && (!front || panel.zOrder > front->zOrder)) front = &panel;
         if (front) return front->key;
         for (std::size_t i = m_panelData.size(); i > 0; --i) {
             const u32 index = static_cast<u32>(i - 1);
             const Panel& panel = m_panelData[index];
-            if (panel.closed || panel.floating || panel.group >= m_nodes.size()) continue;
+            if (panel.key == excludePanel || panel.closed || panel.floating || panel.group >= m_nodes.size()) continue;
             const TreeNode& group = m_nodes[panel.group];
             if (group.active < group.panels.size() && group.panels[group.active] == index && group.bounds.contains(point)) return panel.key;
         }

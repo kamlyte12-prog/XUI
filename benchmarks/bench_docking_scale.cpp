@@ -6,6 +6,7 @@
 #include <cmath>
 #include <chrono>
 #include <cstdio>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -35,6 +36,17 @@ namespace {
 			source += "    DockPanel(title: \"Panel\")[id: \"p" + std::to_string(i) +
 				"\", region: \"Left\", target: \"p" + std::to_string(i - 1) + "\", minSize: 8x8] { Text(\"P" +
 				std::to_string(i) + "\") }\n";
+		source += "  }\n}\n";
+		return source;
+	}
+
+	std::string tabSource(u32 panels) {
+		std::string source = "Window(size: 1200x800) {\n"
+			"  DockHost[id: \"host\", width: 100%, height: 100%, gutter: 7px, headerHeight: 30px] {\n"
+			"    DockPanel(title: \"Tab 0\")[id: \"p0\", region: \"Center\", minSize: 160x120] { Text(\"0\") }\n";
+		for (u32 i = 1; i < panels; ++i)
+			source += "    DockPanel(title: \"Tab\")[id: \"p" + std::to_string(i) +
+				"\", region: \"Center\", target: \"p0\", minSize: 80x60] { Text(\"" + std::to_string(i) + "\") }\n";
 		source += "  }\n}\n";
 		return source;
 	}
@@ -145,6 +157,82 @@ namespace {
 		return true;
 	}
 
+	bool runInteractionScenarios(u32 iterations) {
+		StringInterner strings;
+		TextSystem text;
+		UiRuntime ui;
+		const std::string source = tabSource(12);
+		auto document = parseXui(source, "bench-docking-tabs.xui", strings);
+		auto styles = compileXss("DockHost { resting: { pad: 0px } }", "bench-docking-tabs.xss", strings);
+		std::string error;
+		if (!document || !styles || !ui.build(*document, *styles, strings, text, {}, error)) {
+			std::fprintf(stderr, "tab-switch fixture failed: %s\n", error.c_str());
+			return false;
+		}
+		ui.layout(1200.f, 800.f);
+		const f64 tabSwitch = micros([&](u32 i) {
+			const std::string id = "p" + std::to_string((i & 1u) ? 11 : 1);
+			DockPanelValue value = std::get<DockPanelValue>(*ui.value(id));
+			value.active = true;
+			ui.setValue(id, value, false);
+		}, iterations);
+
+		const DockPanelValue docked = std::get<DockPanelValue>(*ui.value("p11"));
+		DockPanelValue floating = docked;
+		floating.floating = true; floating.bounds = { 500.f, 180.f, 320.f, 260.f };
+		DockPanelValue redocked = docked;
+		redocked.floating = false; redocked.targetPanel = "p0"; redocked.region = DockZone::Center; redocked.active = true;
+		f64 undockTotal = 0.0, redockTotal = 0.0;
+		for (u32 i = 0; i < iterations; ++i) {
+			const auto undockBegin = std::chrono::steady_clock::now();
+			ui.setValue("p11", floating, false);
+			const auto redockBegin = std::chrono::steady_clock::now();
+			ui.setValue("p11", redocked, false);
+			const auto redockEnd = std::chrono::steady_clock::now();
+			undockTotal += std::chrono::duration<f64, std::micro>(redockBegin - undockBegin).count();
+			redockTotal += std::chrono::duration<f64, std::micro>(redockEnd - redockBegin).count();
+		}
+		const f64 undock = undockTotal / iterations;
+		const f64 redock = redockTotal / iterations;
+
+		// A panel close is one-shot in the current API. Prepare independent runtimes
+		// outside the timed region so the sample measures input, tree close and layout.
+		constexpr u32 closeSamples = 256;
+		const std::string closeSource = R"(
+Window(size: 360x240) {
+  DockHost[id: "host", width: 100%, height: 100%, gutter: 4px, headerHeight: 28px] {
+    DockPanel(title: "Close me")[id: "panel", region: "Center", closable: true] { Text("Panel") }
+  }
+})";
+		auto closeDocument = parseXui(closeSource, "bench-docking-close.xui", strings);
+		std::vector<std::unique_ptr<UiRuntime>> closeRuntimes;
+		closeRuntimes.reserve(closeSamples);
+		for (u32 i = 0; i < closeSamples; ++i) {
+			auto runtime = std::make_unique<UiRuntime>();
+			if (!closeDocument || !runtime->build(*closeDocument, *styles, strings, text, {}, error)) {
+				std::fprintf(stderr, "close fixture failed: %s\n", error.c_str());
+				return false;
+			}
+			runtime->layout(360.f, 240.f);
+			closeRuntimes.push_back(std::move(runtime));
+		}
+		const Vec2 closePoint{ 345.f, 14.f };
+		const auto closeBegin = std::chrono::steady_clock::now();
+		for (auto& runtime : closeRuntimes) {
+			runtime->pointerDown(closePoint);
+			runtime->pointerUp(closePoint);
+		}
+		const auto closeEnd = std::chrono::steady_clock::now();
+		if (closeRuntimes.front()->value("panel")) {
+			std::fprintf(stderr, "close fixture click did not close its panel\n");
+			return false;
+		}
+		const f64 close = std::chrono::duration<f64, std::micro>(closeEnd - closeBegin).count() / closeSamples;
+		std::printf("interaction    tab switch %7.3f us/op | undock %7.3f us/op | re-dock %7.3f us/op | close %7.3f us/op (n=%u)\n",
+			tabSwitch, undock, redock, close, closeSamples);
+		return true;
+	}
+
 } // namespace
 
 int main() {
@@ -156,5 +244,6 @@ int main() {
 	ok = runScenario("deep", deepSource(8), 8, iterations) && ok;
 	ok = runScenario("deep", deepSource(16), 16, iterations) && ok;
 	ok = runScenario("deep", deepSource(24), 24, iterations) && ok;
+	ok = runInteractionScenarios(iterations) && ok;
 	return ok ? 0 : 1;
 }

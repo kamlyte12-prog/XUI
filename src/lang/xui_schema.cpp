@@ -39,7 +39,7 @@ namespace xui {
 		W("Popover", {}, { "open", "anchor" }); W("Modal", { "title" }, { "open" });
 		W("ContextMenu", {}, {});             W("Tooltip", { "text" }, {});
 		W("DockHost", {}, { "gutter", "headerHeight" }); W("DockSpace", {}, { "gutter", "headerHeight" });
-		W("DockPanel", { "title" }, { "dock", "region", "target", "floating", "closable", "icon", "preferredSize" });
+		W("DockPanel", { "title" }, { "dock", "region", "target", "floating", "closable", "icon", "preferredSize", "floatMode", "float-mode" });
 		W("Button", { "label" }, { "variant", "icon", "loading" });
 		W("IconButton", { "icon" }, {});        W("ToggleButton", { "label" }, { "checked", "icon" });
 		W("CheckBox", { "label" }, { "checked" }); W("CheckList", {}, { "gap" }); W("CheckItem", { "label" }, { "checked" });

@@ -55,7 +55,7 @@ Input travels in the opposite direction: `Platform::pumpEvents()` yields normali
 
 ## Backend-neutral coordinate and event contract
 
-The `Platform` contract documents pointer coordinates and logical client dimensions in logical pixels with a top-left origin. `windowSizePixels()` reports physical framebuffer dimensions. `dpiScale()` maps logical size to physical pixels. `WindowDesc` carries the resolved initial title, size, decorations choice, and optional preferred custom-chrome corner radius. The GLFW Windows backend applies the radius through the DWM corner-preference API when accepted and excludes the outside corner pixels from restored-window hit testing; other platforms retain rectangular native corners. Concrete platforms must normalize native coordinates before returning events.
+The `Platform` contract documents pointer coordinates and logical client dimensions in logical pixels with a top-left origin. `windowSizePixels()` reports physical framebuffer dimensions. `dpiScale()` maps logical size to physical pixels. `WindowDesc` carries the resolved initial title, size, decorations choice, optional shared GL context window, and preferred custom-chrome corner radius. Events include their originating `WindowHandle`; pointer events can also carry desktop logical coordinates for moving a tear-off between windows. `windowClientScreenOrigin`, `screenToClient`, and `setWindowPositionLogical` support this mapping. The GLFW Windows backend applies the radius through DWM when accepted and excludes outside-corner hit pixels on restored windows; other platforms retain rectangular corners. Concrete platforms normalize native coordinates before returning events.
 
 The runtime does not handle native messages. The platform queues and returns `xui::Event` values, including `MouseMove`, `MouseDown`, `MouseUp`, `Wheel`, `KeyDown`, `TextInput`, `Resize`, `DpiChange`, `CloseRequest`, and `Quit`. File/IME event data is platform-owned according to the interface comments and must stay valid for the documented period.
 
@@ -78,6 +78,8 @@ See [`renderer.hpp`](../include/xui/render/renderer.hpp). A concrete renderer mu
 5. `caps()` with only capabilities the renderer implements.
 
 `DrawList` data is temporary and remains valid only until the next painter frame. Copy or consume it synchronously. Honor framebuffer pixel dimensions and premultiplied-alpha conventions used by the draw-list renderer. The optional custom-command callback is installed with `setCustomHandler()`.
+
+For optional multi-window support, implement `createSurface`, `destroySurface`, `makeSurfaceCurrent`, and `resizeSurface`. `init()` creates the primary surface; `primarySurface()` returns its handle. Ordinary frame methods target whichever surface is current. The platform creates a secondary window with `WindowDesc.shareContextWith` set to the primary window when graphics resources must be shared. A backend may return an invalid surface handle; `xui::Xui` then leaves an `os-window` DockPanel in the in-app float layer. Existing single-surface renderer implementations remain source-compatible.
 
 The bundled `GlDrawListRenderer` is in [`backends/opengl/gl_drawlist_renderer.cpp`](../backends/opengl/gl_drawlist_renderer.cpp). `SoftRenderer` is a CPU reference renderer for tests/headless work; its full-frame raster cost is not suitable as a high-frame-rate interactive backend at common window sizes.
 

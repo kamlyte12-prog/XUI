@@ -440,7 +440,7 @@ Window[platformTopMenu: false] {
                 Text("Ready. Drag a panel header to rearrange this workspace.")[class: "body-copy"]
               }
             }
-            DockPanel(title: "Preview")[id: "dock-preview", icon: "P", region: "Center", target: "dock-editor", closable: true, preferredSize: 320x240, minSize: 180x140, class: "dock-panel", dock: onDockChange, undock: onDockChange, resize: onDockChange, tabChange: onDockChange, close: onDockChange] {
+            DockPanel(title: "Preview")[id: "dock-preview", icon: "P", region: "Center", target: "dock-editor", floatMode: "os-window", closable: true, preferredSize: 320x240, minSize: 180x140, class: "dock-panel", dock: onDockChange, undock: onDockChange, resize: onDockChange, tabChange: onDockChange, close: onDockChange] {
               Column[width: 100%, height: 100%, pad: 12px, gap: 8px] {
                 Text("Tabbed center panel")[class: "panel-title"]
                 ProgressBar[id: "dock-preview-progress", value: 0.72, class: "progress", width: 100%, height: 18px]

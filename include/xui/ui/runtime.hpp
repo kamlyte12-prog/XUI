@@ -41,6 +41,7 @@ namespace xui {
 		std::string activeTab;
 		u32 order = 0;
 		bool active = false;
+		bool osWindow = false; ///< authored floatMode: "os-window" policy; actual surface ownership is facade-managed
 	};
 
 	/// IDs of checked CheckItem children, returned by a CheckList's authored id.
@@ -100,6 +101,8 @@ namespace xui {
 		/// Paint styled shapes and glyph-atlas-backed text in logical coordinates. Glyphs are rasterized
 		/// at physical resolution so high-DPI displays stay crisp.
 		void paint(Painter& painter, f32 dpiScale = 1.f);
+		/// Paint only the named floating DockPanel subtree and its header, for a secondary native surface.
+		void paintDockPanel(Painter& painter, f32 dpiScale, std::string_view panelId);
 
 		/// Route mouse motion and button events. Returns true when visual state changed.
 		bool pointerMove(Vec2 point);
@@ -169,6 +172,13 @@ namespace xui {
 		std::string_view controlText(std::string_view id) const;
 		/// Read a stateful value (bool, number, string, color, selection, scroll offset, checklist, or dock state).
 		std::optional<UiValue> value(std::string_view id) const;
+		std::vector<std::string> dockPanelIds() const;
+		Rect dockPanelRect(std::string_view id) const;
+		f32 dockPanelHeaderHeight(std::string_view id) const;
+		std::string_view dockPanelTitle(std::string_view id) const;
+		void setDockPanelNativeSurface(std::string_view id, bool enabled);
+		/// Dock a native-floating panel into the host group under a client-space drop point.
+		bool redockPanelAt(std::string_view id, Vec2 clientPoint);
 		/// Set a supported control value. If notify is true, dispatches its change handler when applicable.
 		bool setValue(std::string_view id, const UiValue& value, bool notify = false);
 		/// Restart the XSS animation declared for an authored node. Once completes at its final frame;
@@ -244,7 +254,7 @@ namespace xui {
 			bool datePicker = false, segmented = false, stepper = false, rating = false, breadcrumb = false, keybindField = false;
 			bool indeterminate = false;
 			bool dockHost = false, dockPanel = false, dockClosable = true, dockClosed = false;
-			bool dockFloatingInitial = false;
+			bool dockFloatingInitial = false, dockOsWindow = false, dockNativeSurface = false;
 			bool menu = false, menuItem = false, submenuOpen = false;
 			std::string menuShortcut;
 			std::string menuSelectedItem;   // Menu: label of the last activated item
@@ -328,6 +338,7 @@ namespace xui {
 		void syncPickerEditors(u32 ownerIndex, u32 preserveIndex = 0xFFFFFFFFu);
 		bool updatePickerFromEditor(Node& editor);
 		bool isNodeVisible(u32 index) const;
+		void paintImpl(Painter& painter, f32 dpiScale);
 		bool pointInsideScrollAncestors(u32 index, Vec2 point) const;
 		Rect scrollBarRect(u32 index, bool horizontal, Rect* track = nullptr) const;
 		bool setScrollOffset(u32 index, Vec2 offset, bool smooth);
@@ -397,6 +408,8 @@ namespace xui {
 		Platform* m_platform = nullptr;
 		WindowHandle m_windowHandle{};
 		bool m_clientChrome = false;
+		u32 m_paintDockPanel = 0xFFFFFFFFu;
+		bool m_paintDockPanelScope = false;
 		// TitleBar interaction state (one gesture at a time; multiple bars share it).
 		u32 m_titleDragBar = 0xFFFFFFFFu;
 		u32 m_titleLastDownBar = 0xFFFFFFFFu;
@@ -405,6 +418,7 @@ namespace xui {
 		Vec2 m_titleLastDownPos{};
 		std::chrono::steady_clock::time_point m_titleLastDown{};
 		std::vector<u32> m_dockOrderScratch;
+		std::vector<u32> m_paintOrderScratch;
 		std::vector<DockHostState> m_dockHosts;
 		StyleSetId m_tooltipStyleSet;
 		std::vector<GlyphQuad> m_glyphScratch;

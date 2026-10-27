@@ -193,6 +193,9 @@ bool GlDrawListRenderer::init(const RendererDesc& d) {
 	if (!loadFunctions()) { m_error = "Required OpenGL 2.1 entry points are unavailable in the active context."; return false; }
 	if (!createProgram())return false;
 	resize(d.width, d.height, d.dpiScale);
+	m_surfaces.clear();
+	m_surfaces.push_back({ d.nativeWindow, d.width, d.height, 1, d.dpiScale, true });
+	m_currentSurface = 0;
 	m_genBuffers(1, &m_vertexBuffer);
 	m_genBuffers(1, &m_indexBuffer);
 	glDisable(GL_DEPTH_TEST);
@@ -217,9 +220,47 @@ void GlDrawListRenderer::shutdown() {
 	m_vertexBuffer = m_indexBuffer = 0;
 	releaseProgram();
 	m_textures.clear();
+	m_surfaces.clear();
+	m_currentSurface = 0;
 }
 void GlDrawListRenderer::resize(u32 w, u32 h, f32) {
 	m_width = w;m_height = h;glViewport(0, 0, GLsizei(w), GLsizei(h));
+	if (m_currentSurface < m_surfaces.size() && m_surfaces[m_currentSurface].alive) {
+		m_surfaces[m_currentSurface].width = w; m_surfaces[m_currentSurface].height = h;
+	}
+}
+xui::RenderSurfaceHandle GlDrawListRenderer::createSurface(const RenderSurfaceDesc& d) {
+	if (!d.nativeWindow || !d.width || !d.height || m_surfaces.empty()) return {};
+	for (xui::u32 i = 1; i < m_surfaces.size(); ++i) if (!m_surfaces[i].alive) {
+		Surface& surface = m_surfaces[i]; surface.nativeWindow = d.nativeWindow; surface.width = d.width; surface.height = d.height;
+		surface.dpi = d.dpiScale; surface.alive = true; return { i, surface.generation };
+	}
+	m_surfaces.push_back({ d.nativeWindow, d.width, d.height, 1, d.dpiScale, true });
+	return { xui::u32(m_surfaces.size() - 1), 1 };
+}
+void GlDrawListRenderer::destroySurface(RenderSurfaceHandle h) {
+	if (!h.valid() || h.index == 0 || h.index >= m_surfaces.size()) return;
+	Surface& surface = m_surfaces[h.index];
+	if (!surface.alive || surface.generation != h.gen) return;
+	surface.nativeWindow = nullptr; surface.alive = false; ++surface.generation;
+	if (m_currentSurface == h.index) { m_currentSurface = 0; makeSurfaceCurrent({ 0, m_surfaces[0].generation }); }
+}
+bool GlDrawListRenderer::makeSurfaceCurrent(RenderSurfaceHandle h) {
+	if (!h.valid() || h.index >= m_surfaces.size()) return false;
+	Surface& surface = m_surfaces[h.index];
+	if (!surface.alive || surface.generation != h.gen || !surface.nativeWindow) return false;
+	glfwMakeContextCurrent(static_cast<GLFWwindow*>(surface.nativeWindow));
+	m_currentSurface = h.index; m_width = surface.width; m_height = surface.height;
+	glViewport(0, 0, GLsizei(m_width), GLsizei(m_height));
+	return true;
+}
+bool GlDrawListRenderer::resizeSurface(RenderSurfaceHandle h, u32 w, u32 height, f32 dpi) {
+	if (!h.valid() || h.index >= m_surfaces.size()) return false;
+	Surface& surface = m_surfaces[h.index];
+	if (!surface.alive || surface.generation != h.gen) return false;
+	surface.width = w; surface.height = height; surface.dpi = dpi;
+	if (m_currentSurface == h.index) resize(w, height, dpi);
+	return true;
 }
 TextureHandle GlDrawListRenderer::createTexture(const TextureDesc& d) {
 	if (!d.width || !d.height)return{};

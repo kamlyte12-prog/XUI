@@ -66,7 +66,7 @@ namespace xui {
 		u32 activePanel(u32 panel) const;
 		u32 panelOrder(u32 panel) const;
 		u32 panelCount(u32 panel) const;
-		u32 panelAt(Vec2 point) const;
+		u32 panelAt(Vec2 point, u32 excludePanel = 0xFFFFFFFFu) const;
 		u32 splitAt(Vec2 point, bool* horizontal = nullptr) const;
 		Rect splitBounds(u32 splitNode) const;
 		f32 splitRatio(u32 splitNode) const;

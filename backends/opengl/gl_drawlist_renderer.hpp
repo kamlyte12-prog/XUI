@@ -28,6 +28,10 @@ public:
 	bool init(const xui::RendererDesc&) override;
 	void shutdown() override;
 	void resize(xui::u32, xui::u32, xui::f32) override;
+	xui::RenderSurfaceHandle createSurface(const xui::RenderSurfaceDesc&) override;
+	void destroySurface(xui::RenderSurfaceHandle) override;
+	bool makeSurfaceCurrent(xui::RenderSurfaceHandle) override;
+	bool resizeSurface(xui::RenderSurfaceHandle, xui::u32, xui::u32, xui::f32) override;
 	xui::TextureHandle createTexture(const xui::TextureDesc&) override;
 	void updateTexture(xui::TextureHandle, const void*, xui::Recti) override;
 	void destroyTexture(xui::TextureHandle) override;
@@ -42,6 +46,7 @@ public:
 
 private:
 	struct Texture { GLuint name = 0; xui::u32 generation = 1; bool alive = false; xui::TextureFormat format = xui::TextureFormat::RGBA8; };
+	struct Surface { void* nativeWindow = nullptr; xui::u32 width = 0, height = 0, generation = 1; xui::f32 dpi = 1.f; bool alive = false; };
 	Texture* texture(xui::TextureHandle);
 	bool loadFunctions();
 	bool createProgram();
@@ -92,4 +97,6 @@ private:
 	xui::u32 m_width = 0, m_height = 0;
 	std::string m_error;
 	std::vector<Texture> m_textures;
+	std::vector<Surface> m_surfaces;
+	xui::u32 m_currentSurface = 0;
 };

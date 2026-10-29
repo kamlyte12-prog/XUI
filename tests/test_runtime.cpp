@@ -582,6 +582,7 @@ Window(size: 640x420) {
 		constexpr std::string_view xssSource = R"(
 DockPanel { resting: { bg: #223344, fg: #ffffff } }
 DockHost { resting: { bg: #101820 } }
+DockPreview { dragging: { bg: #00AAFFFF, opacity: 1 } }
 )";
 		StringInterner strings;
 		UiAssetBundle assets;
@@ -607,6 +608,13 @@ DockHost { resting: { bg: #101820 } }
 		mainPainter.begin(640, 420, 1.f);
 		ui.paint(mainPainter, 1.f);
 		const DrawList mainDraw = mainPainter.finish();
+		const Rect targetRect = ui.dockPanelRect("inspector");
+		CHECK(ui.updateDockDropPreview("editor", { targetRect.x + targetRect.w * 0.5f, targetRect.y + targetRect.h * 0.5f }));
+		Painter previewPainter;
+		previewPainter.begin(640, 420, 1.f);
+		ui.paint(previewPainter, 1.f);
+		const DrawList previewDraw = previewPainter.finish();
+		CHECK(previewDraw.nIdx > mainDraw.nIdx);
 		Painter panelPainter;
 		const Rect panelRect = ui.dockPanelRect("editor");
 		CHECK(!panelRect.empty());
@@ -618,10 +626,44 @@ DockHost { resting: { bg: #101820 } }
 		const DrawList panelDraw = panelPainter.finish();
 		CHECK(mainDraw.nIdx > 0);
 		CHECK(panelDraw.nIdx > 0);
-		const Rect targetRect = ui.dockPanelRect("inspector");
 		CHECK(ui.redockPanelAt("editor", { targetRect.x + targetRect.w * 0.5f, targetRect.y + targetRect.h * 0.5f }));
 		const auto redocked = ui.value("editor");
 		CHECK(redocked && !std::get<DockPanelValue>(*redocked).floating);
+	}
+
+	TEST(ui_runtime_undecorated_os_dock_panel_has_custom_close_button) {
+		constexpr std::string_view xuiSource = R"(
+Window(size: 520x360) {
+  DockHost[id: "workspace", width: 100%, height: 100%] {
+    DockPanel(title: "Tool")[id: "tool", region: "Center", floatMode: "os-window", nativeTitleBar: false, closable: false] { Text("Tool body") }
+  }
+}
+)";
+		StringInterner strings;
+		auto document = parseXui(xuiSource, "dock-custom-titlebar.xui", strings);
+		auto styles = compileXss("DockCloseButton { resting: { fg: #ffffff } }", "dock-custom-titlebar.xss", strings);
+		CHECK(document.has_value()); CHECK(styles.has_value());
+		if (!document || !styles) return;
+		TextSystem text; UiRuntime ui; std::string error;
+		CHECK(ui.build(*document, *styles, strings, text, {}, error));
+		if (!error.empty()) return;
+		ui.layout(520.f, 360.f);
+		CHECK(!ui.dockPanelUsesNativeTitleBar("tool"));
+		auto value = ui.value("tool");
+		CHECK(value.has_value());
+		if (!value) return;
+		DockPanelValue floating = std::get<DockPanelValue>(*value);
+		floating.floating = true; floating.bounds = { 60.f, 50.f, 220.f, 180.f };
+		CHECK(ui.setValue("tool", floating));
+		ui.layout(520.f, 360.f);
+		ui.setDockPanelNativeSurface("tool", true);
+		const Rect panel = ui.dockPanelRect("tool");
+		CHECK(ui.dockPanelCloseButtonContains("tool", { panel.w - 15.f, 15.f }));
+		CHECK(!ui.dockPanelCloseButtonContains("tool", { 20.f, 15.f }));
+		const Vec2 closePoint{ panel.right() - 15.f, panel.y + 15.f };
+		CHECK(ui.pointerDown(closePoint));
+		ui.pointerUp(closePoint);
+		CHECK(!ui.value("tool").has_value());
 	}
 
 	TEST(ui_runtime_floating_panel_raise_matches_content_paint_and_hit_order) {
@@ -2540,6 +2582,46 @@ Window(size: 320x220) {
 	CHECK_EQ(picks, 3u);
 	if (const auto value = ui.value("ctx"))
 		if (const auto* label = std::get_if<std::string>(&*value)) CHECK_EQ(*label, std::string("Inner"));
+}
+
+TEST(ui_runtime_context_menu_opens_at_pointer_and_flips_inside_viewport) {
+	constexpr std::string_view xuiSource = R"(
+Window(size: 320x220)[id: "context-root"] {
+  Menu[id: "context-menu", context: true, anchor: "context-root", width: 150px] {
+    MenuItem(label: "First")[press: onPick]
+    MenuItem(label: "Second")[press: onPick]
+  }
+}
+)";
+	StringInterner strings;
+	auto document = parseXui(xuiSource, "context-menu-position.xui", strings);
+	auto styles = compileXss("Menu { resting: { bg: #151E32FF } }", "context-menu-position.xss", strings);
+	CHECK(document.has_value()); CHECK(styles.has_value());
+	if (!document || !styles) return;
+	TextSystem text; UiRuntime ui; std::string error;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error));
+	if (!error.empty()) return;
+	ui.layout(320.f, 220.f);
+	u32 picks = 0;
+	ui.setEventHandler([](void* context, std::string_view) { ++*static_cast<u32*>(context); }, &picks);
+
+	const auto chooseFirstAt = [&](Vec2 openPoint, Vec2 rowPoint) {
+		CHECK(ui.pointerDown(openPoint, MouseButton::Right));
+		CHECK(ui.pointerDown(rowPoint));
+		ui.pointerUp(rowPoint);
+	};
+	// Top-left and center retain the cursor point as the popup's near corner.
+	chooseFirstAt({ 12.f, 14.f }, { 32.f, 32.f });
+	CHECK_EQ(picks, 1u);
+	chooseFirstAt({ 160.f, 100.f }, { 180.f, 118.f });
+	CHECK_EQ(picks, 2u);
+	// An outside press closes even though the menu is anchored to the full Window.
+	ui.pointerDown({ 300.f, 200.f }); ui.pointerUp({ 300.f, 200.f });
+	ui.pointerDown({ 180.f, 118.f }); ui.pointerUp({ 180.f, 118.f });
+	CHECK_EQ(picks, 2u);
+	// Two rows plus popup insets are 64px high; flip both axes at bottom-right.
+	chooseFirstAt({ 315.f, 215.f }, { 185.f, 169.f });
+	CHECK_EQ(picks, 3u);
 }
 
 TEST(ui_runtime_number_field_live_values_invalid_state_and_blur_revert) {

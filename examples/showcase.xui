@@ -410,7 +410,7 @@ Window[platformTopMenu: false] {
       Tab(title: "Docking") {
         Column[class: "page", gap: 10px, pad: 16px, width: 100%, height: 100%, minSize: 0x0] {
           Text("Dockable workspace")[class: "section-title"]
-          Text("Drag a panel title or tab. Drop near an edge to create a nested split, drop in the center to make a tab, and release outside the workspace to float it. Drag the gutters to resize; press Escape during a drag to cancel.")[class: "help"]
+          Text("Drag a panel title or tab. Drop near an edge to create a nested split, drop in the center to make a tab, and release outside the workspace to float it. Preview uses a custom borderless title bar when torn off. Drag the gutters to resize; press Escape during an in-app drag to cancel.")[class: "help"]
           Text("Dock values update when you dock, undock, resize, switch tabs, or close a panel.")[id: "dock-readout", class: "value-readout", width: 100%, height: 30px]
           DockHost[id: "dock-workspace", class: "docking-host", width: 100%, grow: 1, gutter: 7px, headerHeight: 30px, minSize: 520x300] {
             DockPanel(title: "Editor")[id: "dock-editor", icon: "E", region: "Center", closable: false, preferredSize: 420x320, minSize: 220x170, class: "dock-panel", dock: onDockChange, undock: onDockChange, resize: onDockChange, tabChange: onDockChange, close: onDockChange] {
@@ -440,7 +440,7 @@ Window[platformTopMenu: false] {
                 Text("Ready. Drag a panel header to rearrange this workspace.")[class: "body-copy"]
               }
             }
-            DockPanel(title: "Preview")[id: "dock-preview", icon: "P", region: "Center", target: "dock-editor", floatMode: "os-window", closable: true, preferredSize: 320x240, minSize: 180x140, class: "dock-panel", dock: onDockChange, undock: onDockChange, resize: onDockChange, tabChange: onDockChange, close: onDockChange] {
+            DockPanel(title: "Preview")[id: "dock-preview", icon: "P", region: "Center", target: "dock-editor", floatMode: "os-window", nativeTitleBar: false, closable: true, preferredSize: 320x240, minSize: 180x140, class: "dock-panel", dock: onDockChange, undock: onDockChange, resize: onDockChange, tabChange: onDockChange, close: onDockChange] {
               Column[width: 100%, height: 100%, pad: 12px, gap: 8px] {
                 Text("Tabbed center panel")[class: "panel-title"]
                 ProgressBar[id: "dock-preview-progress", value: 0.72, class: "progress", width: 100%, height: 18px]

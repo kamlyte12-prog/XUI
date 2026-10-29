@@ -497,7 +497,7 @@ Dropdown.dropdown { resting: { size: 240px 38px, pad: 8px, bg: #172033, fg: #f5f
 
 ### `Menu` and `MenuItem`
 
-A command popup menu, distinct from `Dropdown`: Dropdown is a *value selector* (its own committed text/value changes; flat option list), while `Menu` is an *action launcher* — it reports the last activated item but changes no control value, and supports separators, disabled items, checked items, and one nesting level of submenus. A `Menu` may anchor to another widget with `anchor: "<id>"` (opens on left-press over the anchor) or open as a context menu with `context: true` (opens on right-press over the anchor). Items fire their own `press: handler` on activation.
+A command popup menu, distinct from `Dropdown`: Dropdown is a *value selector* (its own committed text/value changes; flat option list), while `Menu` is an *action launcher* — it reports the last activated item but changes no control value, and supports separators, disabled items, checked items, and one nesting level of submenus. A `Menu` may anchor to another widget with `anchor: "<id>"` (opens on left-press over the anchor) or open as a context menu with `context: true` (opens on right-press over the anchor). Context menus open at the right-click point in logical window-client coordinates. They flip left/up near the right or bottom edge and clamp to the client area. To receive right-clicks across the window, anchor the context menu to a full-window container or `Window` ID. Items fire their own `press: handler` on activation.
 
 ```xui
 Button(label: "Menu")[id: "menu-anchor", width: 64px, height: 30px]

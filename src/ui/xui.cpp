@@ -265,6 +265,7 @@ namespace xui {
 					if (candidate.window == event.window) { floating = &candidate; break; }
 				if (floating) {
 					if (event.type == EventType::Quit || event.type == EventType::CloseRequest) {
+						m_runtime.clearDockDropPreview(floating->id);
 						const auto value = m_runtime.value(floating->id);
 						if (value) if (const auto* dock = std::get_if<DockPanelValue>(&*value)) {
 							DockPanelValue inApp = *dock;
@@ -285,7 +286,8 @@ namespace xui {
 						redraw = true; continue;
 					}
 					if (event.type == EventType::MouseDown && event.button == MouseButton::Left &&
-						event.y < m_runtime.dockPanelHeaderHeight(floating->id)) {
+						event.y < m_runtime.dockPanelHeaderHeight(floating->id) &&
+						!m_runtime.dockPanelCloseButtonContains(floating->id, { event.x, event.y })) {
 						const Vec2 windowPos = m_platform->windowPositionLogical(floating->window);
 						floating->dragOffset = { event.screenX - windowPos.x, event.screenY - windowPos.y };
 						floating->dragging = true;
@@ -299,14 +301,20 @@ namespace xui {
 					auto dragged = std::find_if(m_floatingSurfaces.begin(), m_floatingSurfaces.end(), [&](const FloatingPanelSurface& candidate) { return candidate.id == m_draggingFloatingPanel; });
 					if (dragged != m_floatingSurfaces.end()) {
 						m_platform->setWindowPositionLogical(dragged->window, { event.screenX - dragged->dragOffset.x, event.screenY - dragged->dragOffset.y });
+						Vec2 mainClient{};
+						if (m_platform->screenToClient(m_window, { event.screenX, event.screenY }, mainClient))
+							m_runtime.updateDockDropPreview(dragged->id, mainClient);
+						else m_runtime.clearDockDropPreview(dragged->id);
 						redraw = true;
 					}
 					consumed = true;
 				}
 				if (!m_draggingFloatingPanel.empty() && event.type == EventType::MouseUp && event.button == MouseButton::Left) {
+					const std::string releasedPanel = m_draggingFloatingPanel;
 					Vec2 mainClient{};
 					if (m_platform->screenToClient(m_window, { event.screenX, event.screenY }, mainClient))
-						m_runtime.redockPanelAt(m_draggingFloatingPanel, mainClient);
+						m_runtime.redockPanelAt(releasedPanel, mainClient);
+					m_runtime.clearDockDropPreview(releasedPanel);
 					m_draggingFloatingPanel.clear(); redraw = true; consumed = true;
 				}
 				if (consumed) { reconcileFloatingPanels(); continue; }
@@ -496,7 +504,8 @@ namespace xui {
 			desc.title = m_runtime.dockPanelTitle(id); desc.width = std::max(160u, u32(std::lround(panelRect.w)));
 			desc.height = std::max(100u, u32(std::lround(panelRect.h)));
 			desc.minWidth = 120; desc.minHeight = 80; desc.glContext = m_options.glContext;
-			desc.shareContextWith = m_window; desc.visible = true; desc.decorations = true;
+			desc.shareContextWith = m_window; desc.visible = true;
+			desc.decorations = m_runtime.dockPanelUsesNativeTitleBar(id);
 			const WindowHandle secondary = m_platform->createWindow(desc);
 			if (!secondary.valid()) continue;
 			const Vec2 mainOrigin = m_platform->windowClientScreenOrigin(m_window);

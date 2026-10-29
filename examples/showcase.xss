@@ -201,5 +201,5 @@ DockCloseButton { resting: { fg: color.muted, font-size: 16px, radius: 4px, alig
   hover: { bg: #9c3e52, fg: #ffffff } pressed: { bg: #762f40, fg: #ffffff } disabled: { opacity: 0.4 } }
 DockSplitter { resting: { bg: color.outline }
   hover: { bg: color.accent } pressed: { bg: color.accent-hover } dragging: { bg: color.accent-hover } }
-DockPreview { resting: { bg: #69a7ff55, border: 1px solid color.accent, radius: 5px }
-  dragging: { bg: #69a7ff66 } }
+DockPreview { resting: { bg: #377EF288, border: 2px solid #80B7FFFF, radius: 5px }
+  dragging: { bg: #377EF2AA, border: 2px solid #A9CEFFFF } }

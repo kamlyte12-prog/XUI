@@ -176,7 +176,13 @@ namespace xui {
 		Rect dockPanelRect(std::string_view id) const;
 		f32 dockPanelHeaderHeight(std::string_view id) const;
 		std::string_view dockPanelTitle(std::string_view id) const;
+		bool dockPanelUsesNativeTitleBar(std::string_view id) const;
+		/// True when a point in a native floating panel's client area hits its painted close affordance.
+		bool dockPanelCloseButtonContains(std::string_view id, Vec2 panelPoint) const;
 		void setDockPanelNativeSurface(std::string_view id, bool enabled);
+		/// Update/clear the shared DockPreview while an OS-window panel is dragged over the main window.
+		bool updateDockDropPreview(std::string_view id, Vec2 clientPoint);
+		void clearDockDropPreview(std::string_view id);
 		/// Dock a native-floating panel into the host group under a client-space drop point.
 		bool redockPanelAt(std::string_view id, Vec2 clientPoint);
 		/// Set a supported control value. If notify is true, dispatches its change handler when applicable.
@@ -254,6 +260,7 @@ namespace xui {
 			bool datePicker = false, segmented = false, stepper = false, rating = false, breadcrumb = false, keybindField = false;
 			bool indeterminate = false;
 			bool dockHost = false, dockPanel = false, dockClosable = true, dockClosed = false;
+			bool dockNativeTitleBar = true;
 			bool dockFloatingInitial = false, dockOsWindow = false, dockNativeSurface = false;
 			bool menu = false, menuItem = false, submenuOpen = false;
 			std::string menuShortcut;
@@ -475,6 +482,7 @@ namespace xui {
 		Vec2 m_dockDragStart{};
 		Rect m_dockFloatStart{};
 		DockPreview m_dockPreview{};
+		u32 m_externalDockPreviewPanel = 0xFFFFFFFFu;
 		bool m_dockDragging = false, m_dockSplitDragging = false, m_dockSplitHorizontal = true;
 		f32 m_dockSplitStartRatio = 0.f, m_dockSplitStartPointer = 0.f, m_dockSplitExtent = 1.f;
 		f32 m_dockTabDragX = 0.f;

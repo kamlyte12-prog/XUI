@@ -886,6 +886,8 @@ namespace xui {
 					node.dockFloatingInitial = document.exprs[prop.expr].kind == XExprKind::Bool && document.exprs[prop.expr].bval;
 				else if (name == "closable" && prop.expr < document.exprs.size())
 					node.dockClosable = document.exprs[prop.expr].kind != XExprKind::Bool || document.exprs[prop.expr].bval;
+				else if ((name == "nativeTitleBar" || name == "native-title-bar") && prop.expr < document.exprs.size())
+					node.dockNativeTitleBar = document.exprs[prop.expr].kind != XExprKind::Bool || document.exprs[prop.expr].bval;
 				else if (name == "preferredSize" && prop.expr < document.exprs.size() && document.exprs[prop.expr].kind == XExprKind::Size)
 					node.dockPreferredSize = { document.exprs[prop.expr].num, document.exprs[prop.expr].num2 };
 			}
@@ -1628,7 +1630,10 @@ namespace xui {
 			const f32 tabWidth = count ? host.tree.groupBounds(panel).w / f32(count) : panelBounds.w;
 			const f32 tabX = count > 1 ? host.tree.groupBounds(panel).x + tabWidth * f32(host.tree.panelOrder(panel)) : panelBounds.x;
 			const Rect closeRect{ tabX + std::max(0.f, tabWidth - headerHeight), panelBounds.y, std::min(headerHeight, tabWidth), headerHeight };
-			if (m_nodes[panel].dockClosable && closeRect.contains(local)) {
+			const Node& panelNode = m_nodes[panel];
+			const bool closeVisible = panelNode.dockClosable ||
+				(panelNode.dockNativeSurface && !panelNode.dockNativeTitleBar);
+			if (closeVisible && closeRect.contains(local)) {
 				const u32 previousActive = host.tree.activePanel(panel);
 				if (host.tree.close(panel)) {
 					m_nodes[panel].dockClosed = true;
@@ -1947,14 +1952,29 @@ namespace xui {
 
 	Rect UiRuntime::menuPopupRect(const Node& menu) const {
 		// Menus are retained as structural children of the root, not laid out at their
-		// anchor. Resolve popup geometry from the authored anchor widget instead.
+		// anchor. Anchored menus use the anchor bounds; context menus use the logical
+		// client-space point recorded by the right-button event.
+		const bool contextPopup = menu.menuContext && menu.popupOpen;
 		const Rect anchor = menuAnchorHitRect(menu);
 		f32 height = 8.f;
 		for (u32 child = firstMenuChildIndex(nodeIndexOf(menu)); child != 0xFFFFFFFFu; child = nextMenuSiblingIndex(child))
 			height += menuRowIsSeparator(m_nodes[child]) ? 9.f : 28.f;
-		const f32 width = std::max(140.f, anchor.w);
-		Rect popup{ anchor.x, anchor.bottom() + 4.f, width, height };
-		if (popup.bottom() > m_lastLayoutHeight && anchor.y > popup.h + 4.f) {
+		const LayoutStyle& menuLayout = m_layout.style(menu.layout);
+		f32 width = contextPopup ? 180.f : std::max(140.f, anchor.w);
+		if (contextPopup && menuLayout.width.k == LenKind::Px) width = menuLayout.width.v;
+		else if (contextPopup && menuLayout.width.k == LenKind::Percent) width = m_lastLayoutWidth * menuLayout.width.v * 0.01f;
+		width = std::clamp(width, 0.f, std::max(0.f, m_lastLayoutWidth));
+		if (contextPopup) height = std::min(height, std::max(0.f, m_lastLayoutHeight));
+		Rect popup = contextPopup
+			? Rect{ menu.menuPoint.x, menu.menuPoint.y, width, height }
+			: Rect{ anchor.x, anchor.bottom() + 4.f, width, height };
+		if (contextPopup) {
+			// Keep the pointer at the popup's near corner when there is room. Flip each
+			// axis independently at the viewport edge, then clamp for oversized menus.
+			if (popup.right() > m_lastLayoutWidth) popup.x = menu.menuPoint.x - popup.w;
+			if (popup.bottom() > m_lastLayoutHeight) popup.y = menu.menuPoint.y - popup.h;
+		}
+		else if (popup.bottom() > m_lastLayoutHeight && anchor.y > popup.h + 4.f) {
 			popup.y = anchor.y - popup.h - 4.f;                       // flip above when clipped
 			if (popup.y < 0.f) popup.y = std::max(0.f, m_lastLayoutHeight - popup.h);
 		}
@@ -2053,9 +2073,10 @@ namespace xui {
 		}
 		const u32 hit = menuHitRow(menu, popup, point, &row);
 		if (hit != 0xFFFFFFFFu) return menuRowPress(hit, row);
-		// Press on the open anchor toggles it closed on release-free semantics; anything
-		// else outside the surfaces closes every menu.
-		if (menuAnchorHitRect(menu).contains(point)) return true;
+		// An anchored command menu remains open when the press is on its launcher.
+		// A context menu has no launcher interaction: every press outside its popup
+		// dismisses it, even when its hit anchor is the whole Window.
+		if (!menu.menuContext && menuAnchorHitRect(menu).contains(point)) return true;
 		addDamage(popup);
 		closeAllMenus();
 		return true;
@@ -3488,7 +3509,7 @@ namespace xui {
 					if (m_dockCandidate == panelIndex) states |= stateBit(State::Pressed);
 					drawChrome(panel, panel.dockHeaderStyleSet, header, states,
 						Color::fromRGBA8(0x263247FFu), Color::fromRGBA8(0xE6EDF7FFu), panel.text, 10.f);
-					if (panel.dockClosable) {
+					if (panel.dockClosable || (panel.dockNativeSurface && !panel.dockNativeTitleBar)) {
 						const f32 side = header.h;
 						const Rect close{ header.right() - side, header.y, side, side };
 						StateMask closeStates = stateBit(State::Resting) | (panel.disabled ? stateBit(State::Disabled) : stateBit(State::Enabled));
@@ -3521,7 +3542,7 @@ namespace xui {
 							drawLabel(tab.dockIcon, bounds, iconFont.valid() ? iconFont : tab.font, iconStyle,
 								Color::fromRGBA8(0xE6EDF7FFu), 8.f, false);
 						}
-						if (tab.dockClosable) {
+						if (tab.dockClosable || (tab.dockNativeSurface && !tab.dockNativeTitleBar)) {
 							const Rect close{ bounds.right() - bounds.h, bounds.y, bounds.h, bounds.h };
 						StateMask closeStates = stateBit(State::Resting) | (tab.disabled ? stateBit(State::Disabled) : stateBit(State::Enabled));
 						if (!tab.disabled && close.contains(m_pointerPosition)) closeStates |= stateBit(State::Hover);
@@ -5505,6 +5526,92 @@ namespace xui {
 		return id;
 	}
 
+	bool UiRuntime::dockPanelUsesNativeTitleBar(std::string_view id) const {
+		for (const Node& node : m_nodes)
+			if (node.dockPanel && node.id.v && m_strings->view(node.id) == id) return node.dockNativeTitleBar;
+		return true;
+	}
+
+	bool UiRuntime::dockPanelCloseButtonContains(std::string_view id, Vec2 panelPoint) const {
+		for (u32 panel = 0; panel < m_nodes.size(); ++panel) {
+			const Node& node = m_nodes[panel];
+			if (!node.dockPanel || !node.id.v || m_strings->view(node.id) != id) continue;
+			if (!node.dockClosable && !(node.dockNativeSurface && !node.dockNativeTitleBar)) return false;
+			const DockHostState* host = dockHostForPanel(panel);
+			if (!host || !host->tree.contains(panel)) return false;
+			const Rect panelRect = m_layout.absRect(node.layout);
+			const u32 count = host->tree.panelCount(panel);
+			const Rect group = host->tree.groupBounds(panel);
+			const f32 height = count > 1
+				? std::min(group.h, node.dockHeaderHeight)
+				: std::min(panelRect.h, node.dockHeaderHeight);
+			Rect close{};
+			if (count > 1) {
+				const f32 tabWidth = group.w / f32(count);
+				const f32 tabX = group.x + tabWidth * f32(host->tree.panelOrder(panel));
+				close = { tabX + tabWidth - std::min(height, tabWidth) - panelRect.x,
+					group.y - panelRect.y, std::min(height, tabWidth), height };
+			}
+			else close = { panelRect.w - height, 0.f, height, height };
+			return close.contains(panelPoint);
+		}
+		return false;
+	}
+
+	bool UiRuntime::updateDockDropPreview(std::string_view id, Vec2 clientPoint) {
+		u32 panel = 0xFFFFFFFFu;
+		for (u32 i = 0; i < m_nodes.size(); ++i)
+			if (m_nodes[i].dockPanel && m_nodes[i].id.v && m_strings->view(m_nodes[i].id) == id) { panel = i; break; }
+		if (panel == 0xFFFFFFFFu) { clearDockDropPreview(id); return false; }
+		DockHostState* host = dockHostForPanel(panel);
+		if (!host || !host->tree.contains(panel)) { clearDockDropPreview(id); return false; }
+		const u32 hostIndex = static_cast<u32>(host - m_dockHosts.data());
+		const Rect hostRect = m_layout.absRect(m_nodes[host->node].layout);
+		const LayoutStyle& style = m_layout.style(m_nodes[host->node].layout);
+		const Vec2 origin{ hostRect.x + style.border.l + style.padding.l, hostRect.y + style.border.t + style.padding.t };
+		const Vec2 local{ clientPoint.x - origin.x, clientPoint.y - origin.y };
+		if (!Rect{ 0.f, 0.f, host->contentArea.w, host->contentArea.h }.contains(local)) {
+			clearDockDropPreview(id);
+			return false;
+		}
+		u32 target = host->tree.panelAt(local, panel);
+		if (target == 0xFFFFFFFFu) {
+			// The dragged OS window can cover its target on screen. Resolve against the
+			// underlying DockTree and choose the nearest docked group for gutter drops.
+			f32 nearest = kInf;
+			for (u32 candidate : host->panelNodes) {
+				if (candidate == panel || !host->tree.contains(candidate) || host->tree.floating(candidate)) continue;
+				const Rect bounds = host->tree.groupBounds(candidate);
+				const f32 dx = std::max({ bounds.x - local.x, 0.f, local.x - bounds.right() });
+				const f32 dy = std::max({ bounds.y - local.y, 0.f, local.y - bounds.bottom() });
+				const f32 distance = dx * dx + dy * dy;
+				if (distance < nearest) { nearest = distance; target = candidate; }
+			}
+		}
+		if (target == 0xFFFFFFFFu) { clearDockDropPreview(id); return false; }
+		const Rect group = host->tree.groupBounds(target);
+		const f32 edgeX = std::min(group.w * 0.25f, 72.f), edgeY = std::min(group.h * 0.25f, 72.f);
+		DockZone zone = DockZone::Center;
+		if (local.x < group.x + edgeX) zone = DockZone::Left;
+		else if (local.x >= group.right() - edgeX) zone = DockZone::Right;
+		else if (local.y < group.y + edgeY) zone = DockZone::Top;
+		else if (local.y >= group.bottom() - edgeY) zone = DockZone::Bottom;
+		m_dockDragHost = hostIndex;
+		m_externalDockPreviewPanel = panel;
+		m_dockPreview = host->tree.preview(target, zone);
+		addDockDamage(*host);
+		return m_dockPreview.valid;
+	}
+
+	void UiRuntime::clearDockDropPreview(std::string_view id) {
+		if (m_externalDockPreviewPanel >= m_nodes.size() || !m_nodes[m_externalDockPreviewPanel].id.v ||
+			m_strings->view(m_nodes[m_externalDockPreviewPanel].id) != id) return;
+		if (m_dockDragHost < m_dockHosts.size()) addDockDamage(m_dockHosts[m_dockDragHost]);
+		m_dockPreview = {};
+		m_dockDragHost = 0xFFFFFFFFu;
+		m_externalDockPreviewPanel = 0xFFFFFFFFu;
+	}
+
 	void UiRuntime::setDockPanelNativeSurface(std::string_view id, bool enabled) {
 		for (Node& node : m_nodes) {
 			if (!node.dockPanel || !node.id.v || m_strings->view(node.id) != id || node.dockNativeSurface == enabled) continue;
@@ -5515,6 +5622,7 @@ namespace xui {
 	}
 
 	bool UiRuntime::redockPanelAt(std::string_view id, Vec2 clientPoint) {
+		clearDockDropPreview(id);
 		for (u32 panel = 0; panel < m_nodes.size(); ++panel) {
 			Node& node = m_nodes[panel];
 			if (!node.dockPanel || !node.id.v || m_strings->view(node.id) != id) continue;

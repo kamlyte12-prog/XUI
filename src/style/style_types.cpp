@@ -58,7 +58,7 @@ namespace xui {
 			"z-index", "clip", "overflow", "animation", "animation-keep", "animation-cancel", "scroll-track", "scroll-thumb", "scrollbar-size",
 			"scrollbar-visibility", "scroll-behavior", "scroll-speed", "value", "window-title" };
 		constexpr std::string_view kStateNames[kStateCount] = {
-			"resting", "enabled", "readonly", "hover", "focus", "focus-visible", "selected", "checked", "open", "closed", "pressed", "dragging", "loading", "error", "placeholder", "disabled" };
+			"resting", "enabled", "readonly", "hover", "focus", "focus-visible", "selected", "checked", "open", "closed", "pressed", "dragging", "loading", "error", "placeholder", "disabled", "floating" };
 	}
 	const PropInfo& propInfo(PropId id) { return kProps[static_cast<int>(id)]; }
 	bool findProp(std::string_view n, PropId& out) {

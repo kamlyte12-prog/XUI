@@ -63,12 +63,14 @@ Tooltip { resting: { bg: #292929, fg: #ffffff, border: 1px solid #292929, radius
 TitleBar { resting: { bg: #f5f5f5, fg: #242424, pad: 4px, gap: 4px } }
 TitleButton { resting: { fg: #424242, radius: 4px } hover: { bg: #e5e5e5 } pressed: { bg: #d6d6d6 } }
 DockHost { resting: { bg: #f5f5f5, fg: #242424, radius: 6px, pad: 4px } }
-DockPanel { resting: { bg: #ffffff, fg: #242424, border: 1px solid #d1d1d1, radius: 6px, pad: 8px, shadow: 0px 4px 14px 0px #00000024 } }
-DockHeader { resting: { bg: #f0f0f0, fg: #424242, border: 1px solid #e1e1e1, radius: 4px, pad: 8px }
-  hover: { bg: #ebebeb } selected: { fg: #0f6cbd, font-weight: 600 } }
-DockTab { resting: { bg: #f5f5f5, fg: #616161, pad: 6px } hover: { bg: #ebebeb } selected: { bg: #ffffff, fg: #0f6cbd, font-weight: 600 } }
-DockCloseButton { resting: { fg: #616161 } hover: { bg: #c42b1c, fg: #ffffff } }
-DockSplitter { resting: { bg: #d1d1d1 } hover: { bg: #0f6cbd } pressed: { bg: #115ea3 } }
+DockPanel { resting: { bg: #ffffff, fg: #242424, border: 1px solid #c8c8c8, radius: 6px, pad: 10px, shadow: 0px 6px 18px 2px #00000038 } }
+DockHeader { resting: { bg: #e8f3fc, fg: #0f6cbd, border: 1px solid #b7d5f5, radius: 6px 6px 0px 0px, pad: 10px, font-size: 13px }
+  hover: { bg: #d8ebfc } selected: { fg: #0f6cbd, font-weight: 600 }
+  floating: { font-weight: 600 } dragging: { bg: #c6e1fa, border: 1px solid #0f6cbd } }
+DockTab { resting: { bg: #e8f3fc, fg: #616161, border: 1px solid #d1d1d1, radius: 6px 6px 0px 0px, pad: 10px, font-size: 13px }
+  hover: { bg: #ebebeb, fg: #242424 } selected: { fg: #0f6cbd, border: 1px solid #0f6cbd, font-weight: 600 } }
+DockCloseButton { resting: { fg: #616161, radius: 4px, pad: 5px } hover: { bg: #c42b1c, fg: #ffffff } }
+DockSplitter { resting: { bg: #c8c8c8 } hover: { bg: #0f6cbd } pressed: { bg: #115ea3 } }
 DockPreview { resting: { bg: #0f6cbd44, border: 1px solid #0f6cbd, radius: 4px } }
 Button, ToggleButton, CheckBox, CheckItem, Switch, RadioGroup, TextBox, TextArea, NumberField, SearchField,
 Dropdown, DatePicker, ColorPicker, Slider, Tabs, Tab, Menu, MenuItem, KeybindField, SegmentedControl, Stepper, Rating, Breadcrumb {

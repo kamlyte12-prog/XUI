@@ -38,6 +38,28 @@ namespace xui {
 				if (node.id.v && runtime.m_strings->view(node.id) == id) return runtime.m_layout.absRect(node.layout);
 			return {};
 		}
+		static bool dockPanelAbsolute(const UiRuntime& runtime, std::string_view id) {
+			for (const UiRuntime::Node& node : runtime.m_nodes)
+				if (node.dockPanel && node.id.v && runtime.m_strings->view(node.id) == id)
+					return runtime.m_layout.style(node.layout).position == Position::Absolute;
+			return false;
+		}
+		static bool dockPanelLayoutParentIsHost(const UiRuntime& runtime, std::string_view id) {
+			for (const UiRuntime::Node& node : runtime.m_nodes) {
+				if (!node.dockPanel || !node.id.v || runtime.m_strings->view(node.id) != id || node.parentIndex >= runtime.m_nodes.size()) continue;
+				return runtime.m_layout.parent(node.layout) == runtime.m_nodes[node.parentIndex].layout;
+			}
+			return false;
+		}
+		static Vec2 dockHostContentOrigin(const UiRuntime& runtime, std::string_view id) {
+			for (const UiRuntime::Node& node : runtime.m_nodes) {
+				if (!node.dockHost || !node.id.v || runtime.m_strings->view(node.id) != id) continue;
+				const Rect rect = runtime.m_layout.absRect(node.layout);
+				const LayoutStyle& style = runtime.m_layout.style(node.layout);
+				return { rect.x + style.border.l + style.padding.l, rect.y + style.border.t + style.padding.t };
+			}
+			return {};
+		}
 	};
 }
 
@@ -779,6 +801,104 @@ Button { resting: { bg: #cc3333, fg: #ffffff } }
 		moved = std::get<DockPanelValue>(*ui.value("floating"));
 		CHECK(moved.bounds.x == std::max(0.f, hostBounds.w - moved.bounds.w));
 		CHECK(moved.bounds.y == std::max(0.f, hostBounds.h - 28.f));
+	}
+
+	TEST(ui_runtime_dock_panels_use_global_overlay_paint_clip_and_hit_order) {
+		constexpr std::string_view xuiSource = R"(
+Window(size: 480x320) {
+  Stack[width: 100%, height: 100%] {
+    ScrollView[id: "clipped-ancestor", width: 250px, height: 180px] {
+      DockHost[id: "host", width: 300px, height: 260px, headerHeight: 28px] {
+        DockPanel(title: "Docked")[id: "docked", region: "Center", preferredSize: 300x260] {
+          Text("Underlay dock content")
+        }
+        DockPanel(title: "Floating")[id: "floating", floating: true, preferredSize: 220x150] {
+          Button[id: "overlay-action", class: "overlay-action", label: "Overlay action", width: 260px, height: 60px, press: onOverlay]
+        }
+      }
+    }
+    Button[id: "underlay", class: "underlay", label: "Later sibling under panel", width: 100%, height: 100%, press: onUnderlay]
+  }
+}
+)";
+		constexpr std::string_view xssSource = R"(
+Window { resting: { pad: 0px } }
+Stack { resting: { pad: 0px } }
+ScrollView { resting: { pad: 0px, border: 0px solid #00000000 } }
+DockHost { resting: { pad: 0px, border: 0px solid #00000000 } }
+DockPanel { resting: { pad: 10px, bg: #141B28FF, fg: #FFFFFFFF, border: 0px solid #00000000 } }
+Button.underlay { resting: { pad: 0px, bg: #CC2222FF, fg: #FFFFFFFF, border: 0px solid #00000000 } }
+Button.overlay-action { resting: { pad: 0px, bg: #00CC44FF, fg: #FFFFFFFF, border: 0px solid #00000000 } }
+)";
+		StringInterner strings;
+		auto document = parseXui(xuiSource, "dock-global-overlay.xui", strings);
+		auto styles = compileXss(xssSource, "dock-global-overlay.xss", strings);
+		CHECK(document.has_value()); CHECK(styles.has_value());
+		if (!document || !styles) return;
+		TextSystem text; UiRuntime ui; std::string error;
+		CHECK(ui.build(*document, *styles, strings, text, {}, error));
+		if (!error.empty()) return;
+		ui.layout(480.f, 320.f);
+		CHECK(UiRuntimeFontWeightProbe::dockPanelLayoutParentIsHost(ui, "floating"));
+		CHECK(UiRuntimeFontWeightProbe::dockPanelAbsolute(ui, "floating"));
+		std::cout << "Dock overlay tree: Window > Stack > ScrollView > DockHost > DockPanel[position:absolute, DockTree-managed] > Button; panel remains under DockHost for ownership, not flow.\n";
+		DockPanelValue start = std::get<DockPanelValue>(*ui.value("floating"));
+		start.bounds = { 28.f, 28.f, 220.f, 150.f };
+		CHECK(ui.setValue("floating", start));
+		ui.layout(480.f, 320.f);
+
+		const Vec2 hostOrigin = UiRuntimeFontWeightProbe::dockHostContentOrigin(ui, "host");
+		// Drag the initially floating panel by its header from host-local (40,35) to
+		// (112,57), partly outside the ancestor ScrollView's 250x180 viewport and
+		// over a later-painted sibling.
+		CHECK(ui.pointerDown({ hostOrigin.x + 40.f, hostOrigin.y + 35.f }));
+		CHECK(ui.pointerMove({ hostOrigin.x + 112.f, hostOrigin.y + 57.f }));
+		CHECK(ui.keyDown(Key::Escape)); // cancel the drop, retaining the live floating position
+		const auto floatingValue = ui.value("floating");
+		CHECK(floatingValue && std::get<DockPanelValue>(*floatingValue).floating);
+		const Vec2 dockedOverlapPoint{ hostOrigin.x + 200.f, hostOrigin.y + 110.f };
+		const Vec2 overlayPoint{ hostOrigin.x + 260.f, hostOrigin.y + 110.f };
+		const Rect panelAfterDrag = UiRuntimeFontWeightProbe::bounds(ui, "floating");
+		const Rect dockedPanel = UiRuntimeFontWeightProbe::bounds(ui, "docked");
+		const Rect actionRect = UiRuntimeFontWeightProbe::bounds(ui, "overlay-action");
+		const Rect clippedAncestor = UiRuntimeFontWeightProbe::bounds(ui, "clipped-ancestor");
+		CHECK_NEAR(actionRect.y, panelAfterDrag.y + 28.f, 0.01f); // header height replaces, not adds to, top padding
+		CHECK(panelAfterDrag.contains(dockedOverlapPoint));
+		CHECK(dockedPanel.contains(dockedOverlapPoint));
+		CHECK(panelAfterDrag.contains(overlayPoint));
+		CHECK(!clippedAncestor.contains(overlayPoint));
+
+		SoftRenderer renderer; CHECK(renderer.init({ 480, 320, 1.f, nullptr, false }));
+		Painter painter; painter.begin(480, 320, 1.f); ui.paint(painter);
+		renderer.beginFrame({ 480, 320, 1.f, Color{ 0, 0, 0, 1 }, 1 });
+		renderer.submit(painter.finish()); renderer.endFrame();
+		const Image image = renderer.snapshot();
+		const u8* overlayPixel = image.px(static_cast<u32>(overlayPoint.x), static_cast<u32>(overlayPoint.y)); // outside ScrollView, inside panel/button
+		const u8* overlapPixel = image.px(static_cast<u32>(dockedOverlapPoint.x), static_cast<u32>(dockedOverlapPoint.y)); // over the docked panel beneath
+		CHECK(overlayPixel && overlayPixel[1] > overlayPixel[0] * 2);
+		CHECK(overlapPixel && overlapPixel[1] > overlapPixel[0] * 2);
+		DockPressProbe probe; ui.setEventHandler(recordDockPress, &probe);
+		CHECK(ui.pointerDown(dockedOverlapPoint)); ui.pointerUp(dockedOverlapPoint);
+		CHECK_EQ(probe.last, std::string("onOverlay"));
+		std::cout << "Dock overlay proof: dragged panel to bounds=(" << panelAfterDrag.x << ',' << panelAfterDrag.y << ','
+			<< panelAfterDrag.w << ',' << panelAfterDrag.h << "); over-docked pixel/click at ("
+			<< dockedOverlapPoint.x << ',' << dockedOverlapPoint.y << ")=overlay green/onOverlay; outside-ancestor pixel at ("
+			<< overlayPoint.x << ',' << overlayPoint.y << ")=overlay green with ancestor clip bypassed.\n";
+
+		SoftRenderer scopedRenderer; CHECK(scopedRenderer.init({ 220, 150, 1.f, nullptr, false }));
+		Painter scopedPainter; scopedPainter.begin(220, 150, 1.f);
+		scopedPainter.pushTransform(Mat3::translate(-panelAfterDrag.x, -panelAfterDrag.y));
+		scopedPainter.pushClip(panelAfterDrag);
+		ui.paintDockPanel(scopedPainter, 1.f, "floating");
+		scopedPainter.popClip(); scopedPainter.popTransform();
+		scopedRenderer.beginFrame({ 220, 150, 1.f, Color{ 0, 0, 0, 1 }, 2 });
+		scopedRenderer.submit(scopedPainter.finish()); scopedRenderer.endFrame();
+		const Image scopedImage = scopedRenderer.snapshot();
+		const u8* scopedHeader = scopedImage.px(110, 10);
+		const u8* scopedContent = scopedImage.px(180, 60); // main-window x=260, beyond the parent ScrollView
+		CHECK(scopedHeader && scopedHeader[2] > scopedHeader[0]); // blue default header is present on tear-off surface
+		CHECK(scopedContent && scopedContent[1] > scopedContent[0] * 2); // unrelated red sibling and outer clip cannot bleed in
+		std::cout << "Dock native-surface proof: scoped subtree pixel header=(110,10) blue; child=(180,60) green; no sibling paint or ancestor clip.\n";
 	}
 
 	std::string readExample(std::string_view filename) {

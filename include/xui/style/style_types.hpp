@@ -59,9 +59,9 @@ namespace xui {
 	std::span<const std::string_view> propNames();
 
 	/// Interaction states. Enum order == application priority (later wins). Resting always applies.
-	enum class State : u8 { Resting, Enabled, ReadOnly, Hover, Focus, FocusVisible, Selected, Checked, Open, Closed, Pressed, Dragging, Loading, Error, Placeholder, Disabled, Count };
+	enum class State : u8 { Resting, Enabled, ReadOnly, Hover, Focus, FocusVisible, Selected, Checked, Open, Closed, Pressed, Dragging, Loading, Error, Placeholder, Disabled, Floating, Count };
 	constexpr int kStateCount = static_cast<int>(State::Count);
-	using StateMask = u16;
+	using StateMask = u32;
 	constexpr StateMask stateBit(State s) { return static_cast<StateMask>(1u << static_cast<int>(s)); }
 	std::string_view stateName(State s);
 	bool findState(std::string_view name, State& out);

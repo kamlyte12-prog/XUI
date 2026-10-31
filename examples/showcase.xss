@@ -191,7 +191,7 @@ keyframes fill-to-value { from { value: 0 } to { value: 1 } }
 
 DockHost.docking-host { resting: { bg: color.surface, pad: 4px, border: 1px solid color.outline, radius: 7px, min-size: 520px 300px } }
 DockPanel.dock-panel { resting: { bg: color.surface, fg: color.text, pad: 10px, font-size: 13px } }
-DockHeader { resting: { bg: color.surface-raised, fg: color.text, pad: 8px, font-size: 13px, font-weight: 600, radius: 4px }
+DockHeader { resting: { bg: color.surface-raised, fg: color.text, pad: 8px, font-size: 13px, font-weight: 600, radius: 6px 6px 0px 0px }
   hover: { bg: color.surface-hover } pressed: { bg: color.surface-pressed } disabled: { opacity: 0.48 } }
 DockTab { resting: { bg: color.canvas, fg: color.muted, pad: 8px, font-size: 13px }
   hover: { bg: color.surface-hover, fg: color.text }

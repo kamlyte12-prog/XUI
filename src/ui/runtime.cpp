@@ -1394,7 +1394,16 @@ namespace xui {
 				return false;
 			}
 		}
-		if (node.dockPanel && parentIndex < m_nodes.size()) authoredLayout.padding.t += m_nodes[parentIndex].dockHeaderHeight;
+		if (node.dockPanel && parentIndex < m_nodes.size()) {
+			// Reserve the header inside the existing top padding. Adding the header
+			// height to theme padding left an empty strip between chrome and content.
+			authoredLayout.padding.t = std::max(authoredLayout.padding.t, m_nodes[parentIndex].dockHeaderHeight);
+			// DockHost/DockTree owns panel placement. Make this absolute before the
+			// first layout so a panel never contributes to Stack measurement/flow.
+			authoredLayout.position = Position::Absolute;
+			authoredLayout.left = Length::px(0.f);
+			authoredLayout.top = Length::px(0.f);
+		}
 		m_layout.setStyle(node.layout, authoredLayout);
 		m_nodes.push_back(std::move(node));
 		if (m_nodes[runtimeIndex].dropdown || m_nodes[runtimeIndex].colorPicker) {
@@ -2496,73 +2505,95 @@ namespace xui {
 			m_caretBlinkDeadline = {};
 			m_caretVisible = true;
 		}
-		// A DockHost's panel subtrees are contiguous in the authored preorder. Reorder
-		// those blocks so docked panels paint first and floating panels paint by
-		// increasing zOrder (the front-most floating panel paints last).
-		bool hasFloatingPanel = false;
-		for (const DockHostState& host : m_dockHosts) {
-			if (host.panelNodes.empty()) continue;
-			const std::span<const DockPanelLayout> panels = host.tree.panels();
-			if (std::none_of(panels.begin(), panels.end(), [](const DockPanelLayout& panel) { return panel.floating; })) continue;
-			if (!hasFloatingPanel) {
-				hasFloatingPanel = true;
-				m_paintOrderScratch.resize(m_nodes.size());
-				for (u32 i = 0; i < m_paintOrderScratch.size(); ++i) m_paintOrderScratch[i] = i;
-			}
-			m_dockOrderScratch.resize(panels.size());
-			for (u32 i = 0; i < panels.size(); ++i) m_dockOrderScratch[i] = i;
-			auto isAfter = [&](u32 a, u32 b) {
-				const DockPanelLayout& left = panels[a];
-				const DockPanelLayout& right = panels[b];
-				if (left.floating != right.floating) return left.floating;
-				return left.floating && left.zOrder > right.zOrder;
-			};
-			for (u32 i = 1; i < m_dockOrderScratch.size(); ++i) {
-				const u32 value = m_dockOrderScratch[i];
-				u32 position = i;
-				while (position && isAfter(m_dockOrderScratch[position - 1], value)) {
-					m_dockOrderScratch[position] = m_dockOrderScratch[position - 1];
-					--position;
+		// Floating DockPanel subtrees have their own global overlay pass. They remain
+		// under DockHost in the ownership tree and Absolute in layout, but are appended
+		// after every main-window widget to escape sibling order and ancestor clips.
+		auto dockPanelIsFloating = [&](u32 panelIndex) {
+			for (const DockHostState& host : m_dockHosts)
+				if (host.tree.contains(panelIndex)) return host.tree.floating(panelIndex);
+			return false;
+		};
+		auto floatingDockPanelAncestor = [&](u32 index) {
+			for (u32 current = index; current != 0xFFFFFFFFu && current < m_nodes.size(); current = m_nodes[current].parentIndex)
+				if (m_nodes[current].dockPanel && dockPanelIsFloating(current)) return current;
+			return 0xFFFFFFFFu;
+		};
+		bool hasFloatingDockPanel = false;
+		if (!m_paintDockPanelScope) for (const DockHostState& host : m_dockHosts)
+			for (const DockPanelLayout& panel : host.tree.panels()) hasFloatingDockPanel |= panel.floating;
+		const bool useDockOverlay = hasFloatingDockPanel;
+		if (useDockOverlay) {
+			m_paintOrderScratch.clear();
+			for (u32 index = 0; index < m_nodes.size(); ++index)
+				if (floatingDockPanelAncestor(index) == 0xFFFFFFFFu) m_paintOrderScratch.push_back(index);
+			for (const DockHostState& host : m_dockHosts) {
+				const std::span<const DockPanelLayout> panels = host.tree.panels();
+				m_dockOrderScratch.resize(panels.size());
+				for (u32 i = 0; i < panels.size(); ++i) m_dockOrderScratch[i] = i;
+				auto isAfter = [&](u32 a, u32 b) {
+					const DockPanelLayout& left = panels[a];
+					const DockPanelLayout& right = panels[b];
+					if (left.floating != right.floating) return left.floating;
+					return left.floating && left.zOrder > right.zOrder;
+				};
+				for (u32 i = 1; i < m_dockOrderScratch.size(); ++i) {
+					const u32 value = m_dockOrderScratch[i];
+					u32 position = i;
+					while (position && isAfter(m_dockOrderScratch[position - 1], value)) {
+						m_dockOrderScratch[position] = m_dockOrderScratch[position - 1];
+						--position;
+					}
+					m_dockOrderScratch[position] = value;
 				}
-				m_dockOrderScratch[position] = value;
-			}
-			u32 destination = static_cast<u32>(m_paintOrderScratch.size());
-			for (u32 panelNode : host.panelNodes) {
-				auto found = std::find(m_paintOrderScratch.begin(), m_paintOrderScratch.end(), panelNode);
-				if (found != m_paintOrderScratch.end()) destination = std::min(destination, static_cast<u32>(found - m_paintOrderScratch.begin()));
-			}
-			for (u32 panelOrder : m_dockOrderScratch) {
-				const u32 panelNode = panels[panelOrder].panel;
-				auto found = std::find(m_paintOrderScratch.begin() + destination, m_paintOrderScratch.end(), panelNode);
-				if (found == m_paintOrderScratch.end()) continue;
-				u32 blockEnd = panelNode + 1;
-				while (blockEnd < m_nodes.size()) {
-					u32 ancestor = blockEnd;
-					while (ancestor != panelNode && ancestor < m_nodes.size() && m_nodes[ancestor].parentIndex != 0xFFFFFFFFu)
-						ancestor = m_nodes[ancestor].parentIndex;
-					if (ancestor != panelNode) break;
-					++blockEnd;
+				for (u32 panelOrder : m_dockOrderScratch) {
+					const u32 panelNode = panels[panelOrder].panel;
+					if (panelNode >= m_nodes.size() || !panels[panelOrder].floating) continue;
+					for (u32 index = panelNode; index < m_nodes.size() && floatingDockPanelAncestor(index) == panelNode; ++index)
+						m_paintOrderScratch.push_back(index);
 				}
-				const u32 blockSize = blockEnd - panelNode;
-				const u32 foundPosition = static_cast<u32>(found - m_paintOrderScratch.begin());
-				if (foundPosition != destination)
-					std::rotate(m_paintOrderScratch.begin() + destination, found, found + blockSize);
-				destination += blockSize;
 			}
 		}
-		const u32 paintCount = hasFloatingPanel ? static_cast<u32>(m_paintOrderScratch.size()) : static_cast<u32>(m_nodes.size());
+		const u32 paintCount = useDockOverlay ? static_cast<u32>(m_paintOrderScratch.size()) : static_cast<u32>(m_nodes.size());
+		auto inDockPanelPaintScope = [&](u32 index) {
+			if (!m_paintDockPanelScope) return true;
+			for (u32 current = index; current != 0xFFFFFFFFu && current < m_nodes.size(); current = m_nodes[current].parentIndex)
+				if (current == m_paintDockPanel) return true;
+			return false;
+		};
 		for (u32 paintPosition = 0; paintPosition < paintCount; ++paintPosition) {
-			const u32 nodeIndex = hasFloatingPanel ? m_paintOrderScratch[paintPosition] : paintPosition;
+			const u32 nodeIndex = useDockOverlay ? m_paintOrderScratch[paintPosition] : paintPosition;
 			Node& node = m_nodes[nodeIndex];
-			if ((node.fpsCounter && !m_fpsEnabled && !m_drawBatchCounterEnabled) || !isNodeVisible(nodeIndex)) continue;
+			if (!inDockPanelPaintScope(nodeIndex) || (node.fpsCounter && !m_fpsEnabled && !m_drawBatchCounterEnabled) || !isNodeVisible(nodeIndex)) continue;
 			// Menu nodes and their virtual rows never paint in the retained pass.
 			if (node.menu || node.menuItem || (node.separator && node.parentIndex != 0xFFFFFFFFu
 				&& (m_nodes[node.parentIndex].menu || m_nodes[node.parentIndex].menuItem))) continue;
 			struct ScrollClipScope { Painter& painter; u32 count = 0; ~ScrollClipScope() { while (count--) painter.popClip(); } } scrollClips{ painter };
-			for (u32 parent = node.parentIndex; parent != 0xFFFFFFFFu && parent < m_nodes.size(); parent = m_nodes[parent].parentIndex) {
-				if (m_nodes[parent].scrollView || m_nodes[parent].dockPanel) {
-					painter.pushClip(m_layout.absRect(m_nodes[parent].layout));
-					++scrollClips.count;
+			const u32 overlayPanel = m_paintDockPanelScope ? m_paintDockPanel
+				: useDockOverlay ? floatingDockPanelAncestor(nodeIndex) : 0xFFFFFFFFu;
+			if (overlayPanel != 0xFFFFFFFFu) {
+				painter.pushClip(m_paintDockPanelScope ? m_layout.absRect(m_nodes[overlayPanel].layout)
+					: Rect{ 0.f, 0.f, m_lastLayoutWidth, m_lastLayoutHeight });
+				++scrollClips.count;
+				for (u32 parent = node.parentIndex; parent != 0xFFFFFFFFu && parent < m_nodes.size(); parent = m_nodes[parent].parentIndex) {
+					if (parent == overlayPanel) {
+						if (nodeIndex != overlayPanel) {
+							painter.pushClip(m_layout.absRect(m_nodes[overlayPanel].layout));
+							++scrollClips.count;
+						}
+						break;
+					}
+					if (m_nodes[parent].scrollView) {
+						painter.pushClip(m_layout.absRect(m_nodes[parent].layout));
+						++scrollClips.count;
+					}
+				}
+			}
+			else {
+				for (u32 parent = node.parentIndex; parent != 0xFFFFFFFFu && parent < m_nodes.size(); parent = m_nodes[parent].parentIndex) {
+					if (m_nodes[parent].scrollView || m_nodes[parent].dockPanel) {
+						painter.pushClip(m_layout.absRect(m_nodes[parent].layout));
+						++scrollClips.count;
+					}
 				}
 			}
 			StateMask states = activeStates(node);
@@ -3455,22 +3486,26 @@ namespace xui {
 				m_styles->resolve(set, states, m_theme, table);
 			};
 			const auto drawChrome = [&](const Node& owner, StyleSetId set, Rect bounds, StateMask states,
-				Color fallbackBg, Color fallbackFg, std::string_view label, f32 inset) {
+				std::string_view label, f32 inset) {
 				PropTable style;
 				resolvePart(set, states, style);
-				const Color background = color(style, PropId::Bg, fallbackBg);
-				const f32 radius = style.has(PropId::Radius) ? number(style.get(PropId::Radius), 0) : 0.f;
+				const Color background = color(style, PropId::Bg, Color{});
+				const CornerRadii radius = style.has(PropId::Radius)
+					? CornerRadii{ number(style.get(PropId::Radius), 0), number(style.get(PropId::Radius), 1),
+						number(style.get(PropId::Radius), 2), number(style.get(PropId::Radius), 3) }
+					: CornerRadii{};
 				const f32 opacity = style.has(PropId::Opacity) ? std::clamp(number(style.get(PropId::Opacity), 0, 1.f), 0.f, 1.f) : 1.f;
 				const f32 textInset = style.has(PropId::Pad) ? number(style.get(PropId::Pad), 3, inset) : inset;
+				const Color foreground = color(style, PropId::Fg, color(owner.style, PropId::Fg, Color{}));
 				painter.pushOpacity(opacity);
-				if (background.a > 0.f) painter.fillRect(bounds, background, CornerRadii::all(radius));
+				if (background.a > 0.f) painter.fillRect(bounds, background, radius);
 				if (style.has(PropId::Border) && style.get(PropId::Border).count >= 3) {
 					const StyleValue& border = style.get(PropId::Border);
 					const Color edge = border.atoms[2].kind == AtomKind::Color ? Color::fromRGBA8(border.atoms[2].bits) : Color{};
-					painter.roundRect(bounds, RectStyle{ Color{0,0,0,0}, edge, number(border, 0), CornerRadii::all(radius) });
+					painter.roundRect(bounds, RectStyle{ Color{0,0,0,0}, edge, number(border, 0), radius });
 				}
 				const FontHandle styledFont = selectFont(style);
-				drawLabel(label, bounds, styledFont.valid() ? styledFont : owner.font, style, fallbackFg, textInset, false);
+				drawLabel(label, bounds, styledFont.valid() ? styledFont : owner.font, style, foreground, textInset, false);
 				painter.popOpacity();
 			};
 			const std::span<const DockPanelLayout> panels = host.tree.panels();
@@ -3505,17 +3540,16 @@ namespace xui {
 						std::min(group.h, panel.dockHeaderHeight) };
 					StateMask states = stateBit(State::Resting) | (panel.disabled ? stateBit(State::Disabled) : stateBit(State::Enabled));
 					if (panelLayout.active) states |= stateBit(State::Selected);
+					if (panelLayout.floating) states |= stateBit(State::Floating);
 					if (!panel.disabled && header.contains(m_pointerPosition)) states |= stateBit(State::Hover);
-					if (m_dockCandidate == panelIndex) states |= stateBit(State::Pressed);
-					drawChrome(panel, panel.dockHeaderStyleSet, header, states,
-						Color::fromRGBA8(0x263247FFu), Color::fromRGBA8(0xE6EDF7FFu), panel.text, 10.f);
+					if (m_dockCandidate == panelIndex) states |= stateBit(State::Pressed) | stateBit(State::Dragging);
+					drawChrome(panel, panel.dockHeaderStyleSet, header, states, panel.text, 10.f);
 					if (panel.dockClosable || (panel.dockNativeSurface && !panel.dockNativeTitleBar)) {
 						const f32 side = header.h;
 						const Rect close{ header.right() - side, header.y, side, side };
 						StateMask closeStates = stateBit(State::Resting) | (panel.disabled ? stateBit(State::Disabled) : stateBit(State::Enabled));
 						if (!panel.disabled && close.contains(m_pointerPosition)) closeStates |= stateBit(State::Hover);
-						drawChrome(panel, panel.dockCloseStyleSet, close, closeStates,
-							Color{0,0,0,0}, Color::fromRGBA8(0xCBD5E1FFu), "×", 0.f);
+						drawChrome(panel, panel.dockCloseStyleSet, close, closeStates, "×", 0.f);
 					}
 				}
 				else {
@@ -3532,22 +3566,19 @@ namespace xui {
 						if (order == panelLayout.order) states |= stateBit(State::Selected);
 						if (!tab.disabled && bounds.contains(m_pointerPosition)) states |= stateBit(State::Hover);
 						if (m_dockCandidate == tabNode) states |= stateBit(State::Pressed);
-						drawChrome(tab, tab.dockTabStyleSet, bounds, states,
-							order == panelLayout.order ? Color::fromRGBA8(0x33445EFFu) : Color::fromRGBA8(0x202A3AFFu),
-							Color::fromRGBA8(0xE6EDF7FFu), tab.text, tab.dockIcon.empty() ? 8.f : 28.f);
+						drawChrome(tab, tab.dockTabStyleSet, bounds, states, tab.text, tab.dockIcon.empty() ? 8.f : 28.f);
 						if (!tab.dockIcon.empty()) {
 							PropTable iconStyle;
 							resolvePart(tab.dockTabStyleSet, states, iconStyle);
 							const FontHandle iconFont = selectFont(iconStyle);
 							drawLabel(tab.dockIcon, bounds, iconFont.valid() ? iconFont : tab.font, iconStyle,
-								Color::fromRGBA8(0xE6EDF7FFu), 8.f, false);
+								color(iconStyle, PropId::Fg, Color{}), 8.f, false);
 						}
 						if (tab.dockClosable || (tab.dockNativeSurface && !tab.dockNativeTitleBar)) {
 							const Rect close{ bounds.right() - bounds.h, bounds.y, bounds.h, bounds.h };
 						StateMask closeStates = stateBit(State::Resting) | (tab.disabled ? stateBit(State::Disabled) : stateBit(State::Enabled));
 						if (!tab.disabled && close.contains(m_pointerPosition)) closeStates |= stateBit(State::Hover);
-						drawChrome(tab, tab.dockCloseStyleSet, close, closeStates,
-							Color{0,0,0,0}, Color::fromRGBA8(0xCBD5E1FFu), "×", 0.f);
+						drawChrome(tab, tab.dockCloseStyleSet, close, closeStates, "×", 0.f);
 					}
 					}
 				}
@@ -3560,8 +3591,7 @@ namespace xui {
 				if (bounds.contains(m_pointerPosition)) states |= stateBit(State::Hover);
 				if (m_dockSplitDragging && m_dockDragHost == static_cast<u32>(&host - m_dockHosts.data()) &&
 					m_dockDragSplit == split.node) states |= stateBit(State::Pressed) | stateBit(State::Dragging);
-				drawChrome(hostNode, hostNode.dockSplitterStyleSet, bounds, states,
-					Color::fromRGBA8(0x46546AFFu), Color::fromRGBA8(0x46546AFFu), {}, 0.f);
+				drawChrome(hostNode, hostNode.dockSplitterStyleSet, bounds, states, {}, 0.f);
 			}
 			if (!m_paintDockPanelScope && m_dockPreview.valid && m_dockDragHost == static_cast<u32>(&host - m_dockHosts.data())) {
 				Rect preview = m_dockPreview.bounds;
@@ -5111,8 +5141,16 @@ namespace xui {
 			const Node& editor = m_nodes[index];
 			if (editor.pickerEditor && !editor.disabled && isNodeVisible(index) && pickerEditorRect(editor).contains(point)) return index;
 		}
-		// Floating panel bodies use the same front-to-back z-order as their paint
-		// blocks. Keep their children interactive above every docked panel beneath.
+		// In-app floating DockPanel subtrees form an interaction overlay matching
+		// their dedicated paint pass. Docked panels stay in ordinary retained-tree
+		// hit order and keep their external ancestor clips.
+		auto insidePanelScrollClips = [&](u32 index, u32 panel, Vec2 position) {
+			for (u32 parent = m_nodes[index].parentIndex; parent != 0xFFFFFFFFu && parent < m_nodes.size() && parent != panel;
+				parent = m_nodes[parent].parentIndex) {
+				if (m_nodes[parent].scrollView && !m_layout.absRect(m_nodes[parent].layout).contains(position)) return false;
+			}
+			return true;
+		};
 		for (auto hostIt = m_dockHosts.rbegin(); hostIt != m_dockHosts.rend(); ++hostIt) {
 			const DockHostState& host = *hostIt;
 			if (host.node >= m_nodes.size() || !isNodeVisible(host.node)) continue;
@@ -5130,7 +5168,7 @@ namespace xui {
 				u32 ancestor = index;
 				while (ancestor != frontPanel && ancestor < m_nodes.size() && m_nodes[ancestor].parentIndex != 0xFFFFFFFFu)
 					ancestor = m_nodes[ancestor].parentIndex;
-				if (ancestor != frontPanel || !isNodeVisible(index) || !pointInsideScrollAncestors(index, point)) continue;
+				if (ancestor != frontPanel || !isNodeVisible(index) || !insidePanelScrollClips(index, frontPanel, point)) continue;
 				const Node& node = m_nodes[index];
 				if (node.disabled || (node.fpsCounter && !m_fpsEnabled && !m_drawBatchCounterEnabled) || node.pickerEditor) continue;
 				const Rect rect = m_layout.absRect(node.layout);

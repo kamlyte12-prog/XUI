@@ -23,7 +23,7 @@ The root [`README.md`](../README.md) is a short project entry point. Agent rules
 
 ## Examples and implementation scope
 
-The [showcase](../examples/showcase.xui) and [stylesheet](../examples/showcase.xss) are the default interactive reference. The [Tetris example](../examples/game/README.md) demonstrates a timed application update through the facade, with its board and controls authored as widgets. Focused [cross-platform](../tests/fixtures/cross_platform.xui) and [controls](../tests/fixtures/controls.xui) fixtures are shared by tests and these guides. GLFW backend implementations live in [`backends/glfw`](../backends/glfw/glfw_platform.hpp) and [`backends/opengl`](../backends/opengl/gl_drawlist_renderer.hpp); the showcase application remains in [`examples/glfw_demo.cpp`](../examples/glfw_demo.cpp).
+The [showcase](../examples/showcase/showcase.xui) and [stylesheet](../examples/showcase/showcase.xss) are the default interactive reference. The [Tetris example](../examples/game/README.md) demonstrates a timed application update through the facade, with its board and controls authored as widgets. Focused [cross-platform](../tests/fixtures/cross_platform.xui) and [controls](../tests/fixtures/controls.xui) fixtures are shared by tests and these guides. GLFW backend implementations live in [`backends/glfw`](../backends/glfw/glfw_platform.hpp) and [`backends/opengl`](../backends/opengl/gl_drawlist_renderer.hpp); the showcase application lives in [`examples/showcase/glfw_demo.cpp`](../examples/showcase/glfw_demo.cpp).
 
 The [Card composition sample](../examples/composites/README.md) has its own `xui_component_demo` GLFW target so its imports, parts, slots, and forwarded action can be tried as a runnable app.
 

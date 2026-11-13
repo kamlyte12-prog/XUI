@@ -48,6 +48,14 @@ ctest --test-dir build -C Release --output-on-failure
 
 For GCC/Clang sanitizer checks, configure another build tree with `-DXUI_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug`, then build and run `ctest` there.
 
+Ninja-based CMake presets are available for the common configurations. `dev` enables tests, benchmarks, fuzzers, and examples; `release` does the same with `CMAKE_BUILD_TYPE=Release`; `minimal` builds only the library with optional features off.
+
+```sh
+cmake --preset dev
+cmake --build --preset dev
+ctest --preset dev
+```
+
 Xui builds from source and does not currently export an installed CMake package. To consume it from another CMake project in the same build, add the source tree and link the facade target:
 
 ```cmake
@@ -208,7 +216,8 @@ Applications that need timed updates can call `ui.setTickHandler(callback, conte
 | CMake option | Purpose | Default |
 |---|---|---|
 | `XUI_BUILD_TESTS` | Build `xui_tests` | ON |
-| `XUI_BUILD_BENCHMARKS` | Build benchmarks and fuzz harnesses | ON |
+| `XUI_BUILD_BENCHMARKS` | Build benchmark executables | ON |
+| `XUI_BUILD_FUZZERS` | Build deterministic parser/layout/paint fuzz harnesses | ON |
 | `XUI_BUILD_EXAMPLES` | Build runnable examples | ON |
 | `XUI_BUILD_GLFW_EXAMPLE` | Build GLFW/OpenGL examples | ON |
 | `XUI_BUILD_GLFW_BACKEND` | Build GLFW/OpenGL adapters independently of examples | OFF |

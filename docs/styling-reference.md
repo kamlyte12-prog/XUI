@@ -136,7 +136,7 @@ keyframes pulse {
 }
 ```
 
-Numbers with matching units, colors, and compatible transform function sequences animate. Layout and font face/weight are not interpolated. `animation: name duration paused ...` holds the first keyframe until `Xui::playAnimation(id, mode)` is called. `Once` plays one cycle and leaves the last sample applied; `Loop` repeats until `cancelAnimation(id)`, which always stops immediately and holds its current sample. A later play request overrides and restarts playback. Visible animations schedule frames on a 16 ms timer; static and paused screens return to the platform event wait. GLFW reports pointer exit and window visibility, so hover-out animations run and hidden/minimized windows pause animation clocks. See [the motion showcase](../examples/showcase.xui) and [stylesheet](../examples/showcase.xss).
+Numbers with matching units, colors, and compatible transform function sequences animate. Layout and font face/weight are not interpolated. `animation: name duration paused ...` holds the first keyframe until `Xui::playAnimation(id, mode)` is called. `Once` plays one cycle and leaves the last sample applied; `Loop` repeats until `cancelAnimation(id)`, which always stops immediately and holds its current sample. A later play request overrides and restarts playback. Visible animations schedule frames on a 16 ms timer; static and paused screens return to the platform event wait. GLFW reports pointer exit and window visibility, so hover-out animations run and hidden/minimized windows pause animation clocks. See [the motion showcase](../examples/showcase/showcase.xui) and [stylesheet](../examples/showcase/showcase.xss).
 
 ## Cursor values
 

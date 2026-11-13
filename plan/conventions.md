@@ -13,7 +13,7 @@ This document captures repository-specific practices for agents. For the full co
 
 - Use stable, descriptive authored IDs for stateful controls and callbacks. Keep widget structure, text/content, layout relationships, and behavior attributes in `.xui`.
 - Put colors, typography, borders, spacing, and visual state rules in `.xss`. Prefer shared selectors/tokens and consistent state blocks over one-off inline/demo colors.
-- Keep examples small enough to teach one pattern, with clear IDs and comments only where they explain behavior. The complete interactive reference is `examples/showcase.xui` plus `examples/showcase.xss`.
+- Keep examples small enough to teach one pattern, with clear IDs and comments only where they explain behavior. The complete interactive reference is `examples/showcase/showcase.xui` plus `examples/showcase/showcase.xss`.
 - Check the current guides before extending syntax: [`xui-guide.md`](../docs/xui-guide.md), [`xss-guide.md`](../docs/xss-guide.md), and [`styling-reference.md`](../docs/styling-reference.md). Parser acceptance alone does not mean the runtime implements an object or property.
 
 ## Adding a widget end to end

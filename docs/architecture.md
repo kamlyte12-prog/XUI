@@ -87,7 +87,7 @@ The bundled `GlDrawListRenderer` is in [`backends/opengl/gl_drawlist_renderer.cp
 
 Framework implementations and public headers remain under `src/` and `include/xui/`. Optional concrete adapters live at the repository root under `backends/`: `backends/glfw/` implements `Platform`, and `backends/opengl/` implements `Renderer`. The example application itself stays in `examples/` and links the `xui_backend_glfw` and `xui_backend_opengl` targets declared by [`backends/CMakeLists.txt`](../backends/CMakeLists.txt). The existing `XUI_BUILD_GLFW_EXAMPLE` option continues to enable these adapters for the demo; `XUI_BUILD_GLFW_BACKEND=ON` can select the adapters without building examples. They are not linked into the core framework targets.
 
-The interactive `showcase.xui`/`.xss` pair stays in `examples/` because the GLFW demo and runtime asset tests both use it. Focused `cross_platform.*` and `controls.*` fixtures live under `tests/fixtures/`; tests load them from `XUI_TEST_FIXTURE_DIR`, and user guides link those same files as syntax examples. Other test-authored UI snippets remain inline in their owning tests.
+The interactive `showcase.xui`/`.xss` pair lives in `examples/showcase/` with the GLFW demo application and its image assets because the runtime asset tests use the same files. Focused `cross_platform.*` and `controls.*` fixtures live under `tests/fixtures/`; tests load them from `XUI_TEST_FIXTURE_DIR`, and user guides link those same files as syntax examples. Other test-authored UI snippets remain inline in their owning tests.
 
 ## Implement `xui::Platform`
 

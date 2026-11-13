@@ -10,7 +10,7 @@ Thanks for your interest in Xui! Xui is experimental, so the design is still evo
 - **Improve documentation** — the guides in [`docs/`](docs/README.md) are as important as the code.
 - **Add or improve examples** — demo apps and `.xui` / `.xss` assets live in [`examples/`](examples).
 - **Implement widgets or runtime features** — follow [the widget implementation checklist](plan/conventions.md#adding-a-widget-end-to-end).
-- **Improve performance or harden parsers** — read the [performance guide](docs/performance.md) and use the fuzz harnesses in [`benchmarks/`](benchmarks).
+- **Improve performance or harden parsers** — read the [performance guide](docs/performance.md) and use the fuzz harnesses in [`fuzz/`](fuzz).
 
 ## Code of conduct
 
@@ -66,4 +66,4 @@ Every push and pull request runs [`.github/workflows/ci.yml`](.github/workflows/
 
 ## Licensing of contributions
 
-The repository is licensed under the [MIT License](LICENSE.md). This repository does not currently document a separate CLA or sign-off requirement. The bundled GLFW dependency retains its own license at [`examples/lib/glfw-3.5.1/LICENSE.md`](examples/lib/glfw-3.5.1/LICENSE.md).
+The repository is licensed under the [MIT License](LICENSE.md). This repository does not currently document a separate CLA or sign-off requirement. Bundled dependencies retain their own licenses; see [third-party notices](THIRD_PARTY_NOTICES.md) and [`libs/glfw-3.5.1/LICENSE.md`](libs/glfw-3.5.1/LICENSE.md).

@@ -2133,11 +2133,11 @@ TEST(controls_example_assets_parse_validate_and_build) {
 }
 
 TEST(showcase_example_assets_parse_validate_and_build) {
-	const std::string xuiSource = readExample("showcase.xui");
-	const std::string xssSource = readExample("showcase.xss");
+	const std::string xuiSource = readExample("showcase/showcase.xui");
+	const std::string xssSource = readExample("showcase/showcase.xss");
 	CHECK(!xuiSource.empty()); CHECK(!xssSource.empty());
 	StringInterner strings; UiAssetBundle assets; std::string error;
-	CHECK(loadUiAssets(xuiSource, xssSource, strings, assets, error, "showcase.xui", "showcase.xss"));
+	CHECK(loadUiAssets(xuiSource, xssSource, strings, assets, error, "showcase/showcase.xui", "showcase/showcase.xss"));
 	if (!error.empty()) { std::cerr << error << '\n'; return; }
 	const std::string_view showcasedTypes[] = { "Text", "Label", "Button", "TextBox", "TextArea", "CheckBox", "CheckItem",
 		"RadioGroup", "Switch", "ToggleButton", "Slider", "Dropdown", "ColorPicker", "Tabs", "Tab", "ScrollView",

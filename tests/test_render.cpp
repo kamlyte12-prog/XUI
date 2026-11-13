@@ -188,7 +188,7 @@ TEST(image_decoder_reads_png_and_lunasvg_rasterizes_vector_assets) {
 	if (imageSupportAvailable()) {
 		CHECK(readImage(temp.string(), decoded));
 		CHECK_EQ(decoded.width, 2u); CHECK_EQ(decoded.height, 1u); CHECK(decoded.rgba == source.rgba);
-		const std::filesystem::path svgPath = std::filesystem::path(XUI_EXAMPLE_DIR) / "xui-demo-image.svg";
+		const std::filesystem::path svgPath = std::filesystem::path(XUI_EXAMPLE_DIR) / "showcase" / "xui-demo-image.svg";
 		SvgImage svg; std::string error;
 		CHECK(svg.load(svgPath.string(), &error));
 		CHECK(svg.valid()); CHECK_NEAR(svg.intrinsicWidth(), 192.f, 0.01f); CHECK_NEAR(svg.intrinsicHeight(), 128.f, 0.01f);

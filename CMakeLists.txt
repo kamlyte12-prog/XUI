@@ -8,6 +8,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(XUI_BUILD_TESTS       "Build unit tests"        ON)
 option(XUI_BUILD_BENCHMARKS  "Build benchmarks"        ON)
+option(XUI_BUILD_FUZZERS     "Build fuzz harnesses"    ON)
 option(XUI_BUILD_EXAMPLES    "Build runnable examples" ON)
 option(XUI_BUILD_GLFW_EXAMPLE "Build the GLFW + OpenGL example (uses bundled GLFW and system OpenGL)" ON)
 option(XUI_BUILD_GLFW_BACKEND "Build the optional GLFW/OpenGL backend adapters" OFF)
@@ -121,21 +122,7 @@ if(XUI_ENABLE_IMAGE_SUPPORT)
 endif()
 
 # One place for warning policy; every Xui target links xui_warnings.
-add_library(xui_warnings INTERFACE)
-if(MSVC)
-  target_compile_options(xui_warnings INTERFACE /W4 /permissive- /EHsc $<$<BOOL:${XUI_WERROR}>:/WX>)
-  target_compile_definitions(xui_warnings INTERFACE _CRT_SECURE_NO_WARNINGS)
-else()
-  target_compile_options(xui_warnings INTERFACE -Wall -Wextra -Wpedantic $<$<BOOL:${XUI_WERROR}>:-Werror>)
-endif()
-if(XUI_SANITIZE AND NOT MSVC)
-  target_compile_options(xui_warnings INTERFACE -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer)
-  target_link_options(xui_warnings INTERFACE -fsanitize=address,undefined)
-endif()
-if(APPLE)
-  # Apple's OpenGL headers are deprecated; without this, -Werror breaks every GL call.
-  target_compile_definitions(xui_warnings INTERFACE GL_SILENCE_DEPRECATION)
-endif()
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/XuiWarnings.cmake")
 
 # --- xui_core: handles, arenas, interner, math, colour, diagnostics. Zero third-party deps. ---
 add_library(xui_core STATIC src/core/color.cpp src/core/diagnostic.cpp)
@@ -193,6 +180,9 @@ endif()
 if(XUI_BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)
 endif()
+if(XUI_BUILD_FUZZERS)
+  add_subdirectory(fuzz)
+endif()
 
 # The legacy example option continues to build its required backend by default.
 # Advanced builds can also select the backend directly without building examples.
@@ -201,7 +191,7 @@ if(XUI_BUILD_GLFW_BACKEND OR (XUI_BUILD_EXAMPLES AND XUI_BUILD_GLFW_EXAMPLE))
   set(GLFW_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
   set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
   set(GLFW_INSTALL        OFF CACHE BOOL "" FORCE)
-  add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/examples/lib/glfw-3.5.1"
+  add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/libs/glfw-3.5.1"
                    "${CMAKE_CURRENT_BINARY_DIR}/glfw" EXCLUDE_FROM_ALL)
 
   find_package(OpenGL REQUIRED)

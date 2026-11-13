@@ -8,7 +8,7 @@ int main() {
 	GlfwPlatform platform;
 	xui::Xui ui;
 
-	if (!ui.loadFont("C:/Windows/Fonts/comic.ttf", "comic") ||
+	if (!ui.loadFont("Roboto.ttf", "Roboto") ||
 		!ui.loadXui("text.xui") ||
 		!ui.loadXss("text.xss")) {
 		std::print("{}\n", ui.lastError());

@@ -160,7 +160,7 @@ TEST(variable_font_gpos_kerning_and_advances_follow_each_weight) {
 	std::cout << "SKIP Roboto GPOS regression: XUI_EXAMPLE_DIR is not configured\n";
 	return;
 #else
-	const std::filesystem::path path = std::filesystem::path(XUI_EXAMPLE_DIR) / "layout" / "Roboto.ttf";
+	const std::filesystem::path path = std::filesystem::path(XUI_EXAMPLE_DIR) / "assets" / "Roboto.ttf";
 	std::ifstream file(path, std::ios::binary);
 	if (!file) { std::cout << "SKIP Roboto GPOS regression: Roboto.ttf is missing\n"; return; }
 	const std::string bytes{ std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>() };
@@ -374,7 +374,7 @@ TEST(text_frame_stats_count_cache_shaping_and_atlas_work) {
 	std::cout << "SKIP text frame counters: XUI_EXAMPLE_DIR is not configured\n";
 	return;
 #else
-	const std::filesystem::path path = std::filesystem::path(XUI_EXAMPLE_DIR) / "layout" / "Roboto.ttf";
+	const std::filesystem::path path = std::filesystem::path(XUI_EXAMPLE_DIR) / "assets" / "Roboto.ttf";
 	std::ifstream file(path, std::ios::binary);
 	if (!file) { std::cout << "SKIP text frame counters: Roboto.ttf is missing\n"; return; }
 	const std::string bytes{ std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>() };
@@ -412,7 +412,7 @@ TEST(text_layout_cache_rehash_preserves_all_entries) {
 	std::cout << "SKIP text cache rehash: XUI_EXAMPLE_DIR is not configured\n";
 	return;
 #else
-	const std::filesystem::path path = std::filesystem::path(XUI_EXAMPLE_DIR) / "layout" / "Roboto.ttf";
+	const std::filesystem::path path = std::filesystem::path(XUI_EXAMPLE_DIR) / "assets" / "Roboto.ttf";
 	std::ifstream file(path, std::ios::binary);
 	if (!file) { std::cout << "SKIP text cache rehash: Roboto.ttf is missing\n"; return; }
 	const std::string bytes{ std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>() };

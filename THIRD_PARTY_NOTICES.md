@@ -12,10 +12,7 @@ license files are included in the vendor tree.
 | PlutoVG | bundled with LunaSVG | `libs/lunasvg-3.5.0/plutovg/` | MIT | `libs/lunasvg-3.5.0/plutovg/LICENSE` |
 | stb_image | bundled single header | `libs/std_image/stb_image.h` | Public domain or MIT | License text in the header |
 | GLFW | 3.5.1 | `libs/glfw-3.5.1/` | zlib/libpng | `libs/glfw-3.5.1/LICENSE.md` |
+| Roboto | 3.015 | `examples/assets/Roboto.ttf` | SIL Open Font License 1.1 | `examples/assets/Roboto.LICENSE.txt` |
 
 The project's own source is licensed under the [MIT License](LICENSE.md).
-
-`examples/assets/Roboto.ttf` is a bundled demo/test font. Its upstream license
-is Apache-2.0, but the upstream notice is not currently stored beside the file;
-add it before distributing prebuilt binaries.
 

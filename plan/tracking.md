@@ -2,6 +2,15 @@
 
 This file records project changes, design decisions, trade-offs, current status, and next steps. It is updated as implementation work lands.
 
+## 2026-11-13 — Install/export the portable CMake package
+
+- Audit: the project was source-tree-only and had no install rules or package config. The vendored FreeType, HarfBuzz, LunaSVG, and PlutoVG projects already provide their own install rules and CMake package configs, and the public API lives under `include/xui`. The optional GLFW/OpenGL adapters are not needed by portable consumers.
+- Changes: added `XUI_INSTALL` (defaults to `PROJECT_IS_TOP_LEVEL`) and `GNUInstallDirs`; gave internal targets export names; installed the static portable libraries, public headers, license files, and a versioned `XuiTargets`/`XuiConfig` package under `lib/cmake/Xui`; switched public include directories to `BUILD_INTERFACE`/`INSTALL_INTERFACE`; made the text/image adapters use the exported vendored targets; and added the `cmake/package-consumer/` fixture, which configures only through `find_package(Xui CONFIG REQUIRED)` and links `xui::widgets`.
+- Decisions/trade-offs: install only the portable libraries and leave the optional GLFW/OpenGL backends source-tree-only so the package does not impose a window-system or OpenGL dependency. Reuse the vendored dependencies' own installed configs via `find_dependency` instead of re-exporting their targets. Expose friendly names (`xui::widgets`, `xui::core`, `xui::text`, and so on) while retaining the internal build target names. The installed libraries are static, so consumers must use a compatible configuration and runtime; no runtime dependency was added.
+- Verification: the `dev` preset reconfigured and built successfully after the export changes. `cmake --install` to a temporary prefix completed, and the external consumer configured with `CMAKE_PREFIX_PATH`, built, and printed `Xui package consumer: ok`. The committed consumer fixture uses the same `find_package`/`xui::widgets` path. This is Windows/MSVC verification only.
+- Limits/status: no Linux/macOS install or consumer verification, no hosted CI result, and no compatibility/versioning policy beyond `SameMajorVersion`. The package excludes the optional GLFW/OpenGL backends.
+- Next: add CI format, clang-tidy, fuzz, and package-consumer jobs, then validate the workflow and Windows-equivalent commands locally.
+
 ## 2026-11-13 — Remove generated GLFW docs and duplicate text sample; add font license
 
 - Audit: `libs/glfw-3.5.1/docs/html/` was generated Doxygen output (195 files) and is not read by the build because `GLFW_BUILD_DOCS` is forced off. `examples/text/text.xui` and `text.xss` are byte-identical to the button demo assets, and `text_demo.cpp` differs only in the filenames it loads. The Roboto font's name table declares SIL Open Font License 1.1, contradicting the earlier Apache-2.0 placeholder in `THIRD_PARTY_NOTICES.md`.

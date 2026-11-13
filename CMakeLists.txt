@@ -15,6 +15,9 @@ option(XUI_BUILD_GLFW_BACKEND "Build the optional GLFW/OpenGL backend adapters" 
 option(XUI_ENABLE_IMAGE_SUPPORT "Enable bundled PNG/JPEG/BMP/TGA and SVG image loading" ON)
 option(XUI_WERROR            "Treat warnings as errors" ON)
 option(XUI_SANITIZE          "Enable ASan+UBSan (GCC/Clang)" OFF)
+option(XUI_INSTALL           "Generate install and CMake package rules" ${PROJECT_IS_TOP_LEVEL})
+
+include(GNUInstallDirs)
 
 # Build vendored FreeType so builds do not depend on a system package or package
 # manager. Xui uses FreeType for variable glyf axes/outlines; shaping is provided
@@ -52,7 +55,10 @@ endif()
 # Stable dependency name for Xui targets; the implementation remains vendored.
 add_library(xui_freetype INTERFACE)
 add_library(xui::freetype ALIAS xui_freetype)
-target_link_libraries(xui_freetype INTERFACE freetype)
+set_target_properties(xui_freetype PROPERTIES EXPORT_NAME freetype)
+target_link_libraries(xui_freetype INTERFACE
+  $<BUILD_INTERFACE:freetype>
+  $<INSTALL_INTERFACE:Freetype::Freetype>)
 
 # HarfBuzz applies OpenType GPOS (including variable-font positioning) during text shaping.
 # Keep the bundled source in sync with FreeType so builds do not depend on system packages.
@@ -87,7 +93,10 @@ else()
 endif()
 add_library(xui_harfbuzz INTERFACE)
 add_library(xui::harfbuzz ALIAS xui_harfbuzz)
-target_link_libraries(xui_harfbuzz INTERFACE harfbuzz)
+set_target_properties(xui_harfbuzz PROPERTIES EXPORT_NAME harfbuzz)
+target_link_libraries(xui_harfbuzz INTERFACE
+  $<BUILD_INTERFACE:harfbuzz>
+  $<INSTALL_INTERFACE:harfbuzz::harfbuzz>)
 
 # Image decoding is optional. stb_image is a single-header decoder; LunaSVG
 # includes its plutovg rasterizer as a source subdirectory.
@@ -118,6 +127,7 @@ if(XUI_ENABLE_IMAGE_SUPPORT)
   endif()
   add_library(xui_lunasvg INTERFACE)
   add_library(xui::lunasvg ALIAS xui_lunasvg)
+  set_target_properties(xui_lunasvg PROPERTIES EXPORT_NAME lunasvg)
   target_link_libraries(xui_lunasvg INTERFACE lunasvg::lunasvg)
 endif()
 
@@ -126,7 +136,9 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/XuiWarnings.cmake")
 
 # --- xui_core: handles, arenas, interner, math, colour, diagnostics. Zero third-party deps. ---
 add_library(xui_core STATIC src/core/color.cpp src/core/diagnostic.cpp)
-target_include_directories(xui_core PUBLIC include)
+target_include_directories(xui_core PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_link_libraries(xui_core PRIVATE xui_warnings)
 
 # --- xui_assets: .xss (and, from M3, .xui) parsers and compilers. Depends only on xui_core. ---
@@ -152,7 +164,7 @@ target_include_directories(xui_image PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/libs/s
 target_compile_definitions(xui_image PRIVATE XUI_ENABLE_IMAGE_SUPPORT=$<BOOL:${XUI_ENABLE_IMAGE_SUPPORT}>)
 target_link_libraries(xui_image PUBLIC xui_renderer PRIVATE xui_warnings)
 if(XUI_ENABLE_IMAGE_SUPPORT)
-  target_link_libraries(xui_image PRIVATE xui::lunasvg)
+  target_link_libraries(xui_image PRIVATE xui_lunasvg)
 endif()
 
 # --- xui_platform: Platform interface + headless null backend. ---
@@ -166,11 +178,13 @@ target_link_libraries(xui_text PUBLIC xui_core xui_renderer PRIVATE xui_warnings
 # The text implementation needs these static libraries, but public Xui headers
 # do not expose either dependency. PRIVATE keeps their include paths out of
 # consumer compile usage requirements while CMake still links static symbols.
-target_link_libraries(xui_text PRIVATE xui::freetype xui::harfbuzz)
+target_link_libraries(xui_text PRIVATE xui_freetype xui_harfbuzz)
 
 # --- xui_widgets: first retained runtime bridge from .xui/.xss to layout, text and paint. ---
 add_library(xui_widgets STATIC src/ui/runtime.cpp src/ui/xui.cpp)
-target_include_directories(xui_widgets PUBLIC include)
+target_include_directories(xui_widgets PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_link_libraries(xui_widgets PUBLIC xui_assets xui_layout xui_renderer xui_image xui_text PRIVATE xui_warnings)
 
 if(XUI_BUILD_TESTS)
@@ -207,4 +221,56 @@ endif()
 
 if(XUI_BUILD_EXAMPLES)
   add_subdirectory(examples)
+endif()
+
+if(XUI_INSTALL)
+  include(CMakePackageConfigHelpers)
+
+  # Package target names are friendlier than the internal library names:
+  # consumers link xui::widgets rather than xui::xui_widgets.
+  set_target_properties(xui_core       PROPERTIES EXPORT_NAME core)
+  set_target_properties(xui_assets     PROPERTIES EXPORT_NAME assets)
+  set_target_properties(xui_layout     PROPERTIES EXPORT_NAME layout)
+  set_target_properties(xui_renderer   PROPERTIES EXPORT_NAME renderer)
+  set_target_properties(xui_image      PROPERTIES EXPORT_NAME image)
+  set_target_properties(xui_platform   PROPERTIES EXPORT_NAME platform)
+  set_target_properties(xui_text       PROPERTIES EXPORT_NAME text)
+  set_target_properties(xui_widgets    PROPERTIES EXPORT_NAME widgets)
+  set_target_properties(xui_warnings   PROPERTIES EXPORT_NAME warnings)
+
+  set(XUI_INSTALL_TARGETS
+    xui_core xui_assets xui_layout xui_renderer xui_image xui_platform
+    xui_text xui_widgets xui_warnings xui_freetype xui_harfbuzz)
+  if(XUI_ENABLE_IMAGE_SUPPORT)
+    list(APPEND XUI_INSTALL_TARGETS xui_lunasvg)
+  endif()
+
+  install(TARGETS ${XUI_INSTALL_TARGETS}
+    EXPORT XuiTargets
+    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+    INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+  install(DIRECTORY include/xui DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+  install(FILES LICENSE.md THIRD_PARTY_NOTICES.md
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/Xui")
+
+  set(XUI_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/Xui")
+  install(EXPORT XuiTargets
+    FILE XuiTargets.cmake
+    NAMESPACE xui::
+    DESTINATION "${XUI_INSTALL_CMAKEDIR}")
+
+  configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/XuiConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/XuiConfig.cmake"
+    INSTALL_DESTINATION "${XUI_INSTALL_CMAKEDIR}")
+  write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/XuiConfigVersion.cmake"
+    VERSION "${PROJECT_VERSION}"
+    COMPATIBILITY SameMajorVersion)
+  install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/XuiConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/XuiConfigVersion.cmake"
+    DESTINATION "${XUI_INSTALL_CMAKEDIR}")
 endif()

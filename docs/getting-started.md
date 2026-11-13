@@ -56,7 +56,33 @@ cmake --build --preset dev
 ctest --preset dev
 ```
 
-Xui builds from source and does not currently export an installed CMake package. To consume it from another CMake project in the same build, add the source tree and link the facade target:
+### Install and consume the package
+
+Xui can install its portable libraries, public headers, licenses, and a CMake package config:
+
+```sh
+cmake -S . -B build -DXUI_INSTALL=ON
+cmake --build build --config Release
+cmake --install build --config Release --prefix /path/to/prefix
+```
+
+Then consume the installed package from another CMake project:
+
+```cmake
+find_package(Xui 0.1 CONFIG REQUIRED)
+target_link_libraries(my_app PRIVATE xui::widgets)
+```
+
+Pass the install prefix through `CMAKE_PREFIX_PATH`. The package exports friendly targets (`xui::widgets`, `xui::core`, `xui::layout`, `xui::renderer`, `xui::text`, `xui::image`, `xui::platform`, `xui::assets`, `xui::freetype`, and `xui::harfbuzz`, plus `xui::lunasvg` when image support is enabled). Its config file loads the installed FreeType, HarfBuzz, and optional LunaSVG packages with `find_dependency`; those vendored dependencies install alongside Xui.
+
+The minimal consumer fixture in [`cmake/package-consumer/`](../cmake/package-consumer/CMakeLists.txt) is built in CI. To run it locally after installing:
+
+```sh
+cmake -S cmake/package-consumer -B build/consumer -DCMAKE_PREFIX_PATH=/path/to/prefix
+cmake --build build/consumer
+```
+
+The optional GLFW/OpenGL backends are not part of the installed package; applications that need them can compile those source targets themselves. To consume the source tree in the same build instead, add it and link the facade target:
 
 ```cmake
 add_subdirectory(path/to/xui)

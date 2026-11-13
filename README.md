@@ -14,7 +14,7 @@ The bundled interactive example uses GLFW and OpenGL. Start with the [user docum
 - `benchmarks/` — performance harnesses; `fuzz/` — deterministic parser/layout/paint fuzzers.
 - `libs/` — pinned vendored source dependencies; see [third-party notices](THIRD_PARTY_NOTICES.md).
 - `docs/` — user guides; `plan/` — agent context, roadmap, and change history.
-- `.github/workflows/` — CI matrix; `cmake/` — shared CMake policy modules.
+- `.github/workflows/` — CI matrix; `cmake/` — shared CMake policy modules and the installed-package consumer fixture.
 
 ## Getting started
 
@@ -77,7 +77,7 @@ Button.primary {
 }
 ```
 
-For a complete build setup and asset instructions, see [Getting started](docs/getting-started.md). The sample uses the current `xui::Xui` facade; custom backends can implement the same [`Renderer`](docs/architecture.md#implement-xuirenderer) and [`Platform`](docs/architecture.md#implement-xuiplatform) interfaces.
+For a complete build setup and asset instructions, see [Getting started](docs/getting-started.md). The sample uses the current `xui::Xui` facade; custom backends can implement the same [`Renderer`](docs/architecture.md#implement-xuirenderer) and [`Platform`](docs/architecture.md#implement-xuiplatform) interfaces. To install the portable libraries for another CMake project, see [Install and consume the package](docs/getting-started.md#install-and-consume-the-package).
 
 ## Showcase
 

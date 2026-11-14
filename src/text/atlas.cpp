@@ -234,7 +234,7 @@ namespace xui {
 			m_renderer->updateTexture(m_tex, m_bitmap.data(), region);
 			++m_frameStats.uploads;
 		}
-		m_entries.push_back(std::move(e));
+		m_entries.push_back(e);
 		indexEntry(u32(m_entries.size() - 1));
 		return m_entries.back().g;
 	}

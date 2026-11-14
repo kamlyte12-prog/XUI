@@ -102,7 +102,10 @@ Dropdown, DatePicker, ColorPicker, Slider, Tabs, Tab, Menu, MenuItem, KeybindFie
 			for (const auto& r : m_a.rules) compileRule(r);
 			for (const Pending& p : m_pending)
 				if (!m_sh.findKeyframes(p.name)) {
-					std::vector<std::string_view> names; for (const auto& k : m_sh.m_kf) names.push_back(m_in.view(k.name));
+					std::vector<std::string_view> names;
+					names.reserve(m_sh.m_kf.size());
+					for (const auto& k : m_sh.m_kf)
+						names.push_back(m_in.view(k.name));
 					std::string s = didYouMean(m_in.view(p.name), names);
 					m_d.error(p.off, p.len, "unknown keyframes '" + std::string(m_in.view(p.name)) + "'", s.empty() ? "define it with `keyframes name { ... }`" : "did you mean '" + s + "'?");
 				}
@@ -161,7 +164,10 @@ Dropdown, DatePicker, ColorPicker, Slider, Tabs, Tab, Menu, MenuItem, KeybindFie
 				if (env.defs.count(e.name)) return evalToken(env, e.name);
 				std::string_view n = m_in.view(e.name);
 				if (n.find('.') == std::string_view::npos) return Atom::ident(e.name);   // bare enum word: Primary, solid, center
-				std::vector<std::string_view> names; for (StrId s : env.order) names.push_back(m_in.view(s));
+				std::vector<std::string_view> names;
+				names.reserve(env.order.size());
+				for (StrId s : env.order)
+					names.push_back(m_in.view(s));
 				std::string s = didYouMean(n, names);
 				err(e.off, e.len, "unknown token '" + std::string(n) + "'", s.empty() ? "" : "did you mean '" + s + "'?");
 				return std::nullopt;
@@ -437,7 +443,10 @@ Dropdown, DatePicker, ColorPicker, Slider, Tabs, Tab, Menu, MenuItem, KeybindFie
 		void compileKeyframes(const xss::KeyframesAst& k) {
 			if (m_sh.findKeyframes(k.name)) { err(k.off, k.len, "duplicate keyframes '" + std::string(m_in.view(k.name)) + "'"); return; }
 			KeyframesDef def; def.name = k.name; def.frameFirst = static_cast<u32>(m_sh.m_frames.size());
-			std::vector<const xss::FrameAst*> fs; for (const auto& f : k.frames) fs.push_back(&f);
+			std::vector<const xss::FrameAst*> fs;
+			fs.reserve(k.frames.size());
+			for (const auto& f : k.frames)
+				fs.push_back(&f);
 			std::stable_sort(fs.begin(), fs.end(), [](auto* a, auto* b) { return a->t < b->t; });
 			for (const auto* f : fs) {
 				std::vector<Declaration> ds;

@@ -664,7 +664,7 @@ namespace xui {
 				editor.styleSet = m_styles->match(input);
 				m_styles->resolve(editor.styleSet, stateBit(State::Resting), m_theme, editor.style);
 				const PropId inherited[] = { PropId::Font, PropId::FontSize, PropId::FontWeight, PropId::Fg, PropId::Align, PropId::LetterSpacing };
-				for (u8 i = 0; i < std::size(inherited); ++i) {
+				for (std::size_t i = 0; i < std::size(inherited); ++i) {
 					const PropId property = inherited[i];
 					if (!editor.style.has(property) && owner.style.has(property)) {
 						editor.style.v[static_cast<int>(property)] = owner.style.get(property);
@@ -723,7 +723,7 @@ namespace xui {
 			if (node.parentIndex < i) {
 				const PropId inherited[] = { PropId::Font, PropId::FontSize, PropId::FontWeight, PropId::Fg, PropId::Align, PropId::LetterSpacing };
 				const PropTable& parentStyle = m_nodes[node.parentIndex].style;
-				for (u8 propertyIndex = 0; propertyIndex < std::size(inherited); ++propertyIndex) {
+				for (std::size_t propertyIndex = 0; propertyIndex < std::size(inherited); ++propertyIndex) {
 					const PropId property = inherited[propertyIndex];
 					if (!node.style.has(property) && parentStyle.has(property)) {
 						node.style.v[static_cast<int>(property)] = parentStyle.get(property);
@@ -975,7 +975,9 @@ namespace xui {
 				}
 				else if (node.datePicker && name == "value") {
 					i32 year = 0; u32 month = 0, day = 0;
-					if (std::sscanf(value.data(), "%4d-%2u-%2u", &year, &month, &day) == 3 && month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth(year, month)) {
+					const std::string valueText(value);
+					if (std::sscanf(valueText.c_str(), "%4d-%2u-%2u", &year, &month, &day) == 3 && month >= 1 &&
+						month <= 12 && day >= 1 && day <= daysInMonth(year, month)) {
 						node.dateYear = year; node.dateMonth = month; node.dateDay = day;
 						node.viewYear = year; node.viewMonth = month;
 					}
@@ -1186,7 +1188,7 @@ namespace xui {
 		if (parentIndex != 0xFFFFFFFFu && parentIndex < m_nodes.size()) {
 			const PropId inherited[] = { PropId::Font, PropId::FontSize, PropId::FontWeight, PropId::Fg, PropId::Align, PropId::LetterSpacing };
 			const PropTable& parentStyle = m_nodes[parentIndex].style;
-			for (u8 i = 0; i < std::size(inherited); ++i) {
+			for (std::size_t i = 0; i < std::size(inherited); ++i) {
 				const PropId property = inherited[i];
 				if (!node.style.has(property) && parentStyle.has(property)) {
 					node.style.v[static_cast<int>(property)] = parentStyle.get(property);
@@ -1452,14 +1454,14 @@ namespace xui {
 			tabsStyle.padding.t += 34.f;
 			m_layout.setStyle(m_nodes[runtimeIndex].layout, tabsStyle);
 		}
-		if (node.titleBar && node.titleBarButtons) {
+		if (m_nodes[runtimeIndex].titleBar && m_nodes[runtimeIndex].titleBarButtons) {
 			// Reserve the caption zone (minimize/maximize/close) so authored children cannot
 			// underlap the framework-drawn buttons; the Tabs header reserve uses the same trick.
 			LayoutStyle barStyle = m_layout.style(m_nodes[runtimeIndex].layout);
 			barStyle.padding.r += kCaptionZoneWidth;
 			m_layout.setStyle(m_nodes[runtimeIndex].layout, barStyle);
 		}
-		if (node.split) {
+		if (m_nodes[runtimeIndex].split) {
 			Node& splitNode = m_nodes[runtimeIndex];
 			NodeId child = m_layout.firstChild(splitNode.layout);
 			u32 ordinal = 0;
@@ -2627,7 +2629,7 @@ namespace xui {
 			if (node.parentIndex != 0xFFFFFFFFu && node.parentIndex < nodeIndex) {
 				const PropId inherited[] = { PropId::Font, PropId::FontSize, PropId::FontWeight, PropId::Fg, PropId::Align, PropId::LetterSpacing };
 				const PropTable& parentStyle = m_nodes[node.parentIndex].style;
-				for (u8 i = 0; i < std::size(inherited); ++i) {
+				for (std::size_t i = 0; i < std::size(inherited); ++i) {
 					const PropId property = inherited[i];
 					const u64 bit = u64{ 1 } << static_cast<int>(property);
 					const bool wasInherited = (node.inheritedTextMask & u8(1u << i)) != 0;
@@ -2657,8 +2659,10 @@ namespace xui {
 						if (!interpolateStyle(tween.from, tween.to, 0.f, probe)) return;
 						tween.start = now; tween.durationMs = transition.durationMs; tween.delayMs = transition.delayMs; tween.easing = transition.ease;
 						auto existing = std::find_if(node.styleTweens.begin(), node.styleTweens.end(), [&](const StyleTween& item) { return item.property == property; });
-						if (existing == node.styleTweens.end()) node.styleTweens.push_back(std::move(tween));
-						else *existing = std::move(tween);
+						if (existing == node.styleTweens.end())
+							node.styleTweens.push_back(tween);
+						else
+							*existing = tween;
 					};
 					if (transition.allProps) for (PropId property : animatable) addTween(property);
 					else addTween(transition.prop);
@@ -2684,7 +2688,7 @@ namespace xui {
 							StyleValue probe;
 							if (!interpolateStyle(tween.from, tween.to, 0.f, probe)) continue;
 							tween.start = now; tween.durationMs = timing.durationMs; tween.delayMs = timing.delayMs; tween.easing = timing.ease;
-							node.styleTweens.push_back(std::move(tween));
+							node.styleTweens.push_back(tween);
 						}
 					}
 				}
@@ -2824,7 +2828,7 @@ namespace xui {
 				if (gradient.count >= 4 && gradient.atoms[0].kind == AtomKind::Ident) {
 					const std::string_view fn = m_strings->view(gradient.atoms[0].str());
 					shape.gradientKind = fn == "radial-gradient" ? 1 : fn == "conic-gradient" ? 2 : 0;
-					shape.gradientAngle = number(gradient, 1) * (shape.gradientKind == 2 ? 1.f : 1.f);
+					shape.gradientAngle = number(gradient, 1);
 					shape.gradientStopCount = static_cast<u8>(std::clamp<int>(gradient.count - 2, 2, 4));
 					for (u8 stop = 0; stop < shape.gradientStopCount; ++stop)
 						if (gradient.atoms[2 + stop].kind == AtomKind::Color) shape.gradientStops[stop] = Color::fromRGBA8(gradient.atoms[2 + stop].bits);
@@ -3354,7 +3358,7 @@ namespace xui {
 			f32 x = rect.x;
 			const f32 padLeft = textPadding.l;
 			const f32 padRight = textPadding.r;
-			const f32 spacingWidth = letterSpacing * static_cast<f32>(run.glyphs.size() > 0 ? run.glyphs.size() - 1 : 0);
+			const f32 spacingWidth = letterSpacing * static_cast<f32>(!run.glyphs.empty() ? run.glyphs.size() - 1 : 0);
 			const f32 runWidth = run.width / m_dpiScale + spacingWidth;
 			const f32 advanceWidth = run.advanceWidth / m_dpiScale + spacingWidth;
 			const f32 runHeight = run.height / m_dpiScale;
@@ -6047,7 +6051,8 @@ namespace xui {
 		const f32 wrapWidth = constraint.fw ? constraint.w : 0.f;
 		const TextLayout& run = textLayout(runtimeNode->text, fontSize, wrapWidth);
 		const f32 spacing = runtimeNode->style.has(PropId::LetterSpacing) ? number(runtimeNode->style.get(PropId::LetterSpacing), 0) : 0.f;
-		const f32 contentWidth = run.width / dpiScale + spacing * static_cast<f32>(run.glyphs.size() > 0 ? run.glyphs.size() - 1 : 0);
+		const f32 contentWidth =
+			run.width / dpiScale + spacing * static_cast<f32>(!run.glyphs.empty() ? run.glyphs.size() - 1 : 0);
 		if (runtimeNode->button || runtimeNode->toggleButton) return { std::max(96.f, contentWidth), std::max(36.f, run.height / dpiScale) };
 		return { contentWidth, run.height / dpiScale };
 	}

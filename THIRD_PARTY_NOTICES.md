@@ -15,4 +15,3 @@ license files are included in the vendor tree.
 | Roboto | 3.015 | `examples/assets/Roboto.ttf` | SIL Open Font License 1.1 | `examples/assets/Roboto.LICENSE.txt` |
 
 The project's own source is licensed under the [MIT License](LICENSE.md).
-

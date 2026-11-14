@@ -79,3 +79,150 @@ jobs:
             echo "exit code: $?"
             exit 1
           fi
+
+  format:
+    name: format
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install clang-format 22.1.3
+        run: |
+          python3 -m venv "$RUNNER_TEMP/format-venv"
+          "$RUNNER_TEMP/format-venv/bin/pip" install --quiet clang-format==22.1.3
+          echo "$RUNNER_TEMP/format-venv/bin" >> "$GITHUB_PATH"
+
+      - name: Check changed C++ lines
+        run: |
+          # Check only lines touched by this push/PR. The existing sources
+          # predate .clang-format, so a whole-tree check would fail on them.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            range="$base...HEAD"
+          else
+            base="${{ github.event.before }}"
+            if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+              if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+                base="$(git rev-parse HEAD^)"
+              else
+                base="$(git rev-list --max-parents=0 HEAD | tail -1)"
+              fi
+            fi
+            range="$base..HEAD"
+          fi
+          echo "Checking formatting since $base"
+          changed="$(git diff --name-only -M "$range" -- '*.cpp' '*.hpp' '*.h' ':(exclude)libs/**')"
+          if [ -z "$changed" ]; then
+            echo "No project C++ files changed."
+            exit 0
+          fi
+          git diff -U0 -M "$range" -- '*.cpp' '*.hpp' '*.h' ':(exclude)libs/**' \
+            | clang-format-diff -p1 -style=file
+
+  tidy:
+    name: clang-tidy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-18 clang-tidy-18 ninja-build pkg-config
+
+      - name: Configure
+        run: |
+          cmake -S . -B build/tidy -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER=clang-18 \
+            -DCMAKE_CXX_COMPILER=clang++-18 \
+            -DXUI_BUILD_TESTS=OFF \
+            -DXUI_BUILD_BENCHMARKS=OFF \
+            -DXUI_BUILD_FUZZERS=OFF \
+            -DXUI_BUILD_EXAMPLES=OFF \
+            -DXUI_BUILD_GLFW_EXAMPLE=OFF \
+            -DXUI_WERROR=OFF
+
+      - name: Run clang-tidy
+        run: |
+          git ls-files -z -- 'src/**/*.cpp' \
+            | xargs -0 -n 1 -P "$(nproc)" clang-tidy-18 -p build/tidy --quiet --warnings-as-errors='*'
+
+  fuzz:
+    name: fuzz
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build pkg-config
+
+      - name: Relax ASLR for ASan
+        run: sudo sysctl vm.mmap_rnd_bits=28
+
+      - name: Configure
+        run: |
+          cmake -S . -B build/fuzz -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DXUI_BUILD_TESTS=OFF \
+            -DXUI_BUILD_BENCHMARKS=OFF \
+            -DXUI_BUILD_EXAMPLES=OFF \
+            -DXUI_BUILD_GLFW_EXAMPLE=OFF \
+            -DXUI_BUILD_FUZZERS=ON \
+            -DXUI_WERROR=OFF \
+            -DXUI_SANITIZE=ON
+
+      - name: Build fuzzers
+        run: cmake --build build/fuzz --parallel --target fuzz_parsers fuzz_layout fuzz_paint
+
+      - name: Run fuzz smoke checks
+        env:
+          UBSAN_OPTIONS: print_stacktrace=1
+        run: |
+          build/fuzz/fuzz_parsers 3000 12345
+          build/fuzz/fuzz_layout 1 300 10
+          build/fuzz/fuzz_paint 1 300 50
+
+  install-consumer:
+    name: install-consumer
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build pkg-config
+
+      - name: Build and install Xui
+        run: |
+          cmake -S . -B build/install -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DXUI_BUILD_TESTS=OFF \
+            -DXUI_BUILD_BENCHMARKS=OFF \
+            -DXUI_BUILD_FUZZERS=OFF \
+            -DXUI_BUILD_EXAMPLES=OFF \
+            -DXUI_BUILD_GLFW_EXAMPLE=OFF \
+            -DXUI_INSTALL=ON \
+            -DXUI_WERROR=OFF
+          cmake --build build/install --parallel
+          cmake --install build/install --prefix "$RUNNER_TEMP/xui-prefix"
+
+      - name: Check the package for source-tree paths
+        run: |
+          if grep -R --line-number --binary-files=without-match "$GITHUB_WORKSPACE" "$RUNNER_TEMP/xui-prefix"; then
+            echo "installed package references the source/build tree" >&2
+            exit 1
+          fi
+
+      - name: Build and run the package consumer
+        run: |
+          cmake -S cmake/package-consumer -B build/consumer -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/xui-prefix"
+          cmake --build build/consumer --parallel
+          ./build/consumer/xui_package_consumer

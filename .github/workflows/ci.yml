@@ -13,7 +13,7 @@ jobs:
           - { name: linux-gcc13,     os: ubuntu-24.04, cc: gcc-13,   cxx: g++-13,     san: "OFF", werror: "ON",  flags: "" }
           - { name: linux-gcc13-san, os: ubuntu-24.04, cc: gcc-13,   cxx: g++-13,     san: "ON",  werror: "OFF", flags: "" }  # ASan + UBSan
           - { name: linux-clang18,   os: ubuntu-24.04, cc: clang-18, cxx: clang++-18, san: "OFF", werror: "ON",  flags: "-stdlib=libc++" }
-          - { name: macos-14,        os: macos-14,     cc: "",       cxx: "",          san: "OFF", werror: "ON",  flags: "" }
+          - { name: macos-15,        os: macos-15,     cc: "",       cxx: "",          san: "OFF", werror: "ON",  flags: "" }
           - { name: windows-2022,    os: windows-2022, cc: "",       cxx: "",          san: "OFF", werror: "ON",  flags: "" }  # MSVC /W4 /WX
     runs-on: ${{ matrix.os }}
     defaults:
@@ -104,7 +104,10 @@ jobs:
           else
             base="${{ github.event.before }}"
             if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
-              if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+              default_branch="origin/${{ github.event.repository.default_branch }}"
+              if git rev-parse --verify "$default_branch" >/dev/null 2>&1; then
+                base="$(git merge-base "$default_branch" HEAD)"
+              elif git rev-parse --verify HEAD^ >/dev/null 2>&1; then
                 base="$(git rev-parse HEAD^)"
               else
                 base="$(git rev-list --max-parents=0 HEAD | tail -1)"
@@ -119,7 +122,7 @@ jobs:
             exit 0
           fi
           git diff -U0 -M "$range" -- '*.cpp' '*.hpp' '*.h' ':(exclude)libs/**' \
-            | clang-format-diff -p1 -style=file
+            | clang-format-diff.py -p1 -style=file
 
   tidy:
     name: clang-tidy
@@ -130,7 +133,10 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang-18 clang-tidy-18 ninja-build pkg-config
+          sudo apt-get install -y --no-install-recommends clang-18 ninja-build pkg-config
+          python3 -m venv "$RUNNER_TEMP/tidy-venv"
+          "$RUNNER_TEMP/tidy-venv/bin/pip" install --quiet clang-tidy==22.1.8
+          echo "$RUNNER_TEMP/tidy-venv/bin" >> "$GITHUB_PATH"
 
       - name: Configure
         run: |
@@ -148,7 +154,7 @@ jobs:
       - name: Run clang-tidy
         run: |
           git ls-files -z -- 'src/**/*.cpp' \
-            | xargs -0 -n 1 -P "$(nproc)" clang-tidy-18 -p build/tidy --quiet --warnings-as-errors='*'
+            | xargs -0 -n 1 -P "$(nproc)" clang-tidy -p build/tidy --quiet --warnings-as-errors='*'
 
   fuzz:
     name: fuzz
@@ -166,7 +172,7 @@ jobs:
 
       - name: Configure
         run: |
-          cmake -S . -B build/fuzz -G Ninja \
+          cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
             -DXUI_BUILD_TESTS=OFF \
             -DXUI_BUILD_BENCHMARKS=OFF \
@@ -177,7 +183,7 @@ jobs:
             -DXUI_SANITIZE=ON
 
       - name: Build fuzzers
-        run: cmake --build build/fuzz --parallel --target fuzz_parsers fuzz_layout fuzz_paint
+        run: cmake --build build --parallel --target fuzz_parsers fuzz_layout fuzz_paint
 
       - name: Run fuzz smoke checks
         env:

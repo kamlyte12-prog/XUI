@@ -52,13 +52,13 @@ The agent [architecture map](plan/architecture.md) maps source modules to respon
 
 Every push and pull request runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
 
-- **build** — Debug build plus `ctest` on Ubuntu (GCC 13, GCC 13 with ASan + UBSan, Clang 18), macOS 14, and Windows (MSVC with `/W4 /WX`). Because `XUI_WERROR` defaults to `ON`, compiler warnings fail the build — keep your changes warning-clean.
+- **build** — Debug build plus `ctest` on Ubuntu (GCC 13, GCC 13 with ASan + UBSan, Clang 18), macOS 15, and Windows (MSVC with `/W4 /WX`). Because `XUI_WERROR` defaults to `ON`, compiler warnings fail the build — keep your changes warning-clean.
 - **format** — checks the C/C++ lines changed by the push or PR with clang-format 22.1.3. Whole-file formatting is not enforced yet because the tree predates `.clang-format`; new and edited lines must conform.
-- **clang-tidy** — runs the curated allowlist in [`.clang-tidy`](.clang-tidy) over every `src/**/*.cpp`, with warnings treated as errors. Add checks one at a time after fixing their findings.
+- **clang-tidy** — runs the curated allowlist in [`.clang-tidy`](.clang-tidy) over every `src/**/*.cpp` with clang-tidy 22.1.8, treating warnings as errors. Add checks one at a time after fixing their findings.
 - **fuzz** — builds the parser, layout, and paint harnesses with ASan/UBSan and runs a short smoke pass.
 - **install-consumer** — installs the CMake package to a clean prefix and builds [`cmake/package-consumer/`](cmake/package-consumer) through `find_package(Xui)`.
 
-The build matrix runs Ubuntu 24.04, macOS 14, and Windows; the hardening jobs currently run on Ubuntu 24.04.
+The build matrix runs Ubuntu 24.04, macOS 15, and Windows; the hardening jobs currently run on Ubuntu 24.04.
 
 ## Technical contribution references
 

@@ -174,7 +174,10 @@ void GlfwPlatform::setCursor(CursorShape shape) {
 }
 void GlfwPlatform::setClipboardText(std::string_view s) { glfwSetClipboardString(nullptr, std::string(s).c_str()); }
 std::string GlfwPlatform::clipboardText() const { const char* s = glfwGetClipboardString(nullptr); return s ? s : ""; }
-void GlfwPlatform::requestRedraw(WindowHandle h) { if (auto* w = find(h)) glfwPostEmptyEvent(); }
+void GlfwPlatform::requestRedraw(WindowHandle h) {
+	if (find(h))
+		glfwPostEmptyEvent();
+}
 
 bool GlfwPlatform::setDecorated(WindowHandle h, bool decorated) {
 	Window* w = find(h);
@@ -217,6 +220,7 @@ bool GlfwPlatform::beginSystemMove(WindowHandle h) {
 }
 
 bool GlfwPlatform::beginSystemResize(WindowHandle h, WindowEdge edge) {
+	(void)edge; // Only the Windows implementation maps the edge to a native hit test.
 	Window* w = find(h);
 	if (!w || !w->native || !w->customChrome) return false;
 #ifdef _WIN32

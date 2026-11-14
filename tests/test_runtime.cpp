@@ -1406,9 +1406,15 @@ TEST(ui_runtime_empty_textbox_displays_focused_blinking_caret) {
 	CHECK(document.has_value()); if (!document) return;
 	auto styles = compileXss(xssSource, "caret.xss", strings);
 	CHECK(styles.has_value()); if (!styles) return;
-	TextSystem text; NullRenderer renderer; CHECK(text.initAtlas(&renderer));
-	const std::string bytes = readTestFont(); std::string error;
-	const FontHandle font = bytes.empty() ? FontHandle{} : text.loadFont(bytes, &error);
+	const std::string bytes = readTestFont();
+	if (bytes.empty())
+		return; // The caret needs a font; Linux/macOS CI has no configured test font.
+	NullRenderer renderer;
+	TextSystem text;
+	CHECK(text.initAtlas(&renderer));
+	std::string error;
+	const FontHandle font = text.loadFont(bytes, &error);
+	CHECK(font.valid());
 	UiRuntime ui; CHECK(ui.build(*document, *styles, strings, text, font, error)); if (!error.empty()) return;
 	ui.layout(240.f, 100.f); const Rect bounds = ui.bounds({ 1, 1 });
 	CHECK(ui.pointerDown({ bounds.x + 12.f, bounds.y + bounds.h * 0.5f }));
@@ -1761,9 +1767,9 @@ Row.bar { resting: { bg: #cbd5e1 } }
 	for (const f32 dpi : { 1.f, 1.25f, 1.5f }) {
 		ui.layout(760.f, 480.f, dpi);
 		CHECK(ui.bounds({ 2, 1 }).w > 700.f); // Column still stretches text on its cross axis.
-		for (const auto [index, sample] : { std::pair{ 4u, std::string_view("World! Extension") },
-			std::pair{ 6u, std::string_view("!") },
-			std::pair{ 8u, std::string_view("World!") } }) {
+		for (const auto& [index, sample] :
+			 {std::pair{4u, std::string_view("World! Extension")}, std::pair{6u, std::string_view("!")},
+			  std::pair{8u, std::string_view("World!")}}) {
 			const Rect rect = ui.bounds({ index, 1 });
 			const TextLayout& measured = text.layout(font, sample, 16.f * dpi);
 			CHECK_EQ(measured.glyphs.size(), static_cast<std::size_t>(std::count_if(sample.begin(), sample.end(), [](char ch) { return ch != ' '; })));
@@ -1776,7 +1782,7 @@ Row.bar { resting: { bg: #cbd5e1 } }
 	CHECK(ui.bounds({ 12, 1 }).w >= 96.f); // A button remains content-sized when hosted by Row.
 	Painter painter; painter.begin(1140, 720, 1.5f); text.beginFrame(); ui.paint(painter, 1.5f);
 	const DrawList list = painter.finish();
-	for (const auto [index, expectedGlyphs] : { std::pair{ 4u, 15u }, std::pair{ 6u, 1u }, std::pair{ 8u, 6u } }) {
+	for (const auto& [index, expectedGlyphs] : {std::pair{4u, 15u}, std::pair{6u, 1u}, std::pair{8u, 6u}}) {
 		const Rect rect = ui.bounds({ index, 1 });
 		bool matchedClip = false;
 		f32 rightmostGlyph = -std::numeric_limits<f32>::infinity();

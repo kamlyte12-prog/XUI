@@ -272,12 +272,16 @@ TextureHandle GlDrawListRenderer::createTexture(const TextureDesc& d) {
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	GLint fmt = d.format == TextureFormat::A8 ? GL_ALPHA : GL_RGBA;
 	glTexImage2D(GL_TEXTURE_2D, 0, fmt, GLsizei(d.width), GLsizei(d.height), 0, fmt, GL_UNSIGNED_BYTE, d.pixels);
-	for (u32 i = 0;i < m_textures.size();++i)if (!m_textures[i].alive) {
-		auto& t = m_textures[i];t.name = name;
-		t.alive = true;t.format = d.format;
-		return{ i,t.generation };
-	}m_textures.push_back({ name,1,true,d.format });
-	return{ u32(m_textures.size() - 1),1 };
+	for (u32 i = 0; i < m_textures.size(); ++i)
+		if (!m_textures[i].alive) {
+			auto& t = m_textures[i];
+			t.name = name;
+			t.alive = true;
+			t.format = d.format;
+			return {i, t.generation};
+		}
+	m_textures.push_back({name, 1, true, d.format});
+	return {u32(m_textures.size() - 1), 1};
 }
 GlDrawListRenderer::Texture* GlDrawListRenderer::texture(TextureHandle h) {
 	return h.index < m_textures.size() && m_textures[h.index].alive &&

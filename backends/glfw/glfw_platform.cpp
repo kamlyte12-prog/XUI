@@ -26,7 +26,13 @@ namespace { void applySnapStyles(HWND hwnd); }
 
 bool GlfwPlatform::init(const PlatformDesc&) { return glfwInit() == GLFW_TRUE; }
 void GlfwPlatform::shutdown() {
-	for (Window& w : m_windows) if (w.native) { removeChrome(w); glfwDestroyWindow(w.native); }
+	for (Window& w : m_windows)
+		if (w.native) {
+#ifdef _WIN32
+			removeChrome(w);
+#endif
+			glfwDestroyWindow(w.native);
+		}
 	m_windows.clear();
 	if (m_cursor) glfwDestroyCursor(m_cursor);
 	m_cursor = nullptr;
@@ -74,7 +80,9 @@ WindowHandle GlfwPlatform::createWindow(const WindowDesc& d) {
 
 void GlfwPlatform::destroyWindow(WindowHandle h) {
 	Window* w = find(h); if (!w) return;
+#ifdef _WIN32
 	removeChrome(*w);
+#endif
 	glfwDestroyWindow(w->native); w->native = nullptr;
 }
 void GlfwPlatform::setWindowTitle(WindowHandle h, std::string_view s) { if (auto* w = find(h)) glfwSetWindowTitle(w->native, std::string(s).c_str()); }

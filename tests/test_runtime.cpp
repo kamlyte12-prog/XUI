@@ -76,7 +76,6 @@ namespace {
 		if (name == "onSubmit") ++*static_cast<u32*>(context);
 		if (name == "onChange") ++static_cast<u32*>(context)[1];
 	}
-	void recordDock(void* context, std::string_view) { ++*static_cast<u32*>(context); }
 	struct DockPressProbe { std::string last; };
 	void recordDockPress(void* context, std::string_view name) { static_cast<DockPressProbe*>(context)->last = name; }
 	struct CheckListProbe { UiRuntime* runtime = nullptr; u32 calls = 0; CheckListValue selected; };

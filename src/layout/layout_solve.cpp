@@ -203,7 +203,13 @@ namespace xui {
 			}
 			if (!anyOpen) break;
 			if (viol == 0) {
-				for (std::size_t k = 0; k < n; ++k) if (!items[k].frozen) { items[k].main = items[k].tent; items[k].frozen = true; } break;
+				for (std::size_t k = 0; k < n; ++k) {
+					if (!items[k].frozen) {
+						items[k].main = items[k].tent;
+						items[k].frozen = true;
+					}
+				}
+				break;
 			}
 			for (std::size_t k = 0; k < n; ++k) {
 				FlexItem& it = items[k]; if (it.frozen) continue;

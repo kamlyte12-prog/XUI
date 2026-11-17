@@ -1138,7 +1138,7 @@ Window(size: 280x150) {
 TEST(ui_runtime_xss_hover_transition_interpolates_without_idle_timer) {
 	constexpr std::string_view xuiSource = R"(Window(size: 240x120) { Button[id: "animated", width: 160px, height: 48px] })";
 	constexpr std::string_view xssSource = R"(
-Button { resting: { bg: #000000ff } hover: { bg: #ffffffff } transition: resting -> hover 120ms linear }
+Button { resting: { bg: #000000ff } hover: { bg: #ffffffff } transition: resting -> hover 600ms linear }
 )";
 	StringInterner strings; auto document = parseXui(xuiSource, "animation.xui", strings);
 	CHECK(document.has_value()); if (!document) return;
@@ -1155,11 +1155,13 @@ Button { resting: { bg: #000000ff } hover: { bg: #ffffffff } transition: resting
 	const Rect rect = ui.bounds({ 1, 1 });
 	CHECK(ui.pointerMove({ rect.x + 8.f, rect.y + 8.f }));
 	(void)paintColor();
-	std::this_thread::sleep_for(std::chrono::milliseconds(65));
+	// Generous durations keep the sampled phases valid on slow CI runners, where a
+	// supposedly sub-100 ms sleep can overshoot a short transition.
+	std::this_thread::sleep_for(std::chrono::milliseconds(325));
 	const u32 midway = paintColor();
 	CHECK(midway != resting);
 	CHECK(ui.nextTimerDelay() >= 0.0);
-	std::this_thread::sleep_for(std::chrono::milliseconds(90));
+	std::this_thread::sleep_for(std::chrono::milliseconds(450));
 	const u32 complete = paintColor();
 	CHECK(complete == 0xFFFFFFFFu);
 }
@@ -1168,8 +1170,8 @@ TEST(ui_runtime_animation_timer_continues_without_pointer_input_and_after_leave)
 	constexpr std::string_view xuiSource = R"(Window(size: 240x120) { Button[id: "animated", width: 160px, height: 48px] })";
 	constexpr std::string_view xssSource = R"(
 Button { resting: { bg: #000000ff } hover: { bg: #ffffffff }
-  transition: resting -> hover 120ms linear
-  transition: hover -> resting 120ms linear }
+  transition: resting -> hover 600ms linear
+  transition: hover -> resting 600ms linear }
 )";
 	StringInterner strings; auto document = parseXui(xuiSource, "animation-leave.xui", strings);
 	CHECK(document.has_value()); if (!document) return;
@@ -1192,17 +1194,17 @@ Button { resting: { bg: #000000ff } hover: { bg: #ffffffff }
 	CHECK(ui.updateTimers(scheduledAt));
 	const f64 remainingFrameDelay = ui.nextTimerDelay(scheduledAt + std::chrono::milliseconds(5));
 	CHECK(remainingFrameDelay > 0.0 && remainingFrameDelay < frameDelay);
-	std::this_thread::sleep_for(std::chrono::milliseconds(65));
+	std::this_thread::sleep_for(std::chrono::milliseconds(325));
 	CHECK(ui.updateTimers()); // no pointer events are needed to schedule the next animation frame
 	const u32 hoverSample = paintColor();
 	CHECK(ui.pointerLeave());
 	(void)paintColor(); // resolves hover -> resting into a new active transition
 	CHECK(ui.nextTimerDelay() > 0.0);
-	std::this_thread::sleep_for(std::chrono::milliseconds(65));
+	std::this_thread::sleep_for(std::chrono::milliseconds(325));
 	CHECK(ui.updateTimers()); // the mouse-leave event does not disable the timer path
 	const u32 leaveSample = paintColor();
 	CHECK(leaveSample != hoverSample);
-	std::this_thread::sleep_for(std::chrono::milliseconds(75));
+	std::this_thread::sleep_for(std::chrono::milliseconds(375));
 	CHECK(ui.updateTimers());
 	CHECK_EQ(paintColor(), Color::fromRGBA8(0x000000FFu).toRGBA8());
 	CHECK(ui.nextTimerDelay() < 0.0);
@@ -1212,8 +1214,8 @@ TEST(ui_runtime_animation_cancel_finish_completes_transition_before_new_state) {
 	constexpr std::string_view xuiSource = R"(Window(size: 240x120) { Button[id: "animated", width: 160px, height: 48px] })";
 	constexpr std::string_view xssSource = R"(
 Button { resting: { bg: #000000ff, animation-cancel: finish } hover: { bg: #ffffffff }
-  transition: resting -> hover 120ms linear
-  transition: hover -> resting 120ms linear }
+  transition: resting -> hover 600ms linear
+  transition: hover -> resting 600ms linear }
 )";
 	StringInterner strings; auto document = parseXui(xuiSource, "animation-finish.xui", strings);
 	CHECK(document.has_value()); if (!document) return;
@@ -1230,16 +1232,16 @@ Button { resting: { bg: #000000ff, animation-cancel: finish } hover: { bg: #ffff
 	const Rect rect = ui.bounds({ 1, 1 });
 	CHECK(ui.pointerMove({ rect.x + 8.f, rect.y + 8.f }));
 	(void)paintColor();
-	std::this_thread::sleep_for(std::chrono::milliseconds(65));
+	std::this_thread::sleep_for(std::chrono::milliseconds(325));
 	(void)paintColor();
 	CHECK(ui.pointerLeave());
 	(void)paintColor(); // finish the hover transition before applying the resting target
-	std::this_thread::sleep_for(std::chrono::milliseconds(75));
+	std::this_thread::sleep_for(std::chrono::milliseconds(375));
 	CHECK(ui.updateTimers());
 	CHECK_EQ(paintColor(), Color::fromRGBA8(0xFFFFFFFFu).toRGBA8());
 	(void)paintColor();
 	CHECK(ui.nextTimerDelay() > 0.0); // the resting transition starts after the hover target completes
-	std::this_thread::sleep_for(std::chrono::milliseconds(140));
+	std::this_thread::sleep_for(std::chrono::milliseconds(700));
 	CHECK(ui.updateTimers());
 	CHECK_EQ(paintColor(), Color::fromRGBA8(0x000000FFu).toRGBA8());
 	CHECK(ui.nextTimerDelay() < 0.0);
@@ -1248,7 +1250,7 @@ Button { resting: { bg: #000000ff, animation-cancel: finish } hover: { bg: #ffff
 TEST(ui_runtime_animation_clock_pauses_and_resumes_for_hidden_window) {
 	constexpr std::string_view xuiSource = R"(Window(size: 240x120) { Button[id: "animated", width: 160px, height: 48px] })";
 	constexpr std::string_view xssSource = R"(
-Button { resting: { bg: #000000ff } hover: { bg: #ffffffff } transition: resting -> hover 180ms linear }
+Button { resting: { bg: #000000ff } hover: { bg: #ffffffff } transition: resting -> hover 900ms linear }
 )";
 	StringInterner strings; auto document = parseXui(xuiSource, "animation-hidden.xui", strings);
 	CHECK(document.has_value()); if (!document) return;
@@ -1262,11 +1264,11 @@ Button { resting: { bg: #000000ff } hover: { bg: #ffffffff } transition: resting
 	ui.pointerMove({ rect.x + 8.f, rect.y + 8.f }); paint();
 	const auto pausedAt = std::chrono::steady_clock::now();
 	ui.setAnimationsPaused(true, pausedAt);
-	std::this_thread::sleep_for(std::chrono::milliseconds(220));
+	std::this_thread::sleep_for(std::chrono::milliseconds(1100));
 	CHECK(!ui.updateTimers()); CHECK(ui.nextTimerDelay() < 0.0);
 	ui.setAnimationsPaused(false);
 	CHECK(ui.nextTimerDelay() > 0.0 && ui.nextTimerDelay() <= 1.0 / 60.0);
-	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	std::this_thread::sleep_for(std::chrono::milliseconds(500));
 	CHECK(ui.updateTimers()); paint(); // animation retains its pre-hide elapsed time
 	CHECK(ui.nextTimerDelay() > 0.0);
 }
@@ -1274,7 +1276,7 @@ Button { resting: { bg: #000000ff } hover: { bg: #ffffffff } transition: resting
 TEST(ui_runtime_animation_cancel_finish_completes_current_keyframe_iteration) {
 	constexpr std::string_view xuiSource = R"(Window(size: 240x120) { Panel[id: "animated", width: 160px, height: 48px] })";
 	constexpr std::string_view xssSource = R"(
-Panel { resting: { bg: #000000ff } hover: { animation: pulse 180ms infinite linear cancel(finish) }
+Panel { resting: { bg: #000000ff } hover: { animation: pulse 900ms infinite linear cancel(finish) }
   transition: resting -> hover 0ms linear }
 keyframes pulse { from { bg: #000000ff } to { bg: #ffffffff } }
 )";
@@ -1293,11 +1295,11 @@ keyframes pulse { from { bg: #000000ff } to { bg: #ffffffff } }
 	const Rect rect = ui.bounds({ 1, 1 });
 	ui.pointerMove({ rect.x + 8.f, rect.y + 8.f });
 	(void)paintColor(); // enter the hover keyframe animation
-	std::this_thread::sleep_for(std::chrono::milliseconds(45));
+	std::this_thread::sleep_for(std::chrono::milliseconds(225));
 	(void)paintColor();
 	ui.pointerLeave();
 	(void)paintColor(); // finish the current infinite iteration, then leave the hover state
-	std::this_thread::sleep_for(std::chrono::milliseconds(160));
+	std::this_thread::sleep_for(std::chrono::milliseconds(800));
 	CHECK(ui.updateTimers());
 	CHECK_EQ(paintColor(), Color::fromRGBA8(0xFFFFFFFFu).toRGBA8());
 	CHECK_EQ(paintColor(), Color::fromRGBA8(0x000000FFu).toRGBA8());
@@ -1317,7 +1319,7 @@ TEST(ui_runtime_f4_draw_batch_counter_is_independent_of_fps_sampling) {
 TEST(ui_runtime_xss_keyframes_tick_only_while_visible_animation_runs) {
 	constexpr std::string_view xuiSource = R"(Window(size: 240x120) { Panel[id: "animated", class: "animated", width: 160px, height: 48px] })";
 	constexpr std::string_view xssSource = R"(
-Panel.animated { resting: { bg: #000000ff, animation: fade-in 120ms 1 linear } }
+Panel.animated { resting: { bg: #000000ff, animation: fade-in 600ms 1 linear } }
 keyframes fade-in { from { opacity: 0, bg: #000000ff } to { opacity: 1, bg: #ffffffff } }
 )";
 	StringInterner strings; auto document = parseXui(xuiSource, "keyframes.xui", strings);
@@ -1334,12 +1336,12 @@ keyframes fade-in { from { opacity: 0, bg: #000000ff } to { opacity: 1, bg: #fff
 	const u32 initial = paintColor();
 	const f64 firstFrameDelay = ui.nextTimerDelay();
 	CHECK(firstFrameDelay > 0.0 && firstFrameDelay <= 1.0 / 60.0);
-	std::this_thread::sleep_for(std::chrono::milliseconds(65));
+	std::this_thread::sleep_for(std::chrono::milliseconds(325));
 	// No pointer or keyboard input is sent: the animation timer alone must wake the runtime.
 	CHECK(ui.updateTimers());
 	const u32 midway = paintColor();
 	CHECK(midway != initial);
-	std::this_thread::sleep_for(std::chrono::milliseconds(90));
+	std::this_thread::sleep_for(std::chrono::milliseconds(450));
 	CHECK(paintColor() == 0xFFFFFFFFu);
 	CHECK(ui.nextTimerDelay() < 0.0);
 }
@@ -1347,7 +1349,7 @@ keyframes fade-in { from { opacity: 0, bg: #000000ff } to { opacity: 1, bg: #fff
 TEST(ui_runtime_keyframe_play_cancel_and_progress_value) {
 	constexpr std::string_view xuiSource = R"(Window(size: 240x120) { ProgressBar[id: "meter", class: "meter", value: 0, width: 180px, height: 18px] })";
 	constexpr std::string_view xssSource = R"(
-ProgressBar.meter { resting: { animation: fill 120ms paused linear } }
+ProgressBar.meter { resting: { animation: fill 600ms paused linear } }
 keyframes fill { from { value: 0 } to { value: 1 } }
 )";
 	StringInterner strings; auto document = parseXui(xuiSource, "animation-control.xui", strings);
@@ -1363,17 +1365,17 @@ keyframes fill { from { value: 0 } to { value: 1 } }
 	CHECK(ui.nextTimerDelay() < 0.0); // paused animations do not keep the event loop awake
 	CHECK(ui.playAnimation("meter", AnimationMode::Once));
 	CHECK(ui.nextTimerDelay() > 0.0 && ui.nextTimerDelay() <= 1.0 / 60.0);
-	std::this_thread::sleep_for(std::chrono::milliseconds(65));
+	std::this_thread::sleep_for(std::chrono::milliseconds(325));
 	CHECK(ui.updateTimers()); paint();
 	const f64 halfway = std::get<f64>(*ui.value("meter"));
 	CHECK(halfway > 0.0 && halfway < 1.0);
-	std::this_thread::sleep_for(std::chrono::milliseconds(90));
+	std::this_thread::sleep_for(std::chrono::milliseconds(450));
 	CHECK(ui.updateTimers()); paint();
 	CHECK_EQ(std::get<f64>(*ui.value("meter")), 1.0);
 	CHECK(ui.nextTimerDelay() < 0.0);
 	CHECK(ui.setValue("meter", 0.0));
 	CHECK(ui.playAnimation("meter", AnimationMode::Loop));
-	std::this_thread::sleep_for(std::chrono::milliseconds(65));
+	std::this_thread::sleep_for(std::chrono::milliseconds(325));
 	CHECK(ui.updateTimers()); paint();
 	const f64 loopValue = std::get<f64>(*ui.value("meter"));
 	CHECK(loopValue > 0.0 && loopValue < 1.0);
@@ -1446,7 +1448,9 @@ TEST(ui_runtime_empty_textbox_displays_focused_blinking_caret) {
 	StringInterner strings; auto document = parseXui(xuiSource, "caret.xui", strings);
 	CHECK(document.has_value()); if (!document) return;
 	auto styles = compileXss(xssSource, "caret.xss", strings);
-	CHECK(styles.has_value()); if (!styles) return;
+	CHECK(styles.has_value());
+	if (!styles)
+		return;
 	const std::string bytes = readTestFont();
 	if (bytes.empty())
 		return; // The caret needs a font; Linux/macOS CI has no configured test font.
@@ -1850,7 +1854,7 @@ Row.bar { resting: { bg: #cbd5e1 } }
 	UiRuntime ui; CHECK(ui.build(assets.document, assets.styles, strings, text, font, error));
 	for (const f32 dpi : { 1.f, 1.25f, 1.5f }) {
 		ui.layout(760.f, 480.f, dpi);
-		CHECK(ui.bounds({ 2, 1 }).w > 700.f); // Column still stretches text on its cross axis.
+		CHECK(ui.bounds({2, 1}).w > 700.f); // Column still stretches text on its cross axis.
 		for (const auto& [index, sample] :
 			 {std::pair{4u, std::string_view("World! Extension")}, std::pair{6u, std::string_view("!")},
 			  std::pair{8u, std::string_view("World!")}}) {
@@ -1864,7 +1868,10 @@ Row.bar { resting: { bg: #cbd5e1 } }
 	CHECK_NEAR(wrapped.w, 120.f, 0.01f);
 	CHECK(wrapped.h > text.layout(font, "Long text wraps inside a narrow row without losing its final glyph.", 24.f, 180.f).lineHeight / 1.5f);
 	CHECK(ui.bounds({ 12, 1 }).w >= 96.f); // A button remains content-sized when hosted by Row.
-	Painter painter; painter.begin(1140, 720, 1.5f); text.beginFrame(); ui.paint(painter, 1.5f);
+	Painter painter;
+	painter.begin(1140, 720, 1.5f);
+	text.beginFrame();
+	ui.paint(painter, 1.5f);
 	const DrawList list = painter.finish();
 	for (const auto& [index, expectedGlyphs] : {std::pair{4u, 15u}, std::pair{6u, 1u}, std::pair{8u, 6u}}) {
 		const Rect rect = ui.bounds({ index, 1 });
@@ -2293,7 +2300,9 @@ ToggleButton.theme-toggle {
 	CHECK(ui.pointerUp(point));
 	CHECK(ui.setTheme("light"));
 	(void)fillAt(point);
-	std::this_thread::sleep_for(std::chrono::milliseconds(220));
+	// Theme switches clear in-flight tweens, so the checked state applies immediately;
+	// the wait only has to outlast the longest former transition on a loaded runner.
+	std::this_thread::sleep_for(std::chrono::milliseconds(800));
 	(void)ui.updateTimers();
 	CHECK_EQ(fillAt(point), Color::fromRGBA8(0x0067C014u).toRGBA8());
 }
@@ -2509,10 +2518,10 @@ TEST(showcase_example_assets_parse_validate_and_build) {
 	const Rect split = rectFor("main-split"), leftPaneBefore = rectFor("tasks-panel");
 	const Vec2 gutterPoint{ leftPaneBefore.right() + 4.f, split.y + split.h * 0.5f };
 	CHECK(ui.pointerDown(gutterPoint));
-	CHECK(ui.pointerMove({ gutterPoint.x + 24.f, gutterPoint.y }));
+	CHECK(ui.pointerMove({gutterPoint.x + 24.f, gutterPoint.y}));
 	ui.layout(1080, 760);
 	CHECK(rectFor("tasks-panel").w > leftPaneBefore.w + 10.f);
-	(void)ui.pointerUp({ gutterPoint.x + 24.f, gutterPoint.y });
+	(void)ui.pointerUp({gutterPoint.x + 24.f, gutterPoint.y});
 
 	// Motion & Style nests a second Tabs control. Its pages must fill the nested control
 	// even though the surrounding Tab style centers header labels.

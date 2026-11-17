@@ -271,8 +271,8 @@ int main(int argc, char** argv) {
 	}
 	else if (profileCase == "docking") {
 		app.runtime().setValue("demo-sections", xui::u32{ 6 });
-		for (const auto [id, bounds] : { std::pair{ "dock-hierarchy", xui::Rect{ 70.f, 110.f, 300.f, 240.f } },
-			std::pair{ "dock-inspector", xui::Rect{ 200.f, 170.f, 300.f, 240.f } } }) {
+		for (const auto& [id, bounds] : {std::pair{"dock-hierarchy", xui::Rect{70.f, 110.f, 300.f, 240.f}},
+										 std::pair{"dock-inspector", xui::Rect{200.f, 170.f, 300.f, 240.f}}}) {
 			if (auto value = app.runtime().value(id)) {
 				if (auto panel = std::get_if<xui::DockPanelValue>(&*value)) {
 					xui::DockPanelValue floating = *panel;

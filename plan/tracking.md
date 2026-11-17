@@ -2,6 +2,40 @@
 
 This file records project changes, design decisions, trade-offs, current status, and next steps. It is updated as implementation work lands.
 
+## 2026-11-17 — Fluent Windows 11 showcase, correct GLFW DPI, and crisp lines
+
+### Audit and findings
+
+- The showcase was visually dated and did not exercise the newer Fluent vocabulary, theme switching, or the full eight-section structure. The redesign keeps authored structure/layout in `showcase.xui` and all paint/state decisions in `showcase.xss`.
+- A live audit at the local 125% monitor (`AppliedDPI=120`) exposed a real DPI contract bug. `windowSizeLogical()` returned `glfwGetWindowSize()`, which is physical on Windows/X11, while the renderer used the framebuffer and the painter scaled by `dpiScale()`. The authored 1080×760 window was created 1080 px wide and laid out at 864×608 logical, clipping the custom title bar and the rightmost tabs. The window/framebuffer/content-scale relationship was not normalized.
+- `windowClientScreenOrigin()` added `glfwGetWindowFrameSize()` to `glfwGetWindowPos()`. Win32 implements `glfwGetWindowPos()` with `ClientToScreen(0, 0)`, so it already reports the content-area origin; the frame addition double-counted decorated borders and could offset in-app floating-panel placement.
+- A 1 dp stroke at fractional DPI could cover 1.25 physical pixels and split into two half-alpha rows. SDF coverage already antialiases sloped edges, so only the integer width and axis-aligned perpendicular placement needed snapping.
+- Additional layout/runtime findings: Grid leaves returned intrinsic content even when the solver constrained them to a fixed/stretched cell; inherited text `align` leaked into layout and stopped Grid cells from stretching; nested Tabs pages shrank and centered when the `Tab` selector carried `align: Center`; wrapping quantized the available width with `floor`, so an exact-fit string such as `11` wrapped; and a theme switch replayed style tweens that captured the previous theme's colors.
+
+### Changes and decisions
+
+- Rebuilt the showcase as a Windows 11/Fluent surface: dark Mica-like gradient shell, custom borderless `TitleBar` with framework min/max/close buttons, `#60CDFF` accent, translucent section cards, eight equal-width tabs, live theme toggle/readout, checklists, split panes, docking, images, and Motion & Style transitions/keyframes. The named `@theme light` overrides paint tokens only; layout geometry remains authored.
+- Runtime/layout fixes: resolved Grid children fill their stretched/percentage cells; inherited text alignment no longer drives layout alignment; Tabs pages force cross-axis stretch; text wrap width uses `ceil`; multi-value `pad`, checkbox/CheckItem outlines, and nested animation layout were corrected for the showcase. `setTheme()` clears in-flight `styleTweens` so old-theme colors cannot leak into the new palette.
+- GLFW DPI normalization: a `GlfwScale` helper derives `toLogical` and `content` scales from window size, framebuffer size, and `glfwGetWindowContentScale()`; `GLFW_SCALE_TO_MONITOR` makes `WindowDesc` sizes logical; window, pointer, wheel, and window-position coordinates normalize to logical pixels; `windowClientScreenOrigin` now uses only `glfwGetWindowPos`; and a content-scale callback queues `DpiChange` (new scale in `.scale`, old in `.w`) and invokes the live-resize hook so an OS move can relayout immediately.
+- Crisp strokes: `Painter::capsule()` rounds stroke width to a whole physical pixel and snaps the perpendicular center of axis-aligned strokes with `round(center - r) + r`. Diagonal strokes keep their authored geometry and analytic SDF coverage. Snapping remains disableable through the existing painter option for geometry authoring.
+- Rendering decision: do **not** enable 4× MSAA. The showcase has no `DrawCmd::Custom` 3D viewport, SDF primitives already receive exact analytic coverage (the PPAA-equivalent path), and a 4× backbuffer would only add bandwidth/memory cost without improving widget edges.
+- Refreshed `docs/showcase.png` from a PMv2-aware 1350×950 capture of the Containers tab, downscaled to 1080×760 so it matches the README's checklist/splitter/readout caption.
+
+### Verification
+
+- Full dev build succeeded and `ctest --preset dev --output-on-failure` passed **1/1**; the direct suite reports **228 tests, 0 failed**. All five existing golden images still pass unchanged, so no golden regeneration was needed.
+- Added four render regressions: axis-aligned separator edges land on pixel boundaries; fractional-DPI line widths round to whole pixels; snapping can be disabled; diagonal lines keep analytic coverage. Added runtime regressions for Grid cell filling, Tabs page stretch under centered alignment, and clearing theme transitions, plus a text exact-fit wrap regression.
+- Live verification on the single 125% monitor with a per-monitor-v2-aware capture/input process: client **1350×950 physical**, logical **1080×760**, `dpi=120`, `dpiScale=1.25`; all eight tabs and the full title bar fit. A click at physical `(758,219)` selected **Display** and updated the readout to **Section 5**; a click at physical `(976,102)` toggled **Light mode** and updated the readout to **Light · Mica**. This exercises window→client→logical pointer mapping, not just rendering.
+- 1:1 and 2× nearest-neighbor crops of the capture show single-pixel tab rules and crisp text/edges at 125%.
+- Visible continuous `--profile` run (dev build, VSync disabled): **981 frames / 5.00171 s / 196.133 FPS**. This is bounded continuous-render throughput, not interactive drag/resize pacing.
+
+### Limits and next steps
+
+- Only one 125% monitor is available here, so a real cross-monitor DPI move was not exercised. The app-level `DpiChange` path is covered by the null-platform test; the GLFW content-scale callback was not driven by an actual monitor transition.
+- SVG images still rasterize into 64-pixel-aligned size buckets and can be downscaled with linear filtering; fine vector strokes may still soften. This pass did not change the image raster policy.
+- Linux/macOS builds and the full hosted matrix are still pending this push. Visible interaction was spot-checked (tab selection and theme switch), not exhaustively re-run across every tab, popup, drag, resize, and close path.
+- Next: verify a mixed-DPI monitor transition, consider finer SVG raster buckets or vector draw commands for fine line art, and confirm the hosted CI matrix after pushing.
+
 ## 2026-11-14 — Clear the remaining Linux and macOS hosted findings
 
 - Cause: the second hosted run still failed on three portability findings and one sanitizer report. GCC 13 rejected two test loops whose structured bindings copied `std::pair` elements (`-Wrange-loop-construct`). Clang 18 and macOS rejected an unused `beginSystemResize` edge parameter and a `requestRedraw` variable set only to test the handle, and Clang rejected an OpenGL statement indented as if it belonged to the preceding `for` loop. The ASan/UBSan log also showed `CHECK(hasCaret())` failing before an invalid-vptr call from `GlyphAtlas::shutdown()`: the caret test only looks for Windows font paths, so Linux had no font and never painted a caret, and the test declared its `TextSystem` before the renderer backing the atlas, destroying that renderer first.

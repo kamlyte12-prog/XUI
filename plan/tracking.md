@@ -33,8 +33,8 @@ This file records project changes, design decisions, trade-offs, current status,
 
 - Only one 125% monitor is available here, so a real cross-monitor DPI move was not exercised. The app-level `DpiChange` path is covered by the null-platform test; the GLFW content-scale callback was not driven by an actual monitor transition.
 - SVG images still rasterize into 64-pixel-aligned size buckets and can be downscaled with linear filtering; fine vector strokes may still soften. This pass did not change the image raster policy.
-- Linux/macOS builds and the full hosted matrix are still pending this push. Visible interaction was spot-checked (tab selection and theme switch), not exhaustively re-run across every tab, popup, drag, resize, and close path.
-- Next: verify a mixed-DPI monitor transition, consider finer SVG raster buckets or vector draw commands for fine line art, and confirm the hosted CI matrix after pushing.
+- Hosted CI passed after the branch was pushed: Linux GCC 13, GCC 13 ASan/UBSan, and Clang 18; macOS 15; Windows 2022; and the format, clang-tidy, fuzz, and package-consumer jobs. The push exposed a latent GCC `-Werror=misleading-indentation` line in the OpenGL draw-list renderer plus structured-binding copies in the showcase and game loops; those are fixed. Wall-clock animation tests were widened after a loaded macOS runner completed short transitions before the sampled phase. Visible interaction was spot-checked (tab selection and theme switch), not exhaustively re-run across every tab, popup, drag, resize, and close path.
+- Next: verify a mixed-DPI monitor transition, consider finer SVG raster buckets or vector draw commands for fine line art, and finish the visible interaction checklist (text entry, popups, hover/cursor, scroll, split/dock gestures, continuous resize, normal close).
 
 ## 2026-11-14 — Clear the remaining Linux and macOS hosted findings
 

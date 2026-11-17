@@ -366,6 +366,12 @@ TEST(text_shaping_matches_pen_advance_sum) {
 	CHECK(&l == &l2);
 	CHECK_EQ(ts.cacheCount(), 1u);
 	CHECK_EQ(ts.rasterCount(), 0u);      // shaping is independent from glyph rasterisation
+	// A text box measured from its own ink width must not wrap because the wrap width is
+	// quantized down: adjacent narrow glyphs ("11") are the common exact-fit case.
+	const TextLayout ones = ts.layout(fh, "11", 16);
+	const TextLayout exactFit = ts.layout(fh, "11", 16, ones.width);
+	CHECK_EQ(exactFit.glyphs.size(), 2u);
+	CHECK_EQ(exactFit.lineStarts.size(), 1u);
 	nr.shutdown();
 }
 

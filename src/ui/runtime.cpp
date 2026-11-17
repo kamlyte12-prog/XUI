@@ -719,6 +719,11 @@ namespace xui {
 			m_styles->resolve(node.styleSet, states, m_theme, node.style);
 			node.resolvedStates = states;
 			node.styleResolved = true;
+			// In-flight transitions captured their start and target values from the
+			// previous theme's palette. Replaying them after a theme switch would keep
+			// painting old-theme colors until the next state change (for example a
+			// hovered checked toggle staying on the dark pressed fill in light mode).
+			node.styleTweens.clear();
 			node.inheritedTextMask = 0;
 			if (node.parentIndex < i) {
 				const PropId inherited[] = { PropId::Font, PropId::FontSize, PropId::FontWeight, PropId::Fg, PropId::Align, PropId::LetterSpacing };
@@ -1452,6 +1457,11 @@ namespace xui {
 			m_nodes[runtimeIndex].selectedTab = std::min(m_nodes[runtimeIndex].selectedTab, pageCount - 1);
 			LayoutStyle tabsStyle = m_layout.style(m_nodes[runtimeIndex].layout);
 			tabsStyle.padding.t += 34.f;
+			// Pages always fill the tab content box. Alignment is inherited through the style
+			// cascade (`Tab { align: Center }` centers header labels), and applying that to the
+			// Stack would center an intrinsic-width page and let its content spill outside the
+			// control once text or nested tabs are wider than the workspace.
+			tabsStyle.alignItems = Align::Stretch;
 			m_layout.setStyle(m_nodes[runtimeIndex].layout, tabsStyle);
 		}
 		if (m_nodes[runtimeIndex].titleBar && m_nodes[runtimeIndex].titleBarButtons) {
@@ -2392,7 +2402,13 @@ namespace xui {
 		}
 		if (node.style.has(PropId::Grow)) layoutStyle.grow = number(node.style.get(PropId::Grow), 0);
 		if (node.style.has(PropId::Shrink)) layoutStyle.shrink = number(node.style.get(PropId::Shrink), 0, 1);
-		if (node.style.has(PropId::Align)) layoutStyle.alignItems = align(node.style.get(PropId::Align).atoms[0]);
+		// `align` doubles as the inherited text alignment, so a container may carry an
+		// ancestor's value in its style table. Layout alignment is not inherited: applying
+		// that copy here would make a Grid nested under `Column.page { align: Start }`
+		// start-align its cells instead of stretching them across their tracks.
+		constexpr u8 kInheritedAlign = u8{1} << 4; // index in the inherited text-prop list
+		if (node.style.has(PropId::Align) && !(node.inheritedTextMask & kInheritedAlign))
+			layoutStyle.alignItems = align(node.style.get(PropId::Align).atoms[0]);
 		if (node.style.has(PropId::Justify)) layoutStyle.justify = justify(node.style.get(PropId::Justify).atoms[0]);
 		m_layout.setStyle(node.layout, layoutStyle);
 	}

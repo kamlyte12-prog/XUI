@@ -1046,6 +1046,47 @@ Window(size: 420x220) {
 	CHECK(automatic.y > spanning.bottom());
 }
 
+TEST(ui_runtime_grid_children_fill_stretched_cells) {
+	constexpr std::string_view xuiSource = R"(
+Window(size: 400x200) {
+  Column {
+    Grid("100px|1fr")[id: "grid", rows: "40px", gap: 8px, width: 100%, height: 80px] {
+      Text("Fixed cell")[id: "fixed-cell", gridColumn: 0, gridRow: 0]
+      Text("Flexible cell")[id: "flexible-cell", gridColumn: 1, gridRow: 0]
+    }
+  }
+}
+)";
+	// `align` doubles as inherited text alignment. A page-level start alignment must not
+	// leak into the Grid container and disable cell stretching.
+	constexpr std::string_view xssSource = R"(
+Column { resting: { align: Start } }
+)";
+	StringInterner strings;
+	UiAssetBundle assets;
+	std::string error;
+	CHECK(loadUiAssets(xuiSource, xssSource, strings, assets, error));
+	if (!error.empty()) {
+		std::cerr << "grid stretch assets: " << error << '\n';
+		return;
+	}
+	TextSystem text;
+	UiRuntime ui;
+	CHECK(ui.build(assets.document, assets.styles, strings, text, {}, error));
+	if (!error.empty()) {
+		std::cerr << "grid stretch build: " << error << '\n';
+		return;
+	}
+	ui.layout(400.f, 200.f);
+	const Rect fixed = ui.bounds({3, 1});
+	const Rect flexible = ui.bounds({4, 1});
+	CHECK_NEAR(fixed.w, 100.f, 0.01f);
+	CHECK(fixed.right() <= flexible.x);
+	CHECK(flexible.w > fixed.w);
+	CHECK_NEAR(fixed.h, 40.f, 0.01f);
+	CHECK_NEAR(flexible.h, 40.f, 0.01f);
+}
+
 TEST(ui_runtime_grid_rejects_invalid_track_definitions) {
 	for (const std::string_view tracks : { "0fr|auto", "12px||1fr", "1px|2px|3px|4px|5px|6px|7px|8px|9px" }) {
 		const std::string xui = "Window(size: 200x100) { Grid(\"" + std::string(tracks) + "\") { Text(\"cell\") } }";
@@ -1478,6 +1519,49 @@ Window(size: 320x180) {
 	CHECK(ui.pointerDown(point)); CHECK(ui.pointerUp(point));
 	CHECK_EQ(events.size(), std::size_t{ 1 });
 	if (!events.empty()) CHECK_EQ(events.front(), "onVisible");
+}
+
+TEST(ui_runtime_tabs_pages_fill_content_box_when_alignment_is_centered) {
+	constexpr std::string_view xuiSource = R"(
+Window(size: 420x260) {
+  Tabs[id: "outer", selected: 0, width: 100%, height: 100%] {
+    Tab(title: "Outer") {
+      Tabs[id: "inner", selected: 0, width: 100%, height: 100%] {
+        Tab(title: "Inner") {
+          Panel[width: 620px, height: 40px]
+        }
+        Tab(title: "Other") { Text("Other page") }
+      }
+    }
+  }
+})";
+	// A Tab's align declaration is also used for its header label. It must not shrink-wrap
+	// and center the page inside a nested Tabs control.
+	constexpr std::string_view xssSource = R"(
+Tab { resting: { align: Center } }
+)";
+	StringInterner strings;
+	auto document = parseXui(xuiSource, "tabs-fill.xui", strings);
+	CHECK(document.has_value());
+	if (!document)
+		return;
+	auto styles = compileXss(xssSource, "tabs-fill.xss", strings);
+	CHECK(styles.has_value());
+	if (!styles)
+		return;
+	TextSystem text;
+	UiRuntime ui;
+	std::string error;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error));
+	if (!error.empty())
+		return;
+	ui.layout(420.f, 260.f);
+	const Rect inner = ui.bounds({3, 1});
+	const Rect page = ui.bounds({4, 1});
+	CHECK(!inner.empty() && !page.empty());
+	CHECK(page.x >= inner.x - 0.01f);
+	CHECK(page.right() <= inner.right() + 0.01f);
+	CHECK(page.w <= inner.w + 0.01f);
 }
 
 TEST(cross_platform_example_assets_parse_and_build_in_shared_runtime) {
@@ -2119,6 +2203,101 @@ Tooltip { resting: { bg: #202a40, fg: #ffffff, pad: 6px, radius: 4px } }
 	CHECK(events.back() == "onSecond");
 }
 
+TEST(ui_runtime_theme_switch_clears_transitions_started_in_previous_theme) {
+	constexpr std::string_view xuiSource = R"(
+Window(size: 320x160) {
+  ToggleButton(label: "Light mode")[id: "theme-toggle", class: "theme-toggle", width: 140px, height: 36px]
+}
+)";
+	constexpr std::string_view xssSource = R"(
+tokens {
+  color.chip = #ffffff0a
+  color.surface-hover = #1d2e4a
+  color.surface-pressed = #0b1422
+  color.accent-soft = #60cdff1c
+  color.accent = #60cdff
+  color.accent-border = #60cdff66
+  color.stroke = #ffffff14
+  color.text = #f2f7ff
+  color.text-secondary = #a7b6cb
+}
+@theme light {
+  tokens {
+    color.chip = #0f172a08
+    color.surface-hover = #e8eef8
+    color.surface-pressed = #dce5f2
+    color.accent-soft = #0067c014
+    color.accent = #0067c0
+    color.accent-border = #0067c066
+    color.stroke = #0f172a1a
+    color.text = #16202f
+    color.text-secondary = #4e5e74
+  }
+}
+ToggleButton.theme-toggle {
+  resting: { bg: color.chip, fg: color.text-secondary, border: 1px solid color.stroke, radius: 6px }
+  hover: { bg: color.surface-hover, fg: color.text }
+  pressed: { bg: color.surface-pressed }
+  checked: { bg: color.accent-soft, fg: color.accent, border: 1px solid color.accent-border }
+  focus: { outline: 2px solid color.accent-border, outline-offset: 2px }
+  transition: resting -> hover 140ms ease-out
+  transition: hover -> resting 180ms ease-out
+}
+)";
+	StringInterner strings;
+	auto document = parseXui(xuiSource, "theme-tween.xui", strings);
+	CHECK(document.has_value());
+	if (!document)
+		return;
+	auto styles = compileXss(xssSource, "theme-tween.xss", strings);
+	CHECK(styles.has_value());
+	if (!styles)
+		return;
+	TextSystem text;
+	UiRuntime ui;
+	std::string error;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error));
+	if (!error.empty())
+		return;
+	ui.layout(320.f, 160.f);
+	Painter painter;
+	auto fillAt = [&](Vec2 point) {
+		painter.begin(320, 160, 1.f);
+		ui.paint(painter, 1.f);
+		const DrawList list = painter.finish();
+		u32 fill = 0;
+		for (u32 i = 0; i + 3 < list.nVerts; i += 4) {
+			// Focus outlines are border-only rounded rectangles: their quad still covers
+			// the button centre but carries a transparent fill. Track the topmost filled
+			// rectangle instead.
+			if (list.verts[i].prim != static_cast<u8>(Prim::RoundRect) || (list.verts[i].c0 & 0xFFu) == 0)
+				continue;
+			f32 left = list.verts[i].x, right = left, top = list.verts[i].y, bottom = top;
+			for (u32 k = 1; k < 4; ++k) {
+				left = std::min(left, list.verts[i + k].x);
+				right = std::max(right, list.verts[i + k].x);
+				top = std::min(top, list.verts[i + k].y);
+				bottom = std::max(bottom, list.verts[i + k].y);
+			}
+			if (point.x >= left && point.x <= right && point.y >= top && point.y <= bottom)
+				fill = list.verts[i].c0;
+		}
+		return fill;
+	};
+	const Rect toggle = ui.bounds({1, 1});
+	const Vec2 point{toggle.x + 8.f, toggle.y + toggle.h * 0.5f};
+	CHECK(ui.pointerMove(point));
+	(void)fillAt(point); // begin the resting -> hover transition in the dark palette
+	CHECK(ui.pointerDown(point));
+	(void)fillAt(point); // pressing retargets the transition to the dark pressed color
+	CHECK(ui.pointerUp(point));
+	CHECK(ui.setTheme("light"));
+	(void)fillAt(point);
+	std::this_thread::sleep_for(std::chrono::milliseconds(220));
+	(void)ui.updateTimers();
+	CHECK_EQ(fillAt(point), Color::fromRGBA8(0x0067C014u).toRGBA8());
+}
+
 TEST(controls_example_assets_parse_validate_and_build) {
 	const std::string xuiSource = readFixture("controls.xui");
 	const std::string xssSource = readFixture("controls.xss");
@@ -2334,6 +2513,17 @@ TEST(showcase_example_assets_parse_validate_and_build) {
 	ui.layout(1080, 760);
 	CHECK(rectFor("tasks-panel").w > leftPaneBefore.w + 10.f);
 	(void)ui.pointerUp({ gutterPoint.x + 24.f, gutterPoint.y });
+
+	// Motion & Style nests a second Tabs control. Its pages must fill the nested control
+	// even though the surrounding Tab style centers header labels.
+	CHECK(ui.setValue("demo-sections", u32{7}));
+	CHECK(ui.setValue("motion-tabs", u32{1}));
+	ui.layout(1080, 760);
+	const Rect motionTabs = rectFor("motion-tabs"), motionPage = rectFor("motion-animation");
+	CHECK(!motionTabs.empty() && !motionPage.empty());
+	CHECK(motionPage.x >= motionTabs.x - 0.01f);
+	CHECK(motionPage.right() <= motionTabs.right() + 0.01f);
+	CHECK(motionPage.w <= motionTabs.w + 0.01f);
 }
 
 TEST(tetris_game_example_assets_parse_validate_and_build) {

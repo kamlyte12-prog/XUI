@@ -69,8 +69,7 @@ namespace xui {
 		// Match GlyphAtlas::glyph(), which rounds its raster size. Shaping and raster bounds must
 		// use the same pixel size or tight Row children can be measured narrower than their glyphs.
 		u16 size = u16(std::clamp(std::lround(sizePx), 1l, 65535l));
-		CacheKey key{ fh.index, hashText(text), size,
-					 wrapWidth > 0 ? i32(std::floor(wrapWidth)) : 0x7FFFFFFF };
+		CacheKey key{fh.index, hashText(text), size, wrapWidth > 0 ? i32(std::ceil(wrapWidth)) : 0x7FFFFFFF};
 
 		if (m_index.size() < 64) m_index.assign(64, 0);
 		u32 mask = u32(m_index.size() - 1);

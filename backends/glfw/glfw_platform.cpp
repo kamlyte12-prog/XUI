@@ -20,6 +20,41 @@
 
 using namespace xui;
 
+namespace {
+	// GLFW reports window, cursor, and monitor geometry in screen coordinates. On Windows
+	// and X11 those are physical pixels; on macOS and Wayland they are logical points.
+	// Xui's platform contract is logical pixels everywhere, so derive the per-window
+	// conversion from the window/framebuffer/content-scale relationship instead of
+	// special-casing an OS. `content` is the monitor scale used for layout and text.
+	struct GlfwScale {
+		Vec2 toLogical{1.f, 1.f}; // multiply screen coordinates by this to get logical px
+		Vec2 content{1.f, 1.f};	  // physical pixels per logical pixel
+	};
+	GlfwScale glfwScale(GLFWwindow* window) {
+		int windowW = 0, windowH = 0, pixelW = 0, pixelH = 0;
+		float scaleX = 1.f, scaleY = 1.f;
+		glfwGetWindowSize(window, &windowW, &windowH);
+		glfwGetFramebufferSize(window, &pixelW, &pixelH);
+		glfwGetWindowContentScale(window, &scaleX, &scaleY);
+		if (!(scaleX > 0.f) || !std::isfinite(scaleX))
+			scaleX = 1.f;
+		if (!(scaleY > 0.f) || !std::isfinite(scaleY))
+			scaleY = 1.f;
+		GlfwScale result;
+		result.content = {scaleX, scaleY};
+		const f32 logicalW = f32(pixelW) / scaleX, logicalH = f32(pixelH) / scaleY;
+		if (windowW > 0 && logicalW > 0.f)
+			result.toLogical.x = f32(windowW) / logicalW;
+		if (windowH > 0 && logicalH > 0.f)
+			result.toLogical.y = f32(windowH) / logicalH;
+		return result;
+	}
+	Vec2 logicalClientPoint(GLFWwindow* window, double x, double y) {
+		const GlfwScale scale = glfwScale(window);
+		return {f32(x) / scale.toLogical.x, f32(y) / scale.toLogical.y};
+	}
+} // namespace
+
 #ifdef _WIN32
 namespace { void applySnapStyles(HWND hwnd); }
 #endif
@@ -43,6 +78,10 @@ void GlfwPlatform::shutdown() {
 
 WindowHandle GlfwPlatform::createWindow(const WindowDesc& d) {
 	glfwWindowHint(GLFW_RESIZABLE, d.resizable ? GLFW_TRUE : GLFW_FALSE);
+	// WindowDesc sizes are logical. On Windows/X11, where screen coordinates are physical,
+	// this makes GLFW scale the pixel size to the target monitor and keep the logical
+	// content size stable when the window moves between mixed-DPI monitors.
+	glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
 	// Framework policy: only platforms that can also provide native window move/resize keep
 	// native decorations removed. On Windows the chrome subclass below restores drag, snap and
 	// resize borders; elsewhere GLFW has no move API, so the native title bar is retained.
@@ -62,8 +101,10 @@ WindowHandle GlfwPlatform::createWindow(const WindowDesc& d) {
 	const WindowHandle handle{ static_cast<u32>(m_windows.size()), 1 };
 	m_windows.push_back({ native, handle, this });
 	m_windows.back().cornerRadius = d.cornerRadius;
+	m_windows.back().contentScale = glfwScale(native).content.x;
 	glfwSetWindowUserPointer(native, &m_windows.back());
 	glfwSetWindowSizeCallback(native, onSize);
+	glfwSetWindowContentScaleCallback(native, onContentScale);
 	glfwSetCursorPosCallback(native, onCursor);
 	glfwSetCursorEnterCallback(native, onCursorEnter);
 	glfwSetScrollCallback(native, onScroll);
@@ -87,14 +128,22 @@ void GlfwPlatform::destroyWindow(WindowHandle h) {
 }
 void GlfwPlatform::setWindowTitle(WindowHandle h, std::string_view s) { if (auto* w = find(h)) glfwSetWindowTitle(w->native, std::string(s).c_str()); }
 Vec2 GlfwPlatform::windowSizeLogical(WindowHandle h) const {
-	int w = 0, height = 0; if (auto* rec = find(h)) glfwGetWindowSize(rec->native, &w, &height); return { f32(w), f32(height) };
+	const Window* rec = find(h);
+	if (!rec || !rec->native)
+		return {};
+	int w = 0, height = 0;
+	glfwGetFramebufferSize(rec->native, &w, &height);
+	const GlfwScale scale = glfwScale(rec->native);
+	return {f32(w) / scale.content.x, f32(height) / scale.content.y};
 }
 Vec2i GlfwPlatform::windowSizePixels(WindowHandle h) const {
 	int w = 0, height = 0; if (auto* rec = find(h)) glfwGetFramebufferSize(rec->native, &w, &height); return { w, height };
 }
 f32 GlfwPlatform::dpiScale(WindowHandle h) const {
-	const Vec2 logical = windowSizeLogical(h); const Vec2i pixels = windowSizePixels(h);
-	return logical.x > 0 ? f32(pixels.x) / logical.x : 1.f;
+	const Window* rec = find(h);
+	if (!rec || !rec->native)
+		return 1.f;
+	return glfwScale(rec->native).content.x;
 }
 bool GlfwPlatform::windowVisible(WindowHandle h) const {
 	const Window* window = find(h);
@@ -103,18 +152,25 @@ bool GlfwPlatform::windowVisible(WindowHandle h) const {
 		glfwGetWindowAttrib(window->native, GLFW_ICONIFIED) != GLFW_TRUE;
 }
 Vec2 GlfwPlatform::windowPositionLogical(WindowHandle h) const {
-	int x = 0, y = 0; if (const auto* rec = find(h)) glfwGetWindowPos(rec->native, &x, &y); return { f32(x), f32(y) };
+	const Window* rec = find(h);
+	if (!rec || !rec->native)
+		return {};
+	int x = 0, y = 0;
+	glfwGetWindowPos(rec->native, &x, &y);
+	const GlfwScale scale = glfwScale(rec->native);
+	return {f32(x) / scale.toLogical.x, f32(y) / scale.toLogical.y};
 }
 Vec2 GlfwPlatform::windowClientScreenOrigin(WindowHandle h) const {
-	const Window* rec = find(h); if (!rec || !rec->native) return {};
-	int x = 0, y = 0, left = 0, top = 0, right = 0, bottom = 0;
-	glfwGetWindowPos(rec->native, &x, &y);
-	glfwGetWindowFrameSize(rec->native, &left, &top, &right, &bottom);
-	return { f32(x + left), f32(y + top) };
+	// glfwGetWindowPos already reports the content-area origin, not the outer frame
+	// (Win32 implements it with ClientToScreen(0, 0)). Adding glfwGetWindowFrameSize
+	// here would double-count the frame for decorated windows and shift docked panels.
+	return windowPositionLogical(h);
 }
 bool GlfwPlatform::setWindowPositionLogical(WindowHandle h, Vec2 position) {
 	Window* rec = find(h); if (!rec || !rec->native) return false;
-	glfwSetWindowPos(rec->native, static_cast<int>(std::lround(position.x)), static_cast<int>(std::lround(position.y)));
+	const GlfwScale scale = glfwScale(rec->native);
+	glfwSetWindowPos(rec->native, static_cast<int>(std::lround(position.x * scale.toLogical.x)),
+					 static_cast<int>(std::lround(position.y * scale.toLogical.y)));
 	return true;
 }
 bool GlfwPlatform::screenToClient(WindowHandle h, Vec2 point, Vec2& client) const {
@@ -291,13 +347,45 @@ void GlfwPlatform::push(GLFWwindow* w, const Event& src) { if (Window* r = recor
 // event AND drives one full frame per live step so widgets and layout resize continuously.
 void GlfwPlatform::onSize(GLFWwindow* w, int width, int height) {
 	if (Window* r = record(w)) {
-		Event e{}; e.type = EventType::Resize; e.w = f32(width); e.h = f32(height);
+		const GlfwScale scale = glfwScale(w);
+		Event e{};
+		e.type = EventType::Resize;
+		e.w = f32(width) / scale.toLogical.x;
+		e.h = f32(height) / scale.toLogical.y;
 		push(w, e);
 		if (r->liveResizeFn) r->liveResizeFn(r->liveResizeContext);
 	}
 }
+// The OS move loop can span monitors with different scales before the app loop runs
+// again, so update the stored scale, queue DpiChange (new scale in .scale, old in .w),
+// and render one live frame through the same hook used by native resize.
+void GlfwPlatform::onContentScale(GLFWwindow* w, float xscale, float yscale) {
+	Window* r = record(w);
+	if (!r)
+		return;
+	const f32 previous = r->contentScale > 0.f ? r->contentScale : 1.f;
+	f32 next = xscale;
+	if (!(next > 0.f) || !std::isfinite(next))
+		next = yscale;
+	if (!(next > 0.f) || !std::isfinite(next))
+		next = previous;
+	r->contentScale = next;
+	if (std::fabs(next - previous) < 1e-4f)
+		return;
+	Event e{};
+	e.type = EventType::DpiChange;
+	e.scale = next;
+	e.w = previous;
+	push(w, e);
+	if (r->liveResizeFn)
+		r->liveResizeFn(r->liveResizeContext);
+}
 void GlfwPlatform::onCursor(GLFWwindow* w, double x, double y) {
-	Event e{}; e.type = EventType::MouseMove; e.x = f32(x); e.y = f32(y);
+	const Vec2 point = logicalClientPoint(w, x, y);
+	Event e{};
+	e.type = EventType::MouseMove;
+	e.x = point.x;
+	e.y = point.y;
 	if (Window* r = record(w)) { const Vec2 origin = r->owner->windowClientScreenOrigin(r->handle); e.screenX = origin.x + e.x; e.screenY = origin.y + e.y; }
 	push(w, e);
 }
@@ -307,14 +395,20 @@ void GlfwPlatform::onCursorEnter(GLFWwindow* w, int entered) {
 	if (entered == GLFW_TRUE) {
 		double x = 0, y = 0;
 		glfwGetCursorPos(w, &x, &y);
-		e.x = f32(x); e.y = f32(y);
+		const Vec2 point = logicalClientPoint(w, x, y);
+		e.x = point.x;
+		e.y = point.y;
 		if (Window* r = record(w)) { const Vec2 origin = r->owner->windowClientScreenOrigin(r->handle); e.screenX = origin.x + e.x; e.screenY = origin.y + e.y; }
 	}
 	push(w, e);
 }
 void GlfwPlatform::onScroll(GLFWwindow* w, double dx, double dy) {
 	Event e{}; e.type = EventType::Wheel; e.dx = f32(dx); e.dy = f32(dy);
-	double x = 0, y = 0; glfwGetCursorPos(w, &x, &y); e.x = f32(x); e.y = f32(y);
+	double x = 0, y = 0;
+	glfwGetCursorPos(w, &x, &y);
+	const Vec2 point = logicalClientPoint(w, x, y);
+	e.x = point.x;
+	e.y = point.y;
 	if (Window* r = record(w)) { const Vec2 origin = r->owner->windowClientScreenOrigin(r->handle); e.screenX = origin.x + e.x; e.screenY = origin.y + e.y; }
 	push(w, e);
 }
@@ -322,7 +416,11 @@ void GlfwPlatform::onMouse(GLFWwindow* w, int button, int action, int mods) {
 	Event e{}; e.type = action == GLFW_PRESS ? EventType::MouseDown : EventType::MouseUp;
 	e.button = button == GLFW_MOUSE_BUTTON_RIGHT ? MouseButton::Right : button == GLFW_MOUSE_BUTTON_MIDDLE ? MouseButton::Middle : MouseButton::Left;
 	e.mods = (mods & GLFW_MOD_SHIFT ? static_cast<u8>(Mod::Shift) : 0) | (mods & GLFW_MOD_CONTROL ? static_cast<u8>(Mod::Ctrl) : 0) | (mods & GLFW_MOD_ALT ? static_cast<u8>(Mod::Alt) : 0);
-	double x = 0, y = 0; glfwGetCursorPos(w, &x, &y); e.x = f32(x); e.y = f32(y);
+	double x = 0, y = 0;
+	glfwGetCursorPos(w, &x, &y);
+	const Vec2 point = logicalClientPoint(w, x, y);
+	e.x = point.x;
+	e.y = point.y;
 	if (Window* r = record(w)) { const Vec2 origin = r->owner->windowClientScreenOrigin(r->handle); e.screenX = origin.x + e.x; e.screenY = origin.y + e.y; }
 	push(w, e);
 }

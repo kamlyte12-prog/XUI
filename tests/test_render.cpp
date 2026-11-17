@@ -79,6 +79,58 @@ TEST(render_half_pixel_edges_get_half_coverage_when_snapping_is_off) {
 	CHECK(std::abs(int(im.px(5, 5)[3]) - 128) <= 1); CHECK(std::abs(int(im.px(15, 5)[3]) - 128) <= 1);
 	CHECK_EQ(int(im.px(8, 5)[3]), 255); CHECK_EQ(int(im.px(4, 5)[3]), 0); CHECK_EQ(int(im.px(16, 5)[3]), 0);
 }
+TEST(render_axis_aligned_separators_snap_edges_to_pixel_boundaries) {
+	Env e(40, 30);
+	Painter p;
+	p.begin(40, 30, 1);
+	p.line({5, 9.2f}, {35, 9.2f}, 1.f, {1, 1, 1, 1});
+	const Image horizontal = e.draw(p);
+	for (u32 x = 7; x < 34; ++x) {
+		CHECK_EQ(int(horizontal.px(x, 9)[3]), 255);
+		CHECK_EQ(int(horizontal.px(x, 8)[3]), 0);
+		CHECK_EQ(int(horizontal.px(x, 10)[3]), 0);
+	}
+	Painter v;
+	v.begin(40, 30, 1);
+	v.line({14.3f, 5}, {14.3f, 25}, 1.f, {1, 1, 1, 1});
+	const Image vertical = e.draw(v);
+	for (u32 y = 7; y < 24; ++y) {
+		CHECK_EQ(int(vertical.px(14, y)[3]), 255);
+		CHECK_EQ(int(vertical.px(13, y)[3]), 0);
+		CHECK_EQ(int(vertical.px(15, y)[3]), 0);
+	}
+}
+TEST(render_fractional_dpi_line_width_rounds_to_whole_pixels) {
+	Env e(120, 40);
+	Painter p;
+	p.begin(120, 40, 1.5f);
+	p.line({8, 6.4f}, {72, 6.4f}, 1.f, {1, 1, 1, 1}); // 9.6 physical y, 1.5 physical px wide
+	const Image im = e.draw(p);
+	for (u32 x = 16; x < 104; ++x) {
+		CHECK_EQ(int(im.px(x, 9)[3]), 255);
+		CHECK_EQ(int(im.px(x, 10)[3]), 255);
+		CHECK_EQ(int(im.px(x, 8)[3]), 0);
+		CHECK_EQ(int(im.px(x, 11)[3]), 0);
+	}
+}
+TEST(render_line_snapping_can_be_disabled_for_geometry_authoring) {
+	Env e(40, 20);
+	Painter p(Painter::Options{true, false});
+	p.begin(40, 20, 1);
+	p.line({5, 9.2f}, {35, 9.2f}, 1.f, {1, 1, 1, 1});
+	const Image im = e.draw(p);
+	CHECK(int(im.px(20, 9)[3]) > 0);
+	CHECK(int(im.px(20, 9)[3]) < 240); // fractional coverage survives when snapping is off
+}
+TEST(render_diagonal_lines_keep_analytic_coverage) {
+	Env e(60, 40);
+	Painter p;
+	p.begin(60, 40, 1);
+	p.line({8, 8}, {50, 32}, 1.f, {1, 1, 1, 1});
+	const Image im = e.draw(p);
+	const double length = std::hypot(42.0, 24.0);
+	CHECK(near(alphaSum(im), length + kPi * 0.25, 3.0)); // axis snapping must not distort sloped geometry
+}
 TEST(render_per_corner_radii_land_on_the_right_corners) {
 	// Every subset of {TL,TR,BR,BL}: exactly the rounded corners lose their corner pixel, the others keep it.
 	Env e(50, 50);

@@ -209,7 +209,27 @@ namespace xui {
 	void Painter::capsule(Vec2 a, Vec2 b2, f32 width, Color c, Color c2, bool grad) {
 		++m_stats.prims;
 		if (c.a <= 0 && !(grad && c2.a > 0)) { ++m_stats.culled; return; }
-		const f32 ax = a.x * m_dpi, ay = a.y * m_dpi, bx = b2.x * m_dpi, by = b2.y * m_dpi, r = std::max(0.5f, width * m_dpi * 0.5f);
+		f32 ax = a.x * m_dpi, ay = a.y * m_dpi, bx = b2.x * m_dpi, by = b2.y * m_dpi;
+		f32 w = std::max(1.f, width * m_dpi);
+		if (m_opt.snap) {
+			// A stroke is only crisp when it covers a whole number of physical pixels.
+			// Rounding is a no-op for authored integer widths at 100/200% and prevents
+			// 1 dp separators from splitting into two half-alpha rows at fractional DPI.
+			w = std::max(1.f, std::round(w));
+			const f32 r = w * 0.5f;
+			// Axis-aligned strokes also snap their perpendicular centre so BOTH edges
+			// land on pixel boundaries. Diagonal strokes keep their authored geometry:
+			// moving them would distort the path, and analytic SDF coverage already AA's
+			// their sloped edges.
+			if (ay == by) {
+				const f32 center = std::round(ay - r) + r;
+				ay = by = center;
+			} else if (ax == bx) {
+				const f32 center = std::round(ax - r) + r;
+				ax = bx = center;
+			}
+		}
+		const f32 r = w * 0.5f;
 		const f32 x0 = std::min(ax, bx) - r - 1, y0 = std::min(ay, by) - r - 1, x1 = std::max(ax, bx) + r + 1, y1 = std::max(ay, by) + r + 1;
 		ClipI b;
 		if (!admit(x0, y0, x1, y1, b)) { ++m_stats.culled; return; }

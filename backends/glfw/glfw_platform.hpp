@@ -52,7 +52,9 @@ public:
 	struct Window { GLFWwindow* native = nullptr; xui::WindowHandle handle; GlfwPlatform* owner = nullptr;
 	                void (*liveResizeFn)(void*) = nullptr; void* liveResizeContext = nullptr;
 	                bool customChrome = false; bool roundedCornersApplied = false; void* chromeState = nullptr; xui::f32 resizeInset = 0.f;
-	                xui::f32 cornerRadius = 0.f; };
+					xui::f32 cornerRadius = 0.f;
+					xui::f32 contentScale = 1.f;
+	};
 
 private:
 	static Window* record(GLFWwindow* window);
@@ -63,6 +65,7 @@ private:
 	static void removeChrome(Window& window);
 #endif
 	static void onSize(GLFWwindow*, int, int);
+	static void onContentScale(GLFWwindow*, float, float);
 	static void onCursor(GLFWwindow*, double, double);
 	static void onCursorEnter(GLFWwindow*, int);
 	static void onScroll(GLFWwindow*, double, double);

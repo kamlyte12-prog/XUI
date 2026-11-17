@@ -1,205 +1,372 @@
-// One restrained theme and a 4/8/12/16/24 spacing rhythm for the complete showcase.
+// Windows 11 / Fluent 2 inspired showcase theme.
+// The base token set is the dark Mica surface; @theme light overrides only paint
+// and typography tokens so switching themes never changes authored geometry.
 tokens {
-  color.canvas = #101827
-  color.surface = #172235
-  color.surface-raised = #202f46
-  color.surface-hover = #293d59
-  color.surface-pressed = #142033
-  color.text = #edf3fb
-  color.muted = #a6b5c9
-  color.placeholder = #8496ae
-  color.accent = #69a7ff
-  color.accent-hover = #91bdff
-  color.outline = #33465f
-  color.outline-soft = #415875
-  color.disabled = #73839a
-  color.readout = #d6e8ff
+  color.mica-a = #0d1a2d
+  color.mica-b = #0b1525
+  color.mica-c = #070d17
+  color.canvas = #0a111d
+  color.workspace = #0c1626e6
+  color.section = #ffffff05
+  color.surface = #101b2e
+  color.surface-raised = #16243a
+  color.surface-hover = #1d2e4a
+  color.surface-pressed = #0b1422
+  color.chip = #ffffff0a
+  color.field = #ffffff08
+  color.field-hover = #ffffff10
+  color.field-focus = #101f33
+  color.stroke = #ffffff14
+  color.stroke-strong = #ffffff24
+  color.text = #f2f7ff
+  color.text-secondary = #a7b6cb
+  color.text-tertiary = #7c8ca4
+  color.placeholder = #70809a
+  color.accent = #60cdff
+  color.accent-hover = #86ddff
+  color.accent-pressed = #45bdec
+  color.accent-soft = #60cdff1c
+  color.accent-border = #60cdff66
+  color.on-accent = #06121d
+  color.readout = #cbeaff
+  color.disabled = #6d7b90
+  color.danger = #ff9da7
+  color.shadow = #00000066
+  color.glow = #60cdff59
+  color.menu = #16243af5
+  color.tooltip = #1b2a42fa
+  color.tab-hover = #ffffff0d
+  color.tab-selected = #60cdff24
+  color.gradient-a = #38bdf8
+  color.gradient-b = #818cf8
+  color.gradient-c = #e879f9
+  color.gradient-surface = #0ea5e9
+  color.alpha-a = #0f2a4a
+  color.alpha-b = #1d4ed8
+  color.alpha-c = #7c3aed
+  color.overlay = #0a1424d9
+  color.image = #ffffff07
+  color.dock-panel = #0e192a
+  color.dock-surface = #0a1322
+  color.pulse-low = #16243a66
+  color.pulse-high = #2a5a86
+  color.fade-from = #101b2e00
+  color.fade-to = #16243a
+  color.preview = #60cdff33
+  color.preview-border = #8adcffcc
+  color.close-hover = #c42b1c
+  color.close-pressed = #991f13
 }
 
-// Native defaults belong to the root Window theme; the showcase .xui intentionally omits title/size.
-Window { resting: { window-title: "Xui widget, image, and text showcase", size: 1080px 760px, radius: 12px, bg: color.canvas, fg: color.text, font-size: 14px } }
-Column.app { resting: { gap: 12px, pad: 18px } }
-Row.masthead { resting: { gap: 16px, align: Center, justify: SpaceBetween } }
-// Window chrome: the custom top menu replaces the native title bar (Window[platformTopMenu: false]).
-TitleBar.top-menu { resting: { bg: color.surface, pad: 4px, gap: 4px, border: 1px solid color.outline } }
-TitleButton { resting: { fg: color.muted } hover: { bg: color.surface-hover, fg: color.text } pressed: { bg: color.surface-pressed, fg: color.text } }
-Text.menu-title { resting: { fg: color.muted, font-size: 12px, align: Right, pad: 0px 8px } }
-// Popup menus: the anchor button uses the Menu rule, rows the MenuItem rule.
-Menu { resting: { bg: #151E32F5, fg: color.text, border: 1px solid color.outline, radius: 5px } }
-MenuItem { resting: { fg: color.text, radius: 4px } hover: { bg: color.surface-hover, fg: color.readout } disabled: { fg: color.disabled, opacity: 0.6 } checked: { fg: color.accent } }
-Dropdown.menu-dropdown { resting: { bg: color.surface-raised, fg: color.text, pad: 6px 9px, border: 1px solid color.outline-soft, radius: 5px, font-size: 12px } hover: { bg: color.surface-hover, border: 1px solid color.accent } focus: { border: 1px solid color.accent } open: { border: 1px solid color.accent } }
-Button.menu-help { resting: { bg: color.surface-raised, fg: color.text, pad: 6px, border: 1px solid color.outline-soft, radius: 5px, font-size: 12px } hover: { bg: color.surface-hover, border: 1px solid color.accent } focus: { border: 1px solid color.accent } }
-Text.title { resting: { fg: color.text, font-size: 25px, font-weight: 700 } }
-Text.subtitle { resting: { fg: color.muted, font-size: 13px } }
-Text.section-title { resting: { fg: color.text, font-size: 17px, font-weight: 650, margin: 4px 0px 2px } }
-Text.help { resting: { fg: color.muted, font-size: 13px } }
-Text.body-copy { resting: { fg: color.muted, font-size: 13px, margin: 0px 0px 4px } }
-Text.field-label { resting: { fg: color.text, font-size: 13px, font-weight: 600 } }
-Text.value-caption { resting: { fg: color.muted, font-size: 13px, align: Center } }
-Text.value-readout { resting: { bg: color.surface-raised, fg: color.readout, font-size: 13px, pad: 7px, border: 1px solid color.outline, radius: 6px } }
-Text.card-label { resting: { fg: color.text, font-size: 13px, align: Center } }
-Text.panel-title { resting: { fg: color.text, font-size: 15px, font-weight: 650, margin: 0px 0px 6px } }
+@theme light {
+  tokens {
+    color.mica-a = #f8fbff
+    color.mica-b = #eef4fc
+    color.mica-c = #e4ecf7
+    color.canvas = #e9eff8
+    color.workspace = #fffffff2
+    color.section = #0f172a05
+    color.surface = #ffffff
+    color.surface-raised = #f5f8fd
+    color.surface-hover = #e8eef8
+    color.surface-pressed = #dce5f2
+    color.chip = #0f172a08
+    color.field = #ffffff
+    color.field-hover = #f7faff
+    color.field-focus = #ffffff
+    color.stroke = #0f172a1a
+    color.stroke-strong = #0f172a33
+    color.text = #16202f
+    color.text-secondary = #4e5e74
+    color.text-tertiary = #6f7f94
+    color.placeholder = #8593a6
+    color.accent = #0067c0
+    color.accent-hover = #0f7ad0
+    color.accent-pressed = #005aa8
+    color.accent-soft = #0067c014
+    color.accent-border = #0067c066
+    color.on-accent = #ffffff
+    color.readout = #1d3b5c
+    color.disabled = #9aa6b6
+    color.danger = #c42b1c
+    color.shadow = #1e293b26
+    color.glow = #0067c040
+    color.menu = #fffffff7
+    color.tooltip = #fffffff7
+    color.tab-hover = #0f172a08
+    color.tab-selected = #0067c012
+    color.gradient-a = #0ea5e9
+    color.gradient-b = #6366f1
+    color.gradient-c = #d946ef
+    color.gradient-surface = #0284c7
+    color.alpha-a = #bae6fd
+    color.alpha-b = #93c5fd
+    color.alpha-c = #c4b5fd
+    color.overlay = #ffffffd9
+    color.image = #0f172a05
+    color.dock-panel = #ffffff
+    color.dock-surface = #f3f7fc
+    color.pulse-low = #dbe7f633
+    color.pulse-high = #7dd3fc
+    color.fade-from = #f5f8fd00
+    color.fade-to = #f5f8fd
+    color.preview = #0067c033
+    color.preview-border = #0067c0aa
+    color.close-hover = #c42b1c
+    color.close-pressed = #991f13
+  }
+}
 
-Tabs.tabs { resting: { bg: color.surface, border: 1px solid color.outline, radius: 8px } focus: { border: 1px solid color.accent } }
+// The native window is the Mica shell. The custom title bar and workspace cards
+// layer translucent surfaces over this gradient instead of painting flat panels.
+Window { resting: { window-title: "Xui widget, image, and text showcase", size: 1080px 760px, radius: 12px, bg: color.canvas, gradient: linear-gradient(155deg, color.mica-a, color.mica-b, color.mica-c), fg: color.text, font-size: 14px } }
+
+// Window chrome: the custom top menu replaces the native title bar.
+TitleBar.top-menu { resting: { bg: #00000000, pad: 5px 12px, gap: 6px, border: 1px solid #00000000 } }
+Badge.app-mark { resting: { bg: color.accent, fg: color.on-accent, radius: 6px, font-size: 11px, font-weight: 700, align: Center } }
+TitleButton { resting: { fg: color.text-secondary } hover: { bg: color.surface-hover, fg: color.text } pressed: { bg: color.surface-pressed, fg: color.text } }
+Text.menu-title { resting: { fg: color.text-tertiary, font-size: 11px, align: End, letter-spacing: 0.8px, pad: 0px 8px } }
+Text.app-name { resting: { fg: color.text, font-size: 12px, font-weight: 600, letter-spacing: 0.2px, pad: 0px 4px } }
+// The dropdown popup reuses the closed control's background, so the title-bar menu
+// keeps a near-opaque Fluent menu surface instead of a transparent window.
+Dropdown.menu-dropdown { resting: { bg: color.menu, fg: color.text-secondary, pad: 5px 9px, border: 1px solid color.stroke, radius: 6px, font-size: 12px } hover: { bg: color.surface-hover, fg: color.text } focus: { border: 1px solid color.accent-border, fg: color.text } open: { bg: color.menu, fg: color.text, border: 1px solid color.accent-border } disabled: { opacity: 0.45 } }
+Button.menu-help { resting: { bg: #00000000, fg: color.text-secondary, pad: 5px 9px, border: 1px solid #00000000, radius: 6px, font-size: 12px } hover: { bg: color.tab-hover, fg: color.text } pressed: { bg: color.surface-hover } focus: { border: 1px solid color.accent-border } disabled: { opacity: 0.45 } }
+
+Menu { resting: { bg: color.menu, fg: color.text, border: 1px solid color.stroke-strong, radius: 8px, pad: 4px, shadow: 0px 14px 38px 4px color.shadow } }
+MenuItem { resting: { fg: color.text, radius: 4px } hover: { bg: color.tab-hover, fg: color.text } disabled: { fg: color.disabled, opacity: 0.55 } checked: { fg: color.accent } }
+
+// Hero and status strip.
+Column.app { resting: { gap: 12px, pad: 16px 20px } }
+Row.masthead { resting: { gap: 20px, align: Center, justify: SpaceBetween } }
+Column.hero { resting: { gap: 5px, align: Start } }
+Row.hero-meta { resting: { gap: 8px, align: Center } }
+Column.status { resting: { gap: 6px, align: End } }
+Row.status-strip { resting: { gap: 8px, align: Center, justify: End } }
+Badge.brand-badge { resting: { bg: color.accent-soft, fg: color.accent, border: 1px solid color.accent-border, radius: 5px, font-size: 10px, font-weight: 700, letter-spacing: 1.1px, align: Center } }
+Text.eyebrow { resting: { fg: color.text-tertiary, font-size: 10px, font-weight: 600, letter-spacing: 1.2px } }
+Text.title { resting: { fg: color.text, font-size: 27px, font-weight: 700, letter-spacing: -0.3px } }
+Text.subtitle { resting: { fg: color.text-secondary, font-size: 13px } }
+Text.status-note { resting: { fg: color.text-tertiary, font-size: 11px, align: End, letter-spacing: 0.2px } }
+
+// Workspace shell and the tab rail. Tab headers are painted by the runtime as
+// equal-width 34 px cells; the selected/accent tint gives them a WinUI pivot feel.
+Panel.workspace { resting: { bg: color.workspace, border: 1px solid color.stroke, radius: 12px, pad: 1px, shadow: 0px 18px 48px 0px color.shadow } }
+Tabs.tabs { resting: { bg: #00000000, border: 1px solid #00000000, radius: 10px } focus: { outline: 1px solid color.accent-border, outline-offset: 0px } }
+Tabs.motion-tabs { resting: { size: 100% 100%, bg: #00000000, border: 1px solid #00000000, radius: 0px } focus: { outline: 1px solid color.accent-border, outline-offset: 0px } }
 Tab {
-  resting: { bg: color.canvas, fg: color.muted, font-size: 13px }
-  hover: { bg: color.surface-hover, fg: color.text }
-  selected: { bg: color.surface, fg: color.accent, border: 1px solid color.accent }
-  disabled: { opacity: 0.42 }
+  resting: { bg: #00000000, fg: color.text-tertiary, font-size: 12px, font-weight: 600, align: Center }
+  hover: { bg: color.tab-hover, fg: color.text }
+  selected: { bg: color.tab-selected, fg: color.accent, border: 1px solid color.tab-selected }
+  disabled: { opacity: 0.4 }
 }
-ScrollView.page-scroll { resting: { bg: color.surface, border: 1px solid color.outline, radius: 8px, pad: 1px, scrollbar-size: 10px, scrollbar-visibility: auto, scroll-behavior: smooth, scroll-speed: 42, scroll-track: color.canvas, scroll-thumb: #405773 } hover: { scroll-thumb: #587493 } pressed: { scroll-thumb: color.accent } }
-Column.page { resting: { bg: color.surface, pad: 16px, gap: 12px, border: 1px solid color.outline, radius: 8px } }
-Panel.demo-panel { resting: { bg: color.surface-raised, fg: color.text, pad: 12px, border: 1px solid color.outline-soft, radius: 8px } }
-Grid.grid-demo { resting: { bg: color.surface-raised, border: 1px solid color.outline-soft, radius: 8px } }
-Text.grid-cell, Button.grid-cell { resting: { bg: color.surface, fg: color.text, pad: 6px, align: Center, border: 1px solid color.outline-soft, radius: 5px } }
-Button.grid-cell { hover: { bg: color.surface-hover } active: { bg: color.accent } }
-Text.fixed-cell { resting: { fg: color.muted } }
-Button.spanning-cell { resting: { bg: color.accent-hover } }
-Stack.stack-demo { resting: { bg: color.canvas, border: 1px solid color.outline-soft, radius: 8px } }
-Panel.stack-backdrop { resting: { bg: color.surface-raised, border: 1px solid color.outline, radius: 7px } }
-Text.stack-caption { resting: { fg: color.text, font-weight: 600, align: Center } }
-Badge.stack-badge { resting: { bg: color.accent, fg: color.canvas, align: Center, radius: 5px } }
-Panel.sizing-card { resting: { bg: color.surface-raised, border: 1px solid color.outline-soft, radius: 7px, pad: 8px } }
-Panel.min-card { resting: { min-size: 220px 64px } }
-Panel.style-floor { resting: { size: 170px 64px, min-size: 200px 64px, bg: #243956 } }
-Panel.clamp-card { resting: { max-width: 230px, border: 1px solid color.accent } }
-Panel.nested-panel { resting: { min-size: 180px 90px, pad: 12px } }
-Panel.vertical-pane { resting: { min-size: 120px 56px, pad: 8px } }
-Panel.pane-left { resting: { min-width: 190px } }
-Panel.pane-right { resting: { min-width: 190px } }
-Split.split { resting: { fg: color.outline-soft, gap: 0px } }
-Split.layout-split { resting: { min-size: 420px 138px } }
+ScrollView.page-scroll { resting: { bg: #00000000, border: 1px solid #00000000, radius: 0px, pad: 0px, min-width: 0px, scrollbar-size: 8px, scrollbar-visibility: auto, scroll-behavior: smooth, scroll-speed: 48, scroll-track: #00000000, scroll-thumb: color.stroke-strong } hover: { scroll-thumb: color.accent-border } pressed: { scroll-thumb: color.accent } }
+Column.page { resting: { bg: #00000000, pad: 20px, gap: 14px, border: 1px solid #00000000, min-width: 0px, align: Start } }
+
+// Content hierarchy.
+Panel.section { resting: { bg: color.section, fg: color.text, pad: 16px, gap: 8px, border: 1px solid color.stroke, radius: 10px, min-width: 0px } }
+Panel.demo-panel { resting: { bg: color.surface, fg: color.text, pad: 14px, gap: 10px, border: 1px solid color.stroke, radius: 8px } }
+Text.section-title { resting: { fg: color.text, font-size: 16px, font-weight: 650, letter-spacing: 0.1px } }
+Text.group-title { resting: { fg: color.text-secondary, font-size: 13px, font-weight: 600, margin: 2px 0px 0px } }
+Text.help { resting: { fg: color.text-secondary, font-size: 13px } }
+Text.body-copy { resting: { fg: color.text-secondary, font-size: 13px } }
+// Long-form paragraphs fill the card column so the text wrapper can break lines
+// instead of measuring one very wide line and clipping at the card edge.
+Text.prose { resting: { size: 100% auto } }
+Text.field-label { resting: { fg: color.text-secondary, font-size: 12px, font-weight: 600, letter-spacing: 0.2px } }
+Text.value-caption { resting: { fg: color.text-tertiary, font-size: 12px, align: Center } }
+Text.value-readout { resting: { bg: color.chip, fg: color.readout, font-size: 12px, pad: 6px 10px, border: 1px solid color.stroke, radius: 6px, align: Start } }
+Text.card-label { resting: { fg: color.text, font-size: 12px, align: Center } }
+Text.panel-title { resting: { fg: color.text, font-size: 14px, font-weight: 650 } }
+Text.inset-note { resting: { fg: color.text-tertiary, font-size: 12px, margin: 4px 0px 0px } }
+
 Row { resting: { gap: 8px } }
 Column { resting: { gap: 8px } }
-Row.masthead { resting: { gap: 16px } }
-Column.app { resting: { gap: 12px } }
-Column.page { resting: { gap: 12px } }
-Panel.range-panel { resting: { gap: 12px } }
-Column.readouts { resting: { gap: 8px } }
 
+// Layout page.
+ScrollView.horizontal-demo { resting: { bg: color.chip, border: 1px solid color.stroke, radius: 8px, pad: 8px, min-width: 0px, scrollbar-size: 8px, scrollbar-visibility: always, scroll-track: #00000000, scroll-thumb: color.stroke-strong } hover: { scroll-thumb: color.accent-border } pressed: { scroll-thumb: color.accent } }
+Panel.sizing-card { resting: { bg: color.surface, border: 1px solid color.stroke, radius: 7px, pad: 8px } }
+Panel.min-card { resting: { min-size: 220px 64px, bg: color.accent-soft, border: 1px solid color.accent-border } }
+Panel.style-floor { resting: { size: 170px 64px, min-size: 200px 64px, bg: color.surface-raised } }
+Panel.clamp-card { resting: { max-width: 230px, border: 1px solid color.accent-border } }
+Grid.grid-demo { resting: { bg: color.chip, border: 1px solid color.stroke, radius: 8px } }
+Text.grid-cell, Button.grid-cell { resting: { bg: color.field, fg: color.text, pad: 6px, align: Center, border: 1px solid color.stroke, radius: 5px, font-size: 12px } }
+Button.grid-cell { hover: { bg: color.surface-hover } pressed: { bg: color.accent-soft } }
+Text.fixed-cell { resting: { fg: color.text-secondary } }
+Button.spanning-cell { resting: { bg: color.accent-soft, fg: color.accent, border: 1px solid color.accent-border } hover: { bg: color.surface-hover } }
+Stack.stack-demo { resting: { bg: color.chip, border: 1px solid color.stroke, radius: 8px } }
+Panel.stack-backdrop { resting: { bg: color.surface, border: 1px solid color.stroke, radius: 7px, gradient: linear-gradient(135deg, color.surface, color.accent-soft) } }
+Text.stack-caption { resting: { bg: color.overlay, fg: color.text, border: 1px solid color.stroke-strong, radius: 6px, font-weight: 600, align: Center } }
+Badge.stack-badge { resting: { bg: color.accent, fg: color.on-accent, align: Center, radius: 6px, font-size: 10px, font-weight: 700 } }
+Panel.nested-panel { resting: { min-size: 180px 90px, pad: 12px } }
+Panel.vertical-pane { resting: { min-size: 120px 56px, pad: 10px } }
+Panel.pane-left { resting: { min-width: 190px } }
+Panel.pane-right { resting: { min-width: 190px } }
+Split.split { resting: { fg: color.stroke-strong } }
+Split.layout-split { resting: { min-size: 420px 138px } }
+Panel.range-panel { resting: { gap: 10px } }
+
+// Buttons: accent-filled primary, translucent secondary, compact chips.
 Button.primary-button, Button.secondary-button, Button.small-button {
-  resting: { bg: color.surface-raised, fg: color.text, pad: 7px, border: 1px solid color.outline-soft, radius: 6px, font-size: 13px }
-  hover: { bg: color.surface-hover, border: 1px solid color.accent }
+  resting: { bg: color.chip, fg: color.text, pad: 8px 14px, border: 1px solid color.stroke-strong, radius: 6px, font-size: 13px }
+  hover: { bg: color.surface-hover, border: 1px solid color.stroke-strong }
   pressed: { bg: color.surface-pressed }
-  focus: { border: 1px solid color.accent }
-  disabled: { bg: color.surface, fg: color.disabled, opacity: 0.48 }
+  focus: { outline: 2px solid color.accent-border, outline-offset: 2px }
+  disabled: { bg: color.field, fg: color.disabled, opacity: 0.5 }
+  transition: resting -> hover 140ms ease-out
+  transition: hover -> resting 180ms ease-out
+  transition: hover -> pressed 70ms ease-out
+  transition: pressed -> resting 160ms ease-out
 }
-Button.primary-button { resting: { bg: #2868b8, fg: #ffffff, border: 1px solid color.accent } hover: { bg: #347acb } pressed: { bg: #1d4e8c } }
-Button.small-button { resting: { pad: 5px, font-size: 12px } }
+Button.primary-button { resting: { bg: color.accent, fg: color.on-accent, border: 1px solid color.accent, font-weight: 600 } hover: { bg: color.accent-hover, border: 1px solid color.accent-hover } pressed: { bg: color.accent-pressed, border: 1px solid color.accent-pressed } }
+Button.small-button { resting: { pad: 5px 10px, font-size: 12px } }
+ToggleButton.theme-toggle {
+  resting: { bg: color.chip, fg: color.text-secondary, pad: 6px 10px, border: 1px solid color.stroke, radius: 6px, font-size: 12px }
+  hover: { bg: color.surface-hover, fg: color.text }
+  pressed: { bg: color.surface-pressed }
+  checked: { bg: color.accent-soft, fg: color.accent, border: 1px solid color.accent-border }
+  focus: { outline: 2px solid color.accent-border, outline-offset: 2px }
+  disabled: { opacity: 0.45 }
+  transition: resting -> hover 140ms ease-out
+  transition: hover -> resting 180ms ease-out
+}
 
+// Fields.
 TextBox.field, TextArea.field, SearchField.field, NumberField.field, KeybindField.field {
-  resting: { bg: color.surface-raised, fg: color.text, pad: 8px, border: 1px solid color.outline-soft, radius: 6px, font-size: 14px }
-  hover: { bg: color.surface-hover }
-  focus: { bg: #1c304b, border: 1px solid color.accent }
+  resting: { bg: color.field, fg: color.text, pad: 8px 10px, border: 1px solid color.stroke-strong, radius: 6px, font-size: 13px }
+  hover: { bg: color.field-hover }
+  focus: { bg: color.field-focus, border: 1px solid color.accent }
   placeholder: { fg: color.placeholder }
-  readonly: { bg: color.surface, fg: color.muted }
-  disabled: { opacity: 0.46 }
+  readonly: { bg: color.field, fg: color.text-secondary }
+  disabled: { opacity: 0.45 }
+  transition: resting -> hover 140ms ease-out
+  transition: hover -> resting 180ms ease-out
+  transition: resting -> focus 140ms ease-out
+  transition: focus -> resting 180ms ease-out
 }
 TextArea.textarea { resting: { pad: 10px } }
 TextBox.number { resting: { size: 240px 40px } }
 TextBox.keybind { resting: { size: 190px 40px } }
+NumberButton { resting: { bg: #00000000, fg: color.text-secondary, radius: 4px } hover: { bg: color.chip, fg: color.text } pressed: { bg: color.surface-hover } }
 
+// Selection controls. The controls use the accent as their semantic indicator
+// color; rows keep a quiet transparent surface until hovered. Note that the
+// runtime paints the checkbox glyph border from `fg`; a transparent control
+// border would also erase the unchecked indicator, so none is authored here.
 CheckBox.checkbox, CheckItem.check-item {
-  resting: { bg: color.surface-raised, fg: color.text, pad: 6px, border: 1px solid color.outline-soft, radius: 5px, font-size: 13px }
-  hover: { bg: color.surface-hover }
-  focus: { border: 1px solid color.accent }
+  resting: { bg: #00000000, fg: color.text, pad: 4px 6px, radius: 6px, font-size: 13px }
+  hover: { bg: color.tab-hover }
+  focus: { outline: 1px solid color.accent-border, outline-offset: 1px }
   checked: { fg: color.accent }
-  disabled: { fg: color.disabled, opacity: 0.48 }
+  disabled: { fg: color.disabled, opacity: 0.5 }
+  transition: resting -> hover 120ms ease-out
+  transition: hover -> resting 160ms ease-out
 }
-Switch.switch, RadioGroup.radio-group { resting: { fg: color.accent, font-size: 14px } hover: { fg: color.accent-hover } focus: { border: 1px solid color.accent } disabled: { opacity: 0.48 } }
-ToggleButton.toggle { resting: { bg: color.surface-raised, fg: color.text, pad: 7px, border: 1px solid color.outline-soft, radius: 6px } hover: { bg: color.surface-hover } pressed: { bg: color.surface-pressed } checked: { bg: color.accent, fg: color.canvas } focus: { border: 1px solid color.accent } disabled: { opacity: 0.48 } }
-SegmentedControl.segmented { resting: { bg: color.surface-raised, fg: color.text, border: 1px solid color.outline-soft, radius: 6px, pad: 6px } hover: { fg: color.accent-hover } focus: { border: 1px solid color.accent } disabled: { opacity: 0.48 } }
+Switch.switch {
+  resting: { fg: color.accent, bg: #00000000, border: 1px solid #00000000, radius: 10px, font-size: 13px }
+  hover: { fg: color.accent-hover, bg: color.tab-hover }
+  focus: { outline: 1px solid color.accent-border, outline-offset: 1px }
+  disabled: { opacity: 0.45 }
+  transition: resting -> hover 120ms ease-out
+  transition: hover -> resting 160ms ease-out
+}
+RadioGroup.radio-group { resting: { bg: color.chip, fg: color.accent, border: 1px solid color.stroke, radius: 8px, font-size: 13px } hover: { fg: color.accent-hover } focus: { outline: 1px solid color.accent-border, outline-offset: 1px } disabled: { opacity: 0.45 } }
+ToggleButton.toggle { resting: { bg: color.chip, fg: color.text, pad: 7px 12px, border: 1px solid color.stroke-strong, radius: 6px, font-size: 13px } hover: { bg: color.surface-hover } pressed: { bg: color.surface-pressed } checked: { bg: color.accent, fg: color.on-accent, border: 1px solid color.accent } focus: { outline: 2px solid color.accent-border, outline-offset: 2px } disabled: { opacity: 0.45 } transition: resting -> hover 140ms ease-out transition: hover -> resting 180ms ease-out }
+SegmentedControl.segmented { resting: { bg: color.chip, fg: color.accent, border: 1px solid color.stroke, radius: 8px, pad: 3px, font-size: 12px } hover: { fg: color.accent-hover } focus: { outline: 1px solid color.accent-border, outline-offset: 2px } disabled: { opacity: 0.45 } }
 
-Slider.slider { resting: { bg: color.outline, fg: color.accent } hover: { fg: color.accent-hover } focus: { border: 1px solid color.accent } disabled: { opacity: 0.42 } }
-ProgressBar.progress { resting: { bg: color.outline, fg: color.accent, radius: 5px } }
-Rating.rating { resting: { fg: color.accent } hover: { fg: color.accent-hover } focus: { border: 1px solid color.accent } disabled: { opacity: 0.45 } }
-Stepper.stepper { resting: { bg: color.surface-raised, fg: color.text, pad: 6px, border: 1px solid color.outline-soft, radius: 6px } hover: { bg: color.surface-hover } focus: { border: 1px solid color.accent } disabled: { opacity: 0.45 } }
+Slider.slider { resting: { bg: color.stroke-strong, fg: color.accent } hover: { fg: color.accent-hover } focus: { outline: 1px solid color.accent-border, outline-offset: 2px } disabled: { opacity: 0.45 } }
+ProgressBar.progress { resting: { bg: color.stroke, fg: color.accent, radius: 6px } }
+Rating.rating { resting: { fg: color.accent } hover: { fg: color.accent-hover } focus: { outline: 1px solid color.accent-border, outline-offset: 2px } disabled: { opacity: 0.45 } }
+Stepper.stepper { resting: { bg: color.field, fg: color.text, pad: 6px 8px, border: 1px solid color.stroke-strong, radius: 6px, font-size: 13px } hover: { bg: color.field-hover } focus: { outline: 1px solid color.accent-border, outline-offset: 1px } disabled: { opacity: 0.45 } transition: resting -> hover 140ms ease-out transition: hover -> resting 180ms ease-out }
 
-Dropdown.popup-control, ColorPicker.popup-control, DatePicker.popup-control { resting: { bg: color.surface-raised, fg: color.text, pad: 8px, border: 1px solid color.outline-soft, radius: 6px } hover: { bg: color.surface-hover } focus: { border: 1px solid color.accent } open: { border: 1px solid color.accent } disabled: { opacity: 0.45 } }
+// Popup controls and navigation.
+Dropdown.popup-control, ColorPicker.popup-control, DatePicker.popup-control { resting: { bg: color.field, fg: color.text, pad: 8px 10px, border: 1px solid color.stroke-strong, radius: 6px, font-size: 13px } hover: { bg: color.field-hover } focus: { bg: color.field-focus, border: 1px solid color.accent } open: { bg: color.field-focus, border: 1px solid color.accent } disabled: { opacity: 0.45 } transition: resting -> hover 140ms ease-out transition: hover -> resting 180ms ease-out transition: resting -> focus 140ms ease-out }
 ColorPicker.color-picker { resting: { size: 100% 40px } }
-Tooltip { resting: { bg: color.surface-raised, fg: color.text, font-size: 13px, pad: 8px, border: 1px solid color.accent, radius: 6px } }
-Breadcrumb.breadcrumb { resting: { fg: color.text, font-size: 13px } hover: { fg: color.accent-hover } focus: { border: 1px solid color.accent } disabled: { opacity: 0.45 } }
+Tooltip { resting: { bg: color.tooltip, fg: color.text, font-size: 12px, pad: 8px 10px, border: 1px solid color.accent-border, radius: 8px, shadow: 0px 10px 28px 2px color.shadow } }
+Breadcrumb.breadcrumb { resting: { bg: color.chip, fg: color.text-secondary, font-size: 13px, pad: 6px 10px, border: 1px solid color.stroke, radius: 6px } hover: { fg: color.accent-hover } focus: { border: 1px solid color.accent } disabled: { opacity: 0.45 } }
 
-Image.demo-image { resting: { bg: color.surface-raised, border: 1px solid color.outline-soft, radius: 8px } }
+// Display leaves and app chrome.
+Image.demo-image { resting: { bg: color.image, border: 1px solid color.stroke, radius: 8px, pad: 8px } }
 Image.raster-image { resting: { radius: 8px } }
 Image.svg-image { resting: { radius: 8px } }
 Label.inline-label, Label.chrome-label { resting: { fg: color.text, font-size: 13px } }
-Badge.badge { resting: { bg: color.accent, fg: color.canvas, pad: 5px, radius: 5px, font-size: 11px, font-weight: 650, align: Center } }
-TreeView.tree-view { resting: { bg: color.surface, fg: color.text, border: 1px solid color.border, radius: 8px, pad: 6px, font-size: 13px }
-  hover: { border: 1px solid color.accent } disabled: { opacity: 0.5 } }
+Badge.badge { resting: { bg: color.accent, fg: color.on-accent, pad: 4px 8px, radius: 5px, font-size: 10px, font-weight: 700, letter-spacing: 0.6px, align: Center } }
+TreeView.tree-view { resting: { bg: color.chip, fg: color.text, border: 1px solid color.stroke, radius: 8px, pad: 6px, font-size: 13px } hover: { border: 1px solid color.stroke-strong } focus: { outline: 1px solid color.accent-border, outline-offset: 1px } disabled: { opacity: 0.5 } }
 Icon.demo-icon { resting: { fg: color.accent } }
-Spinner.spinner { resting: { fg: color.accent } disabled: { fg: color.disabled, opacity: 0.42 } }
-FpsCounter.fps { resting: { bg: color.surface-raised, fg: color.text, font-size: 12px, pad: 6px, border: 1px solid color.outline, radius: 6px } }
-Toolbar.chrome, StatusBar.chrome { resting: { bg: color.surface-raised, fg: color.text, pad: 6px 8px, border: 1px solid color.outline, radius: 6px, gap: 8px, align: Center } }
-Separator.separator, Divider.divider { resting: { fg: color.outline-soft, margin: 3px 0px } }
-ScrollView.scroll-demo, ScrollView.horizontal-demo { resting: { bg: color.canvas, border: 1px solid color.outline, radius: 6px, pad: 8px, scrollbar-size: 10px, scrollbar-visibility: always, scroll-track: color.surface, scroll-thumb: #405773 } hover: { scroll-thumb: #587493 } pressed: { scroll-thumb: color.accent } focus: { border: 1px solid color.accent } }
-Text.scroll-item { resting: { bg: color.surface-raised, fg: color.text, pad: 7px, radius: 5px } }
+Spinner.spinner { resting: { fg: color.accent } disabled: { fg: color.disabled, opacity: 0.45 } }
+FpsCounter.fps { resting: { bg: color.chip, fg: color.text-secondary, font-size: 11px, pad: 6px 10px, border: 1px solid color.stroke, radius: 6px } }
+Toolbar.chrome, StatusBar.chrome { resting: { bg: color.chip, fg: color.text, pad: 6px 10px, border: 1px solid color.stroke, radius: 8px, gap: 8px, align: Center } }
+Separator.separator, Divider.divider { resting: { fg: color.stroke-strong, margin: 3px 0px } }
+ScrollView.scroll-demo { resting: { bg: color.chip, border: 1px solid color.stroke, radius: 8px, pad: 8px, scrollbar-size: 8px, scrollbar-visibility: always, scroll-track: #00000000, scroll-thumb: color.stroke-strong } hover: { scroll-thumb: color.accent-border } pressed: { scroll-thumb: color.accent } focus: { outline: 1px solid color.accent-border, outline-offset: 1px } }
+Text.scroll-item { resting: { bg: color.field, fg: color.text-secondary, pad: 6px 8px, radius: 5px } }
 
-// Motion & Style page: paint properties stay in XSS; the page itself is authored in XUI.
-Panel.gradient-card { resting: { border: 1px solid color.outline-soft, radius: 8px, pad: 12px, align: Center, justify: Center } }
-Panel.gradient-linear { resting: { gradient: linear-gradient(15deg, #154e9a, #397dd1, #7a58c5, #e978a4) } }
-Panel.gradient-radial { resting: { gradient: radial-gradient(#e8f2ff, #5397e2, #193657) } }
-Panel.gradient-conic { resting: { gradient: conic-gradient(30deg, #ed6a5a, #f4bf50, #52b788, #5b8dee) } }
-Panel.alpha-backdrop { resting: { gradient: linear-gradient(0deg, #213d64, #397dd1, #a45aa5), radius: 8px, pad: 12px } }
-Panel.alpha-overlay { resting: { bg: #18263dbb, fg: color.text, pad: 12px, border: 1px solid #c7ddff80, radius: 6px } }
-Panel.paint-card { resting: { bg: color.surface-raised, fg: color.text, pad: 14px, border: 1px solid color.outline-soft, radius: 8px, gap: 6px } }
-Panel.glow-card { resting: { glow: 12px 1px #69a7ffb0 } }
-Panel.shadow-card { resting: { shadow: 0px 5px 14px 2px #000000a8 } }
-Panel.glow-swatch { resting: { bg: color.surface-raised, border: 1px solid color.outline-soft, radius: 7px, glow: 8px 0px #69a7ff70, align: Center, justify: Center } }
-Tabs.motion-tabs { resting: { size: 100% 100% } }
+// Paint and typography page.
+Panel.gradient-card { resting: { border: 1px solid color.stroke, radius: 8px, pad: 12px, align: Center, justify: Center } }
+Panel.gradient-linear { resting: { gradient: linear-gradient(135deg, color.gradient-a, color.gradient-b, color.gradient-c) } }
+Panel.gradient-radial { resting: { gradient: radial-gradient(color.text, color.gradient-a, color.alpha-a) } }
+Panel.gradient-conic { resting: { gradient: conic-gradient(30deg, color.gradient-c, color.gradient-b, color.gradient-a) } }
+Panel.alpha-backdrop { resting: { gradient: linear-gradient(0deg, color.alpha-a, color.alpha-b, color.alpha-c), radius: 8px, pad: 12px } }
+Panel.alpha-overlay { resting: { bg: color.overlay, fg: color.text, pad: 12px, border: 1px solid color.stroke-strong, radius: 7px } }
+Panel.paint-card { resting: { bg: color.surface, fg: color.text, pad: 14px, border: 1px solid color.stroke, radius: 8px, gap: 6px } }
+Panel.glow-card { resting: { glow: 14px 1px color.glow } }
+Panel.shadow-card { resting: { shadow: 0px 8px 22px 2px color.shadow, border: 1px solid color.stroke-strong } }
+Panel.glow-swatch { resting: { bg: color.surface, border: 1px solid color.stroke, radius: 7px, glow: 9px 0px color.glow, align: Center, justify: Center } }
 Text.glow-title { resting: { fg: color.text, font-size: 15px, font-weight: 700 } }
+Text.gradient-label { resting: { fg: #ffffff, font-size: 13px, font-weight: 600, align: Center } }
+Text.swatch-label { resting: { fg: color.text, font-size: 13px, font-weight: 600, align: Center } }
 Text.weight-regular { resting: { fg: color.text, font-size: 15px, font-weight: 400 } }
 Text.weight-bold { resting: { fg: color.text, font-size: 15px, font-weight: 700 } }
-Text.weight-large { resting: { fg: color.accent-hover, font-size: 20px, font-weight: 600 } }
-Panel.fade-card { resting: { bg: color.surface-raised, border: 1px solid color.accent, radius: 8px, pad: 12px, align: Center, justify: Center, animation: fade-in 800ms 1 ease-out } }
-Text.fade-label { resting: { fg: color.text, font-size: 14px, font-weight: 600, align: Center } }
-Button.hug-button { resting: { size: auto, min-width: 180px, max-width: 260px, bg: color.surface-raised, fg: color.text, pad: 12px 16px, gap: 4px, border: 1px solid color.outline-soft, radius: 8px, font-weight: 600 }
-  hover: { bg: color.surface-hover, border: 1px solid color.accent, glow: 8px 0px #69a7ff80 }
+Text.weight-large { resting: { fg: color.accent, font-size: 20px, font-weight: 600 } }
+Button.hug-button { resting: { size: auto, min-width: 180px, max-width: 260px, bg: color.chip, fg: color.text, pad: 12px 16px, gap: 4px, border: 1px solid color.stroke-strong, radius: 8px, font-weight: 600 }
+  hover: { bg: color.surface-hover, border: 1px solid color.accent-border, glow: 10px 0px color.glow }
   pressed: { bg: color.surface-pressed }
+  focus: { outline: 2px solid color.accent-border, outline-offset: 2px }
   transition: resting -> hover 160ms ease-out
   transition: hover -> resting 160ms ease-out
   transition: hover -> pressed 70ms ease-out
   transition: pressed -> resting 140ms ease-out
 }
-Text.gradient-label { resting: { fg: #ffffff, font-size: 14px, font-weight: 600, align: Center } }
-Text.hug-title { resting: { fg: color.text, font-size: 14px, font-weight: 700 } }
-Text.hug-caption { resting: { fg: color.muted, font-size: 12px } }
-Button.motion-button { resting: { bg: color.surface-raised, fg: color.text, border: 1px solid color.outline-soft, radius: 8px, pad: 10px 14px, font-size: 14px, font-weight: 650, transform: translate(0px, 0px) scale(1) }
-  hover: { bg: color.surface-hover, border: 1px solid color.accent, glow: 8px 0px #69a7ff80, transform: translate(0px, -2px) scale(1.02) }
-  pressed: { bg: color.surface-pressed, fg: color.accent-hover }
+Text.hug-title { resting: { fg: color.text, font-size: 13px, font-weight: 700 } }
+Text.hug-caption { resting: { fg: color.text-tertiary, font-size: 11px } }
+Panel.fade-card { resting: { bg: color.fade-to, border: 1px solid color.accent-border, radius: 8px, pad: 12px, align: Center, justify: Center, animation: fade-in 800ms 1 ease-out } }
+Text.fade-label { resting: { fg: color.text, font-size: 13px, font-weight: 600, align: Center } }
+Button.motion-button { resting: { bg: color.chip, fg: color.text, border: 1px solid color.stroke-strong, radius: 8px, pad: 10px 14px, font-size: 13px, font-weight: 650, transform: translate(0px, 0px) scale(1) }
+  hover: { bg: color.surface-hover, border: 1px solid color.accent-border, glow: 10px 0px color.glow, transform: translate(0px, -2px) scale(1.02) }
+  pressed: { bg: color.surface-pressed, fg: color.accent }
+  focus: { outline: 2px solid color.accent-border, outline-offset: 2px }
   transition: resting -> hover 160ms ease-out
   transition: hover -> resting 160ms ease-out
   transition: hover -> pressed 70ms ease-out
   transition: pressed -> resting 140ms ease-out
 }
 Button.finish-hover { resting: { animation-cancel: finish } }
-Panel.motion-swatch { resting: { bg: color.surface-raised, border: 1px solid color.outline-soft, radius: 7px, align: Center, justify: Center, animation: pulse 1.4s infinite ease-in-out cancel(finish) }
-  hover: { border: 1px solid color.accent } }
-ProgressBar.motion-progress { resting: { bg: color.outline, fg: color.accent, radius: 6px } }
-ProgressBar.event-meter { resting: { bg: color.outline, fg: color.accent-hover, radius: 6px, animation: fill-to-value 1200ms paused ease-out } }
+Panel.motion-swatch { resting: { bg: color.pulse-low, border: 1px solid color.stroke, radius: 7px, align: Center, justify: Center, animation: pulse 1.4s infinite ease-in-out cancel(finish) }
+  hover: { border: 1px solid color.accent-border } }
+ProgressBar.motion-progress { resting: { bg: color.stroke, fg: color.accent, radius: 6px } }
+ProgressBar.event-meter { resting: { bg: color.stroke, fg: color.accent-hover, radius: 6px, animation: fill-to-value 1200ms paused ease-out } }
 
 keyframes fade-in {
-  from { opacity: 0, bg: #17223500 }
-  to { opacity: 1, bg: #172235ff }
+  from { opacity: 0, bg: color.fade-from }
+  to { opacity: 1, bg: color.fade-to }
 }
 keyframes pulse {
-  from { opacity: 0.42, bg: #202f4666, transform: rotate(0deg) }
-  50% { opacity: 1, bg: #386194ff, transform: rotate(1.5deg) }
-  to { opacity: 0.42, bg: #202f4666, transform: rotate(0deg) }
+  from { opacity: 0.45, bg: color.pulse-low, transform: rotate(0deg) }
+  50% { opacity: 1, bg: color.pulse-high, transform: rotate(1.2deg) }
+  to { opacity: 0.45, bg: color.pulse-low, transform: rotate(0deg) }
 }
 keyframes fill-to-value { from { value: 0 } to { value: 1 } }
 
-DockHost.docking-host { resting: { bg: color.surface, pad: 4px, border: 1px solid color.outline, radius: 7px, min-size: 520px 300px } }
-DockPanel.dock-panel { resting: { bg: color.surface, fg: color.text, pad: 10px, font-size: 13px } }
-DockHeader { resting: { bg: color.surface-raised, fg: color.text, pad: 8px, font-size: 13px, font-weight: 600, radius: 6px 6px 0px 0px }
-  hover: { bg: color.surface-hover } pressed: { bg: color.surface-pressed } disabled: { opacity: 0.48 } }
-DockTab { resting: { bg: color.canvas, fg: color.muted, pad: 8px, font-size: 13px }
-  hover: { bg: color.surface-hover, fg: color.text }
-  selected: { bg: color.surface-raised, fg: color.accent, border: 1px solid color.accent }
-  pressed: { bg: color.surface-pressed } disabled: { opacity: 0.48 } }
-DockCloseButton { resting: { fg: color.muted, font-size: 16px, radius: 4px, align: Center }
-  hover: { bg: #9c3e52, fg: #ffffff } pressed: { bg: #762f40, fg: #ffffff } disabled: { opacity: 0.4 } }
-DockSplitter { resting: { bg: color.outline }
+// Docking workspace.
+DockHost.docking-host { resting: { bg: color.dock-surface, pad: 4px, border: 1px solid color.stroke, radius: 8px, min-size: 520px 300px } }
+DockPanel.dock-panel { resting: { bg: color.dock-panel, fg: color.text, pad: 10px, font-size: 13px } }
+DockHeader { resting: { bg: color.surface-raised, fg: color.text, pad: 7px 8px, font-size: 12px, font-weight: 600, radius: 6px 6px 0px 0px }
+  hover: { bg: color.surface-hover } pressed: { bg: color.surface-pressed } disabled: { opacity: 0.5 } }
+DockTab { resting: { bg: #00000000, fg: color.text-tertiary, pad: 6px 8px, font-size: 12px }
+  hover: { bg: color.tab-hover, fg: color.text }
+  selected: { bg: color.surface-raised, fg: color.accent, border: 1px solid color.accent-border }
+  pressed: { bg: color.surface-pressed } disabled: { opacity: 0.5 } }
+DockCloseButton { resting: { fg: color.text-tertiary, font-size: 14px, radius: 4px, align: Center }
+  hover: { bg: color.close-hover, fg: #ffffff } pressed: { bg: color.close-pressed, fg: #ffffff } disabled: { opacity: 0.4 } }
+DockSplitter { resting: { bg: color.stroke }
   hover: { bg: color.accent } pressed: { bg: color.accent-hover } dragging: { bg: color.accent-hover } }
-DockPreview { resting: { bg: #377EF288, border: 2px solid #80B7FFFF, radius: 5px }
-  dragging: { bg: #377EF2AA, border: 2px solid #A9CEFFFF } }
+DockPreview { resting: { bg: color.preview, border: 2px solid color.preview-border, radius: 6px }
+  dragging: { bg: color.preview, border: 2px solid color.accent } }

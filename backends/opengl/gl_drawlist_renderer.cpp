@@ -161,7 +161,8 @@ bool GlDrawListRenderer::createProgram() {
 	GLuint a = compile(GL_VERTEX_SHADER, vs), b = compile(GL_FRAGMENT_SHADER, fs);
 	if (!a || !b) {
 		if (a)m_deleteShader(a);
-		if (b)m_deleteShader(b);return false;
+		if (b)m_deleteShader(b);
+		return false;
 	}
 	m_program = m_createProgram();m_attachShader(m_program, a);m_attachShader(m_program, b);
 	const char* names[] = { "p","uv","c0","c1","halfSize","radii","aux","border","prim","flags","c2","c3" };

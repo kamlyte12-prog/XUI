@@ -60,6 +60,21 @@ namespace xui {
 			}
 			return {};
 		}
+		static std::string dockPanelAt(const UiRuntime& runtime, Vec2 point) {
+			u32 index = runtime.hitTestNode(point);
+			for (u32 guard = 0; index < runtime.m_nodes.size() && guard < runtime.m_nodes.size(); ++guard) {
+				const UiRuntime::Node& node = runtime.m_nodes[index];
+				if (node.dockPanel && node.id.v) return std::string(runtime.m_strings->view(node.id));
+				if (node.parentIndex == 0xFFFFFFFFu) break;
+				index = node.parentIndex;
+			}
+			return {};
+		}
+		static f32 firstDockSplitRatio(const UiRuntime& runtime) {
+			for (const UiRuntime::DockHostState& host : runtime.m_dockHosts)
+				if (host.tree.splitterCount()) return host.tree.splitRatio(host.tree.splitterAt(0).node);
+			return -1.f;
+		}
 	};
 }
 
@@ -898,6 +913,84 @@ Button.overlay-action { resting: { pad: 0px, bg: #00CC44FF, fg: #FFFFFFFF, borde
 		CHECK(scopedHeader && scopedHeader[2] > scopedHeader[0]); // blue default header is present on tear-off surface
 		CHECK(scopedContent && scopedContent[1] > scopedContent[0] * 2); // unrelated red sibling and outer clip cannot bleed in
 		std::cout << "Dock native-surface proof: scoped subtree pixel header=(110,10) blue; child=(180,60) green; no sibling paint or ancestor clip.\n";
+	}
+
+	TEST(ui_runtime_floating_dock_panel_paints_above_chrome_and_owns_pointer) {
+		constexpr std::string_view xuiSource = R"(
+Window(size: 460x320) {
+  DockHost[id: "host", width: 100%, height: 100%, gutter: 12px, headerHeight: 24px] {
+    DockPanel(title: "Left")[id: "left", region: "Center", preferredSize: 200x280] {
+      Text("Left body")
+    }
+    DockPanel(title: "Right")[id: "right", region: "Right", target: "left", preferredSize: 200x280] {
+      Text("Right body")
+    }
+    DockPanel(title: "Float")[id: "float", floating: true, closable: false, preferredSize: 180x140] {
+      Button[id: "float-action", class: "float-action", label: "Press", width: 100%, height: 100%, press: onFloat]
+    }
+    DockPanel(title: "Top")[id: "top", floating: true, closable: false, preferredSize: 180x140] {
+      Text("Top body")
+    }
+  }
+}
+)";
+		constexpr std::string_view xssSource = R"(
+Window, DockHost { resting: { pad: 0px, border: 0px solid #00000000 } }
+DockPanel { resting: { pad: 0px, bg: #101820FF, fg: #FFFFFFFF, border: 0px solid #00000000, shadow: 0px 0px 0px 0px #00000000 } }
+DockHeader { resting: { bg: #FF0000FF, fg: #FFFFFFFF, border: 0px solid #00000000, pad: 4px }
+  floating: { bg: #00FF00FF } }
+DockSplitter { resting: { bg: #FF0000FF } }
+Button.float-action { resting: { bg: #00CC44FF, fg: #FFFFFFFF, pad: 0px, border: 0px solid #00000000 } }
+)";
+		StringInterner strings;
+		auto document = parseXui(xuiSource, "dock-floating-chrome.xui", strings);
+		auto styles = compileXss(xssSource, "dock-floating-chrome.xss", strings);
+		CHECK(document.has_value()); CHECK(styles.has_value());
+		if (!document || !styles) return;
+		TextSystem text; UiRuntime ui; std::string error;
+		CHECK(ui.build(*document, *styles, strings, text, {}, error));
+		if (!error.empty()) return;
+		ui.layout(460.f, 320.f);
+		const Vec2 origin = UiRuntimeFontWeightProbe::dockHostContentOrigin(ui, "host");
+		const Rect left = UiRuntimeFontWeightProbe::bounds(ui, "left");
+		const Rect right = UiRuntimeFontWeightProbe::bounds(ui, "right");
+		const f32 gutterX = (left.right() + right.x) * 0.5f;
+		DockPanelValue floatValue = std::get<DockPanelValue>(*ui.value("float"));
+		floatValue.bounds = { gutterX - origin.x - 60.f, 30.f, 180.f, 140.f };
+		CHECK(ui.setValue("float", floatValue));
+		DockPanelValue topValue = std::get<DockPanelValue>(*ui.value("top"));
+		topValue.bounds = { floatValue.bounds.x + 90.f, 80.f, 180.f, 140.f };
+		CHECK(ui.setValue("top", topValue));
+		ui.layout(460.f, 320.f);
+		const Rect floatRect = UiRuntimeFontWeightProbe::bounds(ui, "float");
+		CHECK(floatRect.w > 0.f && floatRect.h > 0.f);
+		CHECK(floatRect.contains({ gutterX, floatRect.y + 60.f }));
+
+		SoftRenderer renderer; CHECK(renderer.init({ 460, 320, 1.f, nullptr, false }));
+		Painter painter; painter.begin(460, 320, 1.f); ui.paint(painter);
+		renderer.beginFrame({ 460, 320, 1.f, Color{ 0, 0, 0, 1 }, 1 });
+		renderer.submit(painter.finish()); renderer.endFrame();
+		const Image image = renderer.snapshot();
+		// The floating title bar was skipped while floating panels were laid out inactive.
+		const u8* headerPixel = image.px(static_cast<u32>(floatRect.right() - 6.f), static_cast<u32>(floatRect.y + 10.f));
+		CHECK(headerPixel && headerPixel[1] > 180 && headerPixel[0] < 80);
+		// The floating body must cover the docked splitter, which now lives on a higher layer
+		// than page content but below floating panels.
+		const u8* gutterPixel = image.px(static_cast<u32>(gutterX), static_cast<u32>(floatRect.y + 60.f));
+		CHECK(gutterPixel && gutterPixel[1] > 120 && gutterPixel[0] < 80);
+
+		const f32 ratioBefore = UiRuntimeFontWeightProbe::firstDockSplitRatio(ui);
+		const Vec2 floatBodyPoint{ origin.x + floatValue.bounds.x + 20.f, origin.y + floatValue.bounds.y + 60.f };
+		const Vec2 overlapPoint{ origin.x + floatValue.bounds.x + 100.f, origin.y + 100.f };
+		CHECK_EQ(UiRuntimeFontWeightProbe::dockPanelAt(ui, overlapPoint), std::string("top"));
+		DockPressProbe probe; ui.setEventHandler(recordDockPress, &probe);
+		CHECK(ui.pointerDown(floatBodyPoint));
+		ui.pointerUp(floatBodyPoint);
+		// Pressing a floating body raises it instead of starting a splitter drag behind it.
+		CHECK_EQ(UiRuntimeFontWeightProbe::dockPanelAt(ui, overlapPoint), std::string("float"));
+		CHECK_NEAR(UiRuntimeFontWeightProbe::firstDockSplitRatio(ui), ratioBefore, 0.0001f);
+		std::cout << "Dock floating chrome proof: header pixel green, body-over-gutter pixel green, "
+			"body press raised float and left the split ratio at " << ratioBefore << ".\n";
 	}
 
 	std::string readExample(std::string_view filename) {

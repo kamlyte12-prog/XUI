@@ -2,6 +2,37 @@
 
 This file records project changes, design decisions, trade-offs, current status, and next steps. It is updated as implementation work lands.
 
+## 2026-11-18 — Dock chrome layering, alignment, and default visual pass
+
+### Audit and root causes
+
+- Floating panels reported `active = false` from `DockTree::layout()`, so the chrome pass treated them as inactive tabs and skipped their title bars and close buttons. Hit testing still worked, which made the defect look like a paint-only z-order bug.
+- Splitter drags clamped the stored ratio only to `0.01...0.99`, not to the feasible min/max range. Once a pane reached its minimum, the ratio kept travelling and reversing the pointer first crossed a dead zone before the splitter moved.
+- Dock chrome was painted in one post-tree pass that sorted all panels together. A floating panel body from the retained stack could therefore be covered by a back panel's title bar. Floating bodies, floating chrome, docked chrome, previews, and popups did not have a single explicit layer contract.
+- Floating panels did not own pointer presses before splitters and docked headers. A press on a floating body could start a hidden splitter drag, and only title-bar presses raised a panel.
+- `DockTree` stores panel bounds in the host content box, but absolute layout places children against the host border box. Panel bodies were offset from their tree-derived chrome and hit regions; the default DockHost border exposed the mismatch. The new default border also changed content geometry in existing tests.
+- Default `DockHeader:floating` and `DockTab:selected` set their own backgrounds, which shadowed authored `resting` backgrounds. That violated the existing authored-theme override contract and produced a white floating header even in dark themes.
+
+### Changes and decisions
+
+- `DockTree::layout()` marks floating panels active, and `resizeSplit()` clamps to the feasible minimum/maximum range instead of fixed `0.01...0.99`.
+- Added an explicit dock paint-layer contract: normal content 0, docked chrome/scrollbars/tabs 1, floating bodies plus their own chrome and the drop preview 2, popups/menus/tooltips 3. Floating chrome is emitted per panel between its own body and the next body, so a front body occludes a back header while a panel never loses its own chrome.
+- Floating panels are hit-tested before splitters and docked headers; any body press raises the panel. Cursor resolution follows the same priority, so a splitter resize cursor cannot appear through a floating body.
+- Added the host content inset (`border + padding`) to DockPanel absolute positions. Bodies, synthetic chrome, splitter hit regions, floating bounds, and the value API now share the same content-box coordinate model.
+- Removed the default DockHost border so host geometry stays neutral unless an application authors one. Redesigned the built-in dock defaults around cool neutral header/tab surfaces, a transparent splitter, accent selected text/outline, red close hover, and floating elevation. State-specific defaults no longer set backgrounds that would shadow authored `resting` rules.
+- Kept `.xui` structure and `.xss` appearance separate. No platform or renderer interface changed; the work uses the existing backend-neutral Painter/DrawList path.
+
+### Verification
+
+- Full dev build succeeded and `ctest --preset dev --output-on-failure` passed **1/1**; the direct suite reports **230 tests, 0 failed**.
+- Regressions cover feasible splitter clamping, floating active state, floating chrome pixels, body-over-gutter occlusion, floating-first hit order, body-press raising, and authored dock background overrides.
+- Captured the `--profile-docking` showcase at 125% in dark and light themes. Floating Hierarchy/Inspector panels now show aligned title bands and close buttons, and the docked Console chrome no longer paints over floating bodies.
+
+### Limits and next steps
+
+- The two captures are scripted visual inspections, not a full pointer-driven checklist. Native tear-off move/resize/redock/close, continuous resize, normal close, and mixed-DPI monitor movement remain open.
+- Linux/macOS are compiled by hosted CI but not visually exercised in this pass. The capture host has one 125% monitor, so cross-monitor `DpiChange` cannot be verified here.
+
 ## 2026-11-17 — Fluent Windows 11 showcase, correct GLFW DPI, and crisp lines
 
 ### Audit and findings

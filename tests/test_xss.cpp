@@ -337,11 +337,11 @@ TEST(xss_fluent2_defaults_apply_and_authored_rules_override) {
 	MatchInput dockHeader; dockHeader.type = strings.intern("DockHeader");
 	PropTable floatingHeader; defaults.resolve(defaults.match(dockHeader),
 		stateBit(State::Resting) | stateBit(State::Selected) | stateBit(State::Floating), 0, floatingHeader);
-	CHECK(floatingHeader.has(PropId::Bg) && floatingHeader.get(PropId::Bg).atoms[0].bits == 0xe8f3fcffu);
+	CHECK(floatingHeader.has(PropId::Bg) && floatingHeader.get(PropId::Bg).atoms[0].bits == 0xf7f9fcffu);
 	CHECK(floatingHeader.has(PropId::Border));
 	PropTable activeDockTab; MatchInput dockTab; dockTab.type = strings.intern("DockTab");
 	defaults.resolve(defaults.match(dockTab), stateBit(State::Resting) | stateBit(State::Selected), 0, activeDockTab);
-	CHECK(activeDockTab.has(PropId::Bg) && activeDockTab.get(PropId::Bg).atoms[0].bits == 0xe8f3fcffu);
+	CHECK(activeDockTab.has(PropId::Bg) && activeDockTab.get(PropId::Bg).atoms[0].bits == 0xf7f9fcffu);
 	CHECK(activeDockTab.has(PropId::Fg) && activeDockTab.get(PropId::Fg).atoms[0].bits == 0x0f6cbdffu);
 	auto blueTheme = mustCompile(strings,
 		"DockHeader { resting: { bg: #172235 } } DockTab { resting: { bg: #101827 } }");

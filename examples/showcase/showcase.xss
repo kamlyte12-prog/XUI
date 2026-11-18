@@ -48,6 +48,7 @@ tokens {
   color.image = #ffffff07
   color.dock-panel = #0e192a
   color.dock-surface = #0a1322
+  color.dock-header-float = #1c2d47
   color.pulse-low = #16243a66
   color.pulse-high = #2a5a86
   color.fade-from = #101b2e00
@@ -106,6 +107,7 @@ tokens {
     color.image = #0f172a05
     color.dock-panel = #ffffff
     color.dock-surface = #f3f7fc
+    color.dock-header-float = #eef5fd
     color.pulse-low = #dbe7f633
     color.pulse-high = #7dd3fc
     color.fade-from = #f5f8fd00
@@ -356,17 +358,20 @@ keyframes pulse {
 keyframes fill-to-value { from { value: 0 } to { value: 1 } }
 
 // Docking workspace.
-DockHost.docking-host { resting: { bg: color.dock-surface, pad: 4px, border: 1px solid color.stroke, radius: 8px, min-size: 520px 300px } }
-DockPanel.dock-panel { resting: { bg: color.dock-panel, fg: color.text, pad: 10px, font-size: 13px } }
-DockHeader { resting: { bg: color.surface-raised, fg: color.text, pad: 7px 8px, font-size: 12px, font-weight: 600, radius: 6px 6px 0px 0px }
-  hover: { bg: color.surface-hover } pressed: { bg: color.surface-pressed } disabled: { opacity: 0.5 } }
-DockTab { resting: { bg: #00000000, fg: color.text-tertiary, pad: 6px 8px, font-size: 12px }
+DockHost.docking-host { resting: { bg: color.dock-surface, pad: 4px, border: 1px solid color.stroke, radius: 10px, min-size: 520px 300px } }
+DockPanel.dock-panel { resting: { bg: color.dock-panel, fg: color.text, border: 1px solid color.stroke, radius: 8px, pad: 10px, font-size: 13px, shadow: 0px 18px 40px 2px color.shadow } }
+DockHeader { resting: { bg: color.surface-raised, fg: color.text-secondary, border: 1px solid #00000000, radius: 8px 8px 0px 0px, pad: 7px 10px, font-size: 12px, font-weight: 600 }
+  hover: { bg: color.surface-hover, fg: color.text } pressed: { bg: color.surface-pressed }
+  selected: { fg: color.text }
+  floating: { bg: color.dock-header-float, fg: color.text, border: 1px solid color.stroke }
+  dragging: { bg: color.tab-selected, border: 1px solid color.accent-border } disabled: { opacity: 0.5 } }
+DockTab { resting: { bg: #00000000, fg: color.text-tertiary, pad: 7px 10px, font-size: 12px, radius: 6px 6px 0px 0px }
   hover: { bg: color.tab-hover, fg: color.text }
-  selected: { bg: color.surface-raised, fg: color.accent, border: 1px solid color.accent-border }
+  selected: { bg: color.surface-raised, fg: color.accent, border: 1px solid color.stroke }
   pressed: { bg: color.surface-pressed } disabled: { opacity: 0.5 } }
-DockCloseButton { resting: { fg: color.text-tertiary, font-size: 14px, radius: 4px, align: Center }
+DockCloseButton { resting: { bg: #00000000, fg: color.text-tertiary, font-size: 14px, radius: 4px, align: Center }
   hover: { bg: color.close-hover, fg: #ffffff } pressed: { bg: color.close-pressed, fg: #ffffff } disabled: { opacity: 0.4 } }
-DockSplitter { resting: { bg: color.stroke }
-  hover: { bg: color.accent } pressed: { bg: color.accent-hover } dragging: { bg: color.accent-hover } }
+DockSplitter { resting: { bg: #00000000 }
+  hover: { bg: color.accent-border } pressed: { bg: color.accent } dragging: { bg: color.accent } }
 DockPreview { resting: { bg: color.preview, border: 2px solid color.preview-border, radius: 6px }
   dragging: { bg: color.preview, border: 2px solid color.accent } }

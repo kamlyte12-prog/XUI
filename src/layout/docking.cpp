@@ -235,27 +235,31 @@ namespace xui {
 
     bool DockTree::resizeSplit(u32 splitNode, f32 ratio) {
         if (splitNode >= m_nodes.size() || m_nodes[splitNode].kind != Kind::Split || !std::isfinite(ratio)) return false;
-        const TreeNode& node = m_nodes[splitNode];
-        const f32 main = node.horizontal ? node.bounds.w : node.bounds.h;
-        const f32 available = std::max(0.f, main - m_gutter);
-        if (available <= 0.f) return false;
-        const Vec2 amin = minimum(node.first), bmin = minimum(node.second);
-        const Vec2 amax = maximum(node.first), bmax = maximum(node.second);
-        const f32 minA = node.horizontal ? amin.x : amin.y;
-        const f32 minB = node.horizontal ? bmin.x : bmin.y;
-        const f32 maxA = node.horizontal ? amax.x : amax.y;
-        const f32 maxB = node.horizontal ? bmax.x : bmax.y;
-        if (available < minA + minB) return false;
-        const f32 low = std::max(minA, available - maxB);
-        const f32 high = std::min(maxA, available - minB);
-        if (low > high) return false;
-        // Clamp the stored ratio to the feasible range. The previous code clamped only
-        // against 0/1, so dragging past a minimum left a dead zone: the panel stopped
-        // moving but the ratio kept travelling, and reversing the pointer did not move it
-        // back until the ratio crossed the minimum again.
-        const f32 next = std::clamp(ratio, low / available, high / available);
-        if (node.ratio == next) return false;
-        m_nodes[splitNode].ratio = next;
+		const TreeNode& node = m_nodes[splitNode];
+		const f32 main = node.horizontal ? node.bounds.w : node.bounds.h;
+		const f32 available = std::max(0.f, main - m_gutter);
+		if (available <= 0.f)
+			return false;
+		const Vec2 amin = minimum(node.first), bmin = minimum(node.second);
+		const Vec2 amax = maximum(node.first), bmax = maximum(node.second);
+		const f32 minA = node.horizontal ? amin.x : amin.y;
+		const f32 minB = node.horizontal ? bmin.x : bmin.y;
+		const f32 maxA = node.horizontal ? amax.x : amax.y;
+		const f32 maxB = node.horizontal ? bmax.x : bmax.y;
+		if (available < minA + minB)
+			return false;
+		const f32 low = std::max(minA, available - maxB);
+		const f32 high = std::min(maxA, available - minB);
+		if (low > high)
+			return false;
+		// Clamp the stored ratio to the feasible range. The previous code clamped only
+		// against 0/1, so dragging past a minimum left a dead zone: the panel stopped
+		// moving but the ratio kept travelling, and reversing the pointer did not move it
+		// back until the ratio crossed the minimum again.
+		const f32 next = std::clamp(ratio, low / available, high / available);
+		if (node.ratio == next)
+			return false;
+		m_nodes[splitNode].ratio = next;
         return true;
     }
 
@@ -340,15 +344,15 @@ namespace xui {
             result.floating = panel.floating && !panel.closed;
             result.zOrder = panel.zOrder;
             if (panel.closed) { result.bounds = {}; continue; }
-            if (panel.floating) {
-                // A floating panel is its own active surface. Without this flag the
-                // chrome pass treats it as an inactive tab and skips its title bar.
-                result.bounds = panel.bounds;
-                result.group = kNone;
-                result.active = true;
-                continue;
-            }
-            if (panel.group >= m_nodes.size() || m_nodes[panel.group].kind != Kind::Group) { result.bounds = {}; continue; }
+			if (panel.floating) {
+				// A floating panel is its own active surface. Without this flag the
+				// chrome pass treats it as an inactive tab and skips its title bar.
+				result.bounds = panel.bounds;
+				result.group = kNone;
+				result.active = true;
+				continue;
+			}
+			if (panel.group >= m_nodes.size() || m_nodes[panel.group].kind != Kind::Group) { result.bounds = {}; continue; }
             const TreeNode& group = m_nodes[panel.group];
             result.bounds = group.bounds;
             const auto it = std::find(group.panels.begin(), group.panels.end(), i);

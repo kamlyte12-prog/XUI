@@ -352,7 +352,10 @@ namespace xui {
 				result.active = true;
 				continue;
 			}
-			if (panel.group >= m_nodes.size() || m_nodes[panel.group].kind != Kind::Group) { result.bounds = {}; continue; }
+			if (panel.group >= m_nodes.size() || m_nodes[panel.group].kind != Kind::Group) {
+				result.bounds = {};
+				continue;
+			}
             const TreeNode& group = m_nodes[panel.group];
             result.bounds = group.bounds;
             const auto it = std::find(group.panels.begin(), group.panels.end(), i);

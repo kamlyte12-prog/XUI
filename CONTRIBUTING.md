@@ -53,7 +53,7 @@ The agent [architecture map](plan/architecture.md) maps source modules to respon
 Every push and pull request runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
 
 - **build** — Debug build plus `ctest` on Ubuntu (GCC 13, GCC 13 with ASan + UBSan, Clang 18), macOS 15, and Windows (MSVC with `/W4 /WX`). Because `XUI_WERROR` defaults to `ON`, compiler warnings fail the build — keep your changes warning-clean.
-- **format** — checks the C/C++ lines changed by the push or PR with clang-format 22.1.3. Whole-file formatting is not enforced yet because the tree predates `.clang-format`; new and edited lines must conform.
+- **format** — checks the C/C++ lines the push or PR adds with clang-format 22.1.3 (see [`.github/scripts/check_changed_format.py`](.github/scripts/check_changed_format.py)). Whole-file formatting is not enforced because the tree predates `.clang-format`. A block that consists only of new lines must be formatted exactly as clang-format produces it; where a rewritten block also covers older lines, only the new lines' text and indentation are checked so unrelated legacy code is not reformatted. Run `python3 .github/scripts/check_changed_format.py origin/master...HEAD` before pushing, or add `--apply` to format the blocks your change owns.
 - **clang-tidy** — runs the curated allowlist in [`.clang-tidy`](.clang-tidy) over every `src/**/*.cpp` with clang-tidy 22.1.8, treating warnings as errors. Add checks one at a time after fixing their findings.
 - **fuzz** — builds the parser, layout, and paint harnesses with ASan/UBSan and runs a short smoke pass.
 - **install-consumer** — installs the CMake package to a clean prefix and builds [`cmake/package-consumer/`](cmake/package-consumer) through `find_package(Xui)`.

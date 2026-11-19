@@ -2,6 +2,31 @@
 
 This file records project changes, design decisions, trade-offs, current status, and next steps. It is updated as implementation work lands.
 
+## 2026-11-19 — Format gate scoped to code the change owns
+
+### Audit and root causes
+
+- The hosted `format` job failed on the dock commit. `clang-format-diff` reformats the entire block that encloses a changed line, so its report included untouched legacy lines such as `return true;` next to new code. Applying that report moves the changed-line ranges outwards, the next run reformats the new neighbours, and the gate only converges when whole files are formatted — 6,370 lines for `src/ui/runtime.cpp` alone.
+- Because the job had never passed on this branch, it also reported every earlier commit's new demo and fuzz code (`examples/showcase/glfw_demo.cpp`, `fuzz/fuzz_{layout,paint,parsers}.cpp`). Those are genuinely new lines, so they do need formatting.
+
+### Changes and decisions
+
+- Added `.github/scripts/check_changed_format.py`. It formats the diff's changed ranges with clang-format 22.1.3 and then reports only rewrites whose original lines all belong to the patch. Blocks that mix new and older lines are not rewritten wholesale; their changed lines are still checked for preserved text (a split or join means the line is not formatted) and clang-format indentation. `--apply` formats the blocks the change owns and prints anything left for manual attention.
+- The `format` job calls that script, keeping the existing pull-request/push base computation. It still runs on Ubuntu 24.04 with clang-format 22.1.3 from pip, and still reports a failure with the offending lines.
+- Formatted the new demo/fuzz code the branch already introduced, plus the one dock line that clang-format splits. No behaviour changed; `git diff --stat` for that step is 218 insertions and 112 deletions in four files.
+- Updated `CONTRIBUTING.md` so the gate's behaviour and the local command are documented.
+
+### Verification
+
+- `python3 .github/scripts/check_changed_format.py <merge-base>...HEAD` reports "Changed C++ lines are clang-format clean" on the branch. The same script run against the pre-format commit in a temporary worktree reported 9 files, including `src/ui/runtime.cpp`, `src/layout/docking.cpp`, and the dock tests, so the check still detects unformatted new code.
+- `cmake --build --preset dev` rebuilt all targets and the direct suite reports **230 tests, 0 failed** after the formatting commit.
+- `git diff --check` reports no whitespace errors.
+
+### Limits and next steps
+
+- The gate's mixed-block rule deliberately tolerates a legacy line that clang-format would also rewrite; that line is not reformatted and not reported. Whole-tree formatting remains a separate decision: 91 of 92 project-owned files still differ from `.clang-format`.
+- The hosted `format` job has not yet run with the new script. Docker-less local validation used the same clang-format 22.1.3 wheel on Windows.
+
 ## 2026-11-18 — Dock chrome layering, alignment, and default visual pass
 
 ### Audit and root causes

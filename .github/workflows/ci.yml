@@ -96,8 +96,11 @@ jobs:
 
       - name: Check changed C++ lines
         run: |
-          # Check only lines touched by this push/PR. The existing sources
-          # predate .clang-format, so a whole-tree check would fail on them.
+          # Check only the C++ lines this push/PR adds. The existing sources
+          # predate .clang-format, so a whole-tree check would fail on them, and
+          # clang-format-diff would keep reporting (and then pulling in) legacy
+          # neighbours of a changed line. The script keeps the gate on code the
+          # change owns; see .github/scripts/check_changed_format.py.
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             base="${{ github.event.pull_request.base.sha }}"
             range="$base...HEAD"
@@ -116,13 +119,7 @@ jobs:
             range="$base..HEAD"
           fi
           echo "Checking formatting since $base"
-          changed="$(git diff --name-only -M "$range" -- '*.cpp' '*.hpp' '*.h' ':(exclude)libs/**')"
-          if [ -z "$changed" ]; then
-            echo "No project C++ files changed."
-            exit 0
-          fi
-          git diff -U0 -M "$range" -- '*.cpp' '*.hpp' '*.h' ':(exclude)libs/**' \
-            | clang-format-diff.py -p1 -style=file
+          python3 .github/scripts/check_changed_format.py "$range"
 
   tidy:
     name: clang-tidy

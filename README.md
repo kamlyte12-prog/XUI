@@ -14,7 +14,7 @@ The bundled interactive example uses GLFW and OpenGL. Start with the [user docum
 - `benchmarks/` — performance harnesses; `fuzz/` — deterministic parser/layout/paint fuzzers.
 - `libs/` — pinned vendored source dependencies; see [third-party notices](THIRD_PARTY_NOTICES.md).
 - `docs/` — user guides; `plan/` — agent context, roadmap, and change history.
-- `.github/workflows/` — CI matrix; `cmake/` — shared CMake policy modules and the installed-package consumer fixture.
+- `.github/workflows/` — CI matrix; `.github/scripts/` — CI helpers such as the changed-line format check; `cmake/` — shared CMake policy modules and the installed-package consumer fixture.
 
 ## Getting started
 

@@ -48,7 +48,41 @@ ctest --test-dir build -C Release --output-on-failure
 
 For GCC/Clang sanitizer checks, configure another build tree with `-DXUI_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug`, then build and run `ctest` there.
 
-Xui builds from source and does not currently export an installed CMake package. To consume it from another CMake project in the same build, add the source tree and link the facade target:
+Ninja-based CMake presets are available for the common configurations. `dev` enables tests, benchmarks, fuzzers, and examples; `release` does the same with `CMAKE_BUILD_TYPE=Release`; `minimal` builds only the library with optional features off.
+
+```sh
+cmake --preset dev
+cmake --build --preset dev
+ctest --preset dev
+```
+
+### Install and consume the package
+
+Xui can install its portable libraries, public headers, licenses, and a CMake package config:
+
+```sh
+cmake -S . -B build -DXUI_INSTALL=ON
+cmake --build build --config Release
+cmake --install build --config Release --prefix /path/to/prefix
+```
+
+Then consume the installed package from another CMake project:
+
+```cmake
+find_package(Xui 0.1 CONFIG REQUIRED)
+target_link_libraries(my_app PRIVATE xui::widgets)
+```
+
+Pass the install prefix through `CMAKE_PREFIX_PATH`. The package exports friendly targets (`xui::widgets`, `xui::core`, `xui::layout`, `xui::renderer`, `xui::text`, `xui::image`, `xui::platform`, `xui::assets`, `xui::freetype`, and `xui::harfbuzz`, plus `xui::lunasvg` when image support is enabled). Its config file loads the installed FreeType, HarfBuzz, and optional LunaSVG packages with `find_dependency`; those vendored dependencies install alongside Xui.
+
+The minimal consumer fixture in [`cmake/package-consumer/`](../cmake/package-consumer/CMakeLists.txt) is built in CI. To run it locally after installing:
+
+```sh
+cmake -S cmake/package-consumer -B build/consumer -DCMAKE_PREFIX_PATH=/path/to/prefix
+cmake --build build/consumer
+```
+
+The optional GLFW/OpenGL backends are not part of the installed package; applications that need them can compile those source targets themselves. To consume the source tree in the same build instead, add it and link the facade target:
 
 ```cmake
 add_subdirectory(path/to/xui)
@@ -208,7 +242,8 @@ Applications that need timed updates can call `ui.setTickHandler(callback, conte
 | CMake option | Purpose | Default |
 |---|---|---|
 | `XUI_BUILD_TESTS` | Build `xui_tests` | ON |
-| `XUI_BUILD_BENCHMARKS` | Build benchmarks and fuzz harnesses | ON |
+| `XUI_BUILD_BENCHMARKS` | Build benchmark executables | ON |
+| `XUI_BUILD_FUZZERS` | Build deterministic parser/layout/paint fuzz harnesses | ON |
 | `XUI_BUILD_EXAMPLES` | Build runnable examples | ON |
 | `XUI_BUILD_GLFW_EXAMPLE` | Build GLFW/OpenGL examples | ON |
 | `XUI_BUILD_GLFW_BACKEND` | Build GLFW/OpenGL adapters independently of examples | OFF |

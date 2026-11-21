@@ -39,7 +39,9 @@ public:
 	void submit(const xui::DrawList&) override;
 	void endFrame() override {}
 	void present() override {}
-	xui::RendererCaps caps() const override { return { "OpenGL 2.1 DrawList renderer", 4096, false, false, false }; }
+	xui::RendererCaps caps() const override {
+		return {"OpenGL 2.1 DrawList renderer", 4096, true, false, false};
+	}
 	std::string_view lastError() const override { return m_error; }
 	xui::u32 width() const { return m_width; }
 	xui::u32 height() const { return m_height; }
@@ -51,6 +53,9 @@ private:
 	bool loadFunctions();
 	bool createProgram();
 	void releaseProgram();
+	/// Restore the GL state this renderer needs on the CURRENT context. Each native window (and therefore each
+	/// shared-context surface) starts with default state, so this must run whenever a surface is made current.
+	void applyContextState();
 
 	using CreateShaderFn = GLuint(APIENTRY*)(GLenum);
 	using ShaderSourceFn = void (APIENTRY*)(GLuint, GLsizei, const char* const*, const GLint*);
@@ -69,6 +74,7 @@ private:
 	using GetUniformLocationFn = GLint(APIENTRY*)(GLuint, const char*);
 	using Uniform2fFn = void (APIENTRY*)(GLint, GLfloat, GLfloat);
 	using Uniform1iFn = void (APIENTRY*)(GLint, GLint);
+	using Uniform4fvFn = void(APIENTRY*)(GLint, GLsizei, const GLfloat*);
 	using GenBuffersFn = void (APIENTRY*)(GLsizei, GLuint*);
 	using BindBufferFn = void (APIENTRY*)(GLenum, GLuint);
 	using BufferDataFn = void (APIENTRY*)(GLenum, XuiGLsizeiptr, const void*, GLenum);
@@ -86,7 +92,9 @@ private:
 	LinkProgramFn m_linkProgram = nullptr; GetProgramivFn m_getProgramiv = nullptr; DeleteProgramFn m_deleteProgram = nullptr;
 	GetProgramInfoLogFn m_getProgramInfoLog = nullptr;
 	UseProgramFn m_useProgram = nullptr; GetUniformLocationFn m_getUniformLocation = nullptr;
-	Uniform2fFn m_uniform2f = nullptr; Uniform1iFn m_uniform1i = nullptr;
+	Uniform2fFn m_uniform2f = nullptr;
+	Uniform1iFn m_uniform1i = nullptr;
+	Uniform4fvFn m_uniform4fv = nullptr;
 	GenBuffersFn m_genBuffers = nullptr; BindBufferFn m_bindBuffer = nullptr; BufferDataFn m_bufferData = nullptr;
 	BufferSubDataFn m_bufferSubData = nullptr; DeleteBuffersFn m_deleteBuffers = nullptr;
 	EnableVertexAttribArrayFn m_enableVertexAttribArray = nullptr; DisableVertexAttribArrayFn m_disableVertexAttribArray = nullptr;
@@ -94,6 +102,7 @@ private:
 
 	GLuint m_program = 0, m_vertexBuffer = 0, m_indexBuffer = 0;
 	GLint m_viewportLoc = -1, m_textureLoc = -1, m_hasTextureLoc = -1;
+	GLint m_clipCountLoc = -1, m_clipRectLoc = -1, m_clipRadiiLoc = -1;
 	xui::u32 m_width = 0, m_height = 0;
 	std::string m_error;
 	std::vector<Texture> m_textures;

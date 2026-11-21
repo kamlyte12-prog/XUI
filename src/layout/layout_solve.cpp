@@ -203,7 +203,13 @@ namespace xui {
 			}
 			if (!anyOpen) break;
 			if (viol == 0) {
-				for (std::size_t k = 0; k < n; ++k) if (!items[k].frozen) { items[k].main = items[k].tent; items[k].frozen = true; } break;
+				for (std::size_t k = 0; k < n; ++k) {
+					if (!items[k].frozen) {
+						items[k].main = items[k].tent;
+						items[k].frozen = true;
+					}
+				}
+				break;
 			}
 			for (std::size_t k = 0; k < n; ++k) {
 				FlexItem& it = items[k]; if (it.frozen) continue;
@@ -436,8 +442,18 @@ namespace xui {
 				const Align a = effAlign(st, cs);
 				const bool sw = a == Align::Stretch && cs.width.k == LenKind::Auto, sh = a == Align::Stretch && cs.height.k == LenKind::Auto;
 				const f32 pw = resolvePct(cs.width, cellW, true, m_taint), ph = resolvePct(cs.height, cellH, true, m_taint);
-				Size s = measure(g.node, Constraint{ std::isnan(pw) ? std::max(0.f, cellW) : clampv(pw, layoutMin(cs, true, cellW), layoutMax(cs, true, cellW)), std::isnan(ph) ? std::max(0.f, cellH) : clampv(ph, layoutMin(cs, false, cellH), layoutMax(cs, false, cellH)),
-													sw || !std::isnan(pw), sh || !std::isnan(ph) });
+				const f32 wantW = std::isnan(pw) ? std::max(0.f, cellW)
+												 : clampv(pw, layoutMin(cs, true, cellW), layoutMax(cs, true, cellW));
+				const f32 wantH = std::isnan(ph) ? std::max(0.f, cellH)
+												 : clampv(ph, layoutMin(cs, false, cellH), layoutMax(cs, false, cellH));
+				Size s = measure(g.node, Constraint{wantW, wantH, sw || !std::isnan(pw), sh || !std::isnan(ph)});
+				// Leaves report intrinsic content even under a fixed constraint. Apply the cell
+				// size explicitly so stretched and percentage-sized grid children fill their
+				// tracks instead of only occupying the top-left corner of the cell.
+				if (sw || !std::isnan(pw))
+					s.w = wantW;
+				if (sh || !std::isnan(ph))
+					s.h = wantH;
 				auto off = [&](f32 room, f32 size) { return a == Align::Center ? (room - size) * 0.5f : a == Align::End ? room - size : 0.f; };
 				Rect& r = m_rect[g.node];
 				r.x = insetEdges.l + x + g.ml + off(cellW, s.w); r.y = insetEdges.t + y + g.mt + off(cellH, s.h);

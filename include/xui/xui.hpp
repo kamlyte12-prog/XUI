@@ -110,6 +110,10 @@ namespace xui {
 			WindowHandle window;
 			RenderSurfaceHandle surface;
 			bool dragging = false;
+			/// False until the first frame has been drawn into this native window. New tear-off
+			/// windows are created hidden and revealed after their first present so the client
+			/// area never flashes an unpainted (black) surface.
+			bool shown = false;
 			Vec2 dragOffset{};
 		};
 

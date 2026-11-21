@@ -2,6 +2,179 @@
 
 This file records project changes, design decisions, trade-offs, current status, and next steps. It is updated as implementation work lands.
 
+## 2026-11-20 - Rounded-corner AA, child clipping, and native tear-off lifecycle
+
+### Audit and root causes
+
+- Rounded corners were rectangular: ancestor clipping used axis-aligned scissors only, while the analytic rounded-rectangle coverage path applied just to the widget's own body. A child background painted into the parent's corner square and the visible arc was effectively unsampled at the boundary, which read as pixelation.
+- The native tear-off surface painted the panel with the main window's ancestor clips still active, so only the top 124 px of a 400x300 surface were filled. The window was also revealed before its first paint, `WM_ERASEBKGND` used the class brush, and GL state (blend, unpack alignment, depth/cull) was not restored when the new context became current. The header close button stayed in hover because pointer tracking only exists for the main window.
+- Closing a native float writes `floatMode`/`osWindow` through the value API. `setValue` dropped `osWindow`, so the close looked like a dock change, fired handlers, and reconciliation recreated the window.
+
+### Changes and decisions
+
+- The painter's clip stack now carries per-corner radii and emits a per-command `ClipShape` of at most four rounded rectangles. Shapes that no primitive corner can touch are filtered out, identical shapes are deduped, and at the cap the smallest-area (most restrictive) shapes stay. Scissor rectangles remain the conservative bound and the fast path.
+- The soft renderer multiplies sample coverage by each clip shape's signed-distance coverage; the OpenGL renderer uploads the four rect/radii pairs and does the same in the fragment shader. This keeps the existing analytic SDF coverage (`cov(d) = clamp(0.5 - d, 0, 1)`) as the only anti-aliasing path; 4x MSAA is intentionally not enabled.
+- The runtime pushes a rounded clip for every ancestor with `radius > 0` in addition to ScrollView/dock-panel rectangle clips. A node's own body is never clipped by its own radius, avoiding a second mask over an already anti-aliased edge. A native tear-off surface skips the former window's ancestors and clips its children with the panel's own radius.
+- Native floats are created hidden, painted once, and then revealed through `Platform::setWindowVisible`. Custom-chrome windows report `WM_ERASEBKGND` as handled, `applyContextState()` restores GL state on every surface activation, hover states are suppressed in scoped paint, and the window's corner radius comes from `DockPanel`'s `.xss` radius.
+- `DockPanelValue::osWindow` is returned and persisted as a policy change with no dock handler notification, so a closed native window stays closed. Floating-panel reconciliation runs in the visible draw block so programmatically created/value-API floats get their native windows too.
+
+### Verification
+
+- `cmake --build --preset dev` succeeds; `ctest --preset dev --output-on-failure` passes 1/1; the direct suite reports **235 tests, 0 failed**.
+- New regressions cover clip-shape emission/filtering, nesting/deduping/capping, a soft-rendered child masked by a rounded parent, runtime corner pixels for a child filling its rounded parent, and the native tear-off hidden-create/reveal/close lifecycle through `NullRenderer`/`NullPlatform` (including the panel's radius and the `osWindow` policy).
+- The `--profile-os-window` showcase paints the full 400x300 tear-off surface; scripted `WM_CLOSE` destroyed the window and the panel returned as an in-app float without recreation (`after_close.png`). `--profile-docking` was recaptured with no visual change in chrome or layering.
+- The changed-line format gate is clean with clang-format 22.1.3. While the tree was dirty the check used a single merge-base sha so it saw the working tree, not just committed trees.
+
+### Limits and next steps
+
+- Visible native move/resize/redock and continuous border-drag resize remain unexercised; the scripted close and full-surface capture do not establish interaction cadence.
+- The capture host has one 125% monitor, so cross-monitor `DpiChange` and mixed-DPI tear-off movement remain unverified. Linux/macOS compile in hosted CI but their native tear-off behavior is not visually exercised.
+- More than four rounded ancestors on one command keep the most restrictive shapes; that is conservative but can square an outer arc when four inner ones already apply.
+
+## 2026-11-19 — Format gate scoped to code the change owns
+
+### Audit and root causes
+
+- The hosted `format` job failed on the dock commit. `clang-format-diff` reformats the entire block that encloses a changed line, so its report included untouched legacy lines such as `return true;` next to new code. Applying that report moves the changed-line ranges outwards, the next run reformats the new neighbours, and the gate only converges when whole files are formatted — 6,370 lines for `src/ui/runtime.cpp` alone.
+- Because the job had never passed on this branch, it also reported every earlier commit's new demo and fuzz code (`examples/showcase/glfw_demo.cpp`, `fuzz/fuzz_{layout,paint,parsers}.cpp`). Those are genuinely new lines, so they do need formatting.
+
+### Changes and decisions
+
+- Added `.github/scripts/check_changed_format.py`. It formats the diff's changed ranges with clang-format 22.1.3 and then reports only rewrites whose original lines all belong to the patch. Blocks that mix new and older lines are not rewritten wholesale; their changed lines are still checked for preserved text (a split or join means the line is not formatted) and clang-format indentation. `--apply` formats the blocks the change owns and prints anything left for manual attention.
+- The `format` job calls that script, keeping the existing pull-request/push base computation. It still runs on Ubuntu 24.04 with clang-format 22.1.3 from pip, and still reports a failure with the offending lines.
+- Formatted the new demo/fuzz code the branch already introduced, plus the one dock line that clang-format splits. No behaviour changed; `git diff --stat` for that step is 218 insertions and 112 deletions in four files.
+- Updated `CONTRIBUTING.md` so the gate's behaviour and the local command are documented.
+
+### Verification
+
+- `python3 .github/scripts/check_changed_format.py <merge-base>...HEAD` reports "Changed C++ lines are clang-format clean" on the branch. The same script run against the pre-format commit in a temporary worktree reported 9 files, including `src/ui/runtime.cpp`, `src/layout/docking.cpp`, and the dock tests, so the check still detects unformatted new code.
+- `cmake --build --preset dev` rebuilt all targets and the direct suite reports **230 tests, 0 failed** after the formatting commit.
+- `git diff --check` reports no whitespace errors.
+
+### Limits and next steps
+
+- The gate's mixed-block rule deliberately tolerates a legacy line that clang-format would also rewrite; that line is not reformatted and not reported. Whole-tree formatting remains a separate decision: 91 of 92 project-owned files still differ from `.clang-format`.
+- The hosted `format` job has not yet run with the new script. Docker-less local validation used the same clang-format 22.1.3 wheel on Windows.
+
+## 2026-11-18 — Dock chrome layering, alignment, and default visual pass
+
+### Audit and root causes
+
+- Floating panels reported `active = false` from `DockTree::layout()`, so the chrome pass treated them as inactive tabs and skipped their title bars and close buttons. Hit testing still worked, which made the defect look like a paint-only z-order bug.
+- Splitter drags clamped the stored ratio only to `0.01...0.99`, not to the feasible min/max range. Once a pane reached its minimum, the ratio kept travelling and reversing the pointer first crossed a dead zone before the splitter moved.
+- Dock chrome was painted in one post-tree pass that sorted all panels together. A floating panel body from the retained stack could therefore be covered by a back panel's title bar. Floating bodies, floating chrome, docked chrome, previews, and popups did not have a single explicit layer contract.
+- Floating panels did not own pointer presses before splitters and docked headers. A press on a floating body could start a hidden splitter drag, and only title-bar presses raised a panel.
+- `DockTree` stores panel bounds in the host content box, but absolute layout places children against the host border box. Panel bodies were offset from their tree-derived chrome and hit regions; the default DockHost border exposed the mismatch. The new default border also changed content geometry in existing tests.
+- Default `DockHeader:floating` and `DockTab:selected` set their own backgrounds, which shadowed authored `resting` backgrounds. That violated the existing authored-theme override contract and produced a white floating header even in dark themes.
+
+### Changes and decisions
+
+- `DockTree::layout()` marks floating panels active, and `resizeSplit()` clamps to the feasible minimum/maximum range instead of fixed `0.01...0.99`.
+- Added an explicit dock paint-layer contract: normal content 0, docked chrome/scrollbars/tabs 1, floating bodies plus their own chrome and the drop preview 2, popups/menus/tooltips 3. Floating chrome is emitted per panel between its own body and the next body, so a front body occludes a back header while a panel never loses its own chrome.
+- Floating panels are hit-tested before splitters and docked headers; any body press raises the panel. Cursor resolution follows the same priority, so a splitter resize cursor cannot appear through a floating body.
+- Added the host content inset (`border + padding`) to DockPanel absolute positions. Bodies, synthetic chrome, splitter hit regions, floating bounds, and the value API now share the same content-box coordinate model.
+- Removed the default DockHost border so host geometry stays neutral unless an application authors one. Redesigned the built-in dock defaults around cool neutral header/tab surfaces, a transparent splitter, accent selected text/outline, red close hover, and floating elevation. State-specific defaults no longer set backgrounds that would shadow authored `resting` rules.
+- Kept `.xui` structure and `.xss` appearance separate. No platform or renderer interface changed; the work uses the existing backend-neutral Painter/DrawList path.
+
+### Verification
+
+- Full dev build succeeded and `ctest --preset dev --output-on-failure` passed **1/1**; the direct suite reports **230 tests, 0 failed**.
+- Regressions cover feasible splitter clamping, floating active state, floating chrome pixels, body-over-gutter occlusion, floating-first hit order, body-press raising, and authored dock background overrides.
+- Captured the `--profile-docking` showcase at 125% in dark and light themes. Floating Hierarchy/Inspector panels now show aligned title bands and close buttons, and the docked Console chrome no longer paints over floating bodies.
+
+### Limits and next steps
+
+- The two captures are scripted visual inspections, not a full pointer-driven checklist. Native tear-off move/resize/redock/close, continuous resize, normal close, and mixed-DPI monitor movement remain open.
+- Linux/macOS are compiled by hosted CI but not visually exercised in this pass. The capture host has one 125% monitor, so cross-monitor `DpiChange` cannot be verified here.
+
+## 2026-11-17 — Fluent Windows 11 showcase, correct GLFW DPI, and crisp lines
+
+### Audit and findings
+
+- The showcase was visually dated and did not exercise the newer Fluent vocabulary, theme switching, or the full eight-section structure. The redesign keeps authored structure/layout in `showcase.xui` and all paint/state decisions in `showcase.xss`.
+- A live audit at the local 125% monitor (`AppliedDPI=120`) exposed a real DPI contract bug. `windowSizeLogical()` returned `glfwGetWindowSize()`, which is physical on Windows/X11, while the renderer used the framebuffer and the painter scaled by `dpiScale()`. The authored 1080×760 window was created 1080 px wide and laid out at 864×608 logical, clipping the custom title bar and the rightmost tabs. The window/framebuffer/content-scale relationship was not normalized.
+- `windowClientScreenOrigin()` added `glfwGetWindowFrameSize()` to `glfwGetWindowPos()`. Win32 implements `glfwGetWindowPos()` with `ClientToScreen(0, 0)`, so it already reports the content-area origin; the frame addition double-counted decorated borders and could offset in-app floating-panel placement.
+- A 1 dp stroke at fractional DPI could cover 1.25 physical pixels and split into two half-alpha rows. SDF coverage already antialiases sloped edges, so only the integer width and axis-aligned perpendicular placement needed snapping.
+- Additional layout/runtime findings: Grid leaves returned intrinsic content even when the solver constrained them to a fixed/stretched cell; inherited text `align` leaked into layout and stopped Grid cells from stretching; nested Tabs pages shrank and centered when the `Tab` selector carried `align: Center`; wrapping quantized the available width with `floor`, so an exact-fit string such as `11` wrapped; and a theme switch replayed style tweens that captured the previous theme's colors.
+
+### Changes and decisions
+
+- Rebuilt the showcase as a Windows 11/Fluent surface: dark Mica-like gradient shell, custom borderless `TitleBar` with framework min/max/close buttons, `#60CDFF` accent, translucent section cards, eight equal-width tabs, live theme toggle/readout, checklists, split panes, docking, images, and Motion & Style transitions/keyframes. The named `@theme light` overrides paint tokens only; layout geometry remains authored.
+- Runtime/layout fixes: resolved Grid children fill their stretched/percentage cells; inherited text alignment no longer drives layout alignment; Tabs pages force cross-axis stretch; text wrap width uses `ceil`; multi-value `pad`, checkbox/CheckItem outlines, and nested animation layout were corrected for the showcase. `setTheme()` clears in-flight `styleTweens` so old-theme colors cannot leak into the new palette.
+- GLFW DPI normalization: a `GlfwScale` helper derives `toLogical` and `content` scales from window size, framebuffer size, and `glfwGetWindowContentScale()`; `GLFW_SCALE_TO_MONITOR` makes `WindowDesc` sizes logical; window, pointer, wheel, and window-position coordinates normalize to logical pixels; `windowClientScreenOrigin` now uses only `glfwGetWindowPos`; and a content-scale callback queues `DpiChange` (new scale in `.scale`, old in `.w`) and invokes the live-resize hook so an OS move can relayout immediately.
+- Crisp strokes: `Painter::capsule()` rounds stroke width to a whole physical pixel and snaps the perpendicular center of axis-aligned strokes with `round(center - r) + r`. Diagonal strokes keep their authored geometry and analytic SDF coverage. Snapping remains disableable through the existing painter option for geometry authoring.
+- Rendering decision: do **not** enable 4× MSAA. The showcase has no `DrawCmd::Custom` 3D viewport, SDF primitives already receive exact analytic coverage (the PPAA-equivalent path), and a 4× backbuffer would only add bandwidth/memory cost without improving widget edges.
+- Refreshed `docs/showcase.png` from a PMv2-aware 1350×950 capture of the Containers tab, downscaled to 1080×760 so it matches the README's checklist/splitter/readout caption.
+
+### Verification
+
+- Full dev build succeeded and `ctest --preset dev --output-on-failure` passed **1/1**; the direct suite reports **228 tests, 0 failed**. All five existing golden images still pass unchanged, so no golden regeneration was needed.
+- Added four render regressions: axis-aligned separator edges land on pixel boundaries; fractional-DPI line widths round to whole pixels; snapping can be disabled; diagonal lines keep analytic coverage. Added runtime regressions for Grid cell filling, Tabs page stretch under centered alignment, and clearing theme transitions, plus a text exact-fit wrap regression.
+- Live verification on the single 125% monitor with a per-monitor-v2-aware capture/input process: client **1350×950 physical**, logical **1080×760**, `dpi=120`, `dpiScale=1.25`; all eight tabs and the full title bar fit. A click at physical `(758,219)` selected **Display** and updated the readout to **Section 5**; a click at physical `(976,102)` toggled **Light mode** and updated the readout to **Light · Mica**. This exercises window→client→logical pointer mapping, not just rendering.
+- 1:1 and 2× nearest-neighbor crops of the capture show single-pixel tab rules and crisp text/edges at 125%.
+- Visible continuous `--profile` run (dev build, VSync disabled): **981 frames / 5.00171 s / 196.133 FPS**. This is bounded continuous-render throughput, not interactive drag/resize pacing.
+
+### Limits and next steps
+
+- Only one 125% monitor is available here, so a real cross-monitor DPI move was not exercised. The app-level `DpiChange` path is covered by the null-platform test; the GLFW content-scale callback was not driven by an actual monitor transition.
+- SVG images still rasterize into 64-pixel-aligned size buckets and can be downscaled with linear filtering; fine vector strokes may still soften. This pass did not change the image raster policy.
+- Hosted CI passed after the branch was pushed: Linux GCC 13, GCC 13 ASan/UBSan, and Clang 18; macOS 15; Windows 2022; and the format, clang-tidy, fuzz, and package-consumer jobs. The push exposed a latent GCC `-Werror=misleading-indentation` line in the OpenGL draw-list renderer plus structured-binding copies in the showcase and game loops; those are fixed. Wall-clock animation tests were widened after a loaded macOS runner completed short transitions before the sampled phase. Visible interaction was spot-checked (tab selection and theme switch), not exhaustively re-run across every tab, popup, drag, resize, and close path.
+- Next: verify a mixed-DPI monitor transition, consider finer SVG raster buckets or vector draw commands for fine line art, and finish the visible interaction checklist (text entry, popups, hover/cursor, scroll, split/dock gestures, continuous resize, normal close).
+
+## 2026-11-14 — Clear the remaining Linux and macOS hosted findings
+
+- Cause: the second hosted run still failed on three portability findings and one sanitizer report. GCC 13 rejected two test loops whose structured bindings copied `std::pair` elements (`-Wrange-loop-construct`). Clang 18 and macOS rejected an unused `beginSystemResize` edge parameter and a `requestRedraw` variable set only to test the handle, and Clang rejected an OpenGL statement indented as if it belonged to the preceding `for` loop. The ASan/UBSan log also showed `CHECK(hasCaret())` failing before an invalid-vptr call from `GlyphAtlas::shutdown()`: the caret test only looks for Windows font paths, so Linux had no font and never painted a caret, and the test declared its `TextSystem` before the renderer backing the atlas, destroying that renderer first.
+- Changes: bind the test loop elements by reference; make the GLFW redraw test use `find(h)` directly; mark the non-Windows `edge` parameter consumed; reformat the OpenGL texture-reuse block into explicit statements; and move the caret test's renderer before the `TextSystem`, skipping it when no platform test font is available and requiring the loaded font to be valid.
+- Decisions/trade-offs: fix the test lifetime and missing-font assumptions rather than weakening the runtime's atlas contract, and keep the test skipped on hosts without a configured font instead of teaching `readTestFont()` new system paths in this CI-only change.
+- Verification: `cmake --build --preset dev` completed all targets and `ctest --preset dev` passed **1/1** in 21.57 s. The changed-line check with clang-format 22.1.3 over the diff from `a9dd89a` reports no replacements.
+- Limits/status: Windows/MSVC local verification only; the GCC/Clang/macOS and ASan fixes are diagnosed from hosted logs and still need a confirming hosted run. The caret regression check remains active on Windows and is skipped on Linux/macOS CI where `readTestFont()` has no candidate path.
+- Next: push the fixes with the showcase redesign and confirm the full hosted matrix.
+
+## 2026-11-14 — Fix findings from the first hosted CI run
+
+- Audit: the first push and its PR run exercised the full matrix. `format` failed on the PR run because the pip package exposes the Linux script as `clang-format-diff.py`, not `clang-format-diff`; the push run only appeared to pass because its new-branch fallback compared `HEAD^`, which contained no C++ changes. `fuzz` built its binaries under `build/fuzz/fuzz/` because the configure directory was `build/fuzz`, while the smoke step looked in `build/fuzz/`. All three Linux builds found issues hidden by MSVC: GCC 13 rejected misleading indentation in `layout_solve.cpp`, Clang 18 rejected an unused `recordDock` test helper, and the ASan build failed because the Windows-only `removeChrome` calls in `glfw_platform.cpp` were unconditional. `clang-tidy-18` failed because Ubuntu's Clang 18 advertises `__cpp_concepts=201907`, so libstdc++ hides `std::expected`. The macOS 14 job was cancelled because that runner image is no longer available. Windows and `install-consumer` passed in both runs.
+- Changes: `format` now invokes `clang-format-diff.py` and, for a new branch push, derives its base from the merge-base with the default branch instead of `HEAD^`. `tidy` installs `clang-tidy==22.1.8` from pip into a temporary venv, keeps clang-18 only for the CMake configure, and runs `clang-tidy`. `fuzz` configures in `build` so the harnesses land at `build/fuzz/` as the smoke step expects. The matrix requests `macos-15` instead of the retired `macos-14`. Source fixes brace the flex-freeze loop in `src/layout/layout_solve.cpp`, remove the unused `tests/test_runtime.cpp` helper, and guard the two `removeChrome` calls with `_WIN32`.
+- Decisions/trade-offs: use the pip clang-tidy 22.1.8 build instead of Ubuntu's older clang-tidy-18 so Clang's advertised concepts support matches the project's C++23 `std::expected` use; this also narrows the local/CI version gap to a patch release. Keep clang-18 as the CMake compiler for the tidy compile database. Compare new branches against the default branch so a push cannot vacuously pass by checking only its last commit.
+- Verification: the first hosted runs identified the failures above and confirmed Windows plus `install-consumer` on both events. After the fixes, the `dev` preset rebuilt and `ctest --preset dev` passed **1/1** in 22.59 s. clang-tidy 22.1.8 reports 0 warnings on 25/25 source files with warnings-as-errors. The workflow parses as YAML with jobs `build`, `format`, `tidy`, `fuzz`, and `install-consumer`; actionlint 1.7.12 and the changed-line format check both pass. Linux wheels exist for clang-format 22.1.3 and clang-tidy 22.1.8, and Clang 22 advertises `__cpp_concepts=202002`, which exposes `std::expected` with libstdc++.
+- Limits/status: a confirming hosted run is pending the next push. macOS 15 availability and the sanitizer/fuzz jobs have not yet been observed in CI. The local fixes were verified on Windows/MSVC; the Linux compiler errors were diagnosed from the hosted logs and are addressed at the source level, not recompiled locally.
+- Next: push the fixes and confirm all jobs on the new run, then record the final matrix result.
+
+## 2026-11-14 — Harden CI with format, clang-tidy, fuzz, and package-consumer jobs
+
+- Audit: the workflow only built and tested the matrix (Ubuntu GCC/ASan/Clang, macOS, Windows). It had no formatting, static-analysis, fuzz-smoke, or installed-package check, and `.clang-format` existed without enforcement. The sources predate that config, so 91 of 92 project-owned C/C++ files differ from whole-file formatting. A trial `bugprone-*`/`performance-*`/`portability-*` audit produced hundreds of legacy findings (reserved identifiers, narrowing conversions, swappable parameters), but also a real use-after-move and several ineffective moves, null-termination, and allocation issues.
+- Changes: added four jobs to `.github/workflows/ci.yml`. `format` installs clang-format 22.1.3 into a temporary pip venv and runs `clang-format-diff` over the lines changed by the push or PR, excluding `libs/`. `tidy` configures a minimal Ubuntu clang-18 build and runs clang-tidy-18 with `--warnings-as-errors='*'` over all 25 `src/**/*.cpp` files. `fuzz` builds the parser/layout/paint harnesses with `XUI_SANITIZE=ON` (ASan/UBSan) and runs 3000 parser iterations, 300 layout seeds x 10 steps, and 300 paint seeds x 50 primitives. `install-consumer` installs a Release build to a clean prefix, rejects any file containing `$GITHUB_WORKSPACE`, and builds/runs `cmake/package-consumer`. Added `.clang-tidy` with an explicit 18-check allowlist and `HeaderFilterRegex: '^$'` so vendored headers are excluded. Fixed the findings: the moved-from `Node` read in `UiRuntime::buildNode`, ineffective `std::move` calls on const tween/atlas entries, `std::sscanf` on a non-null-terminated `string_view`, `size() > 0` misuse, `u8` loop counters compared with `std::size`, missing vector reservations, and an avoidable string temporary. Applied changed-line formatting to `examples/button/button_demo.cpp` and `tests/test_render.cpp`.
+- Decisions/trade-offs: enforce formatting only on changed lines because a whole-tree reformat would bury review and unrelated history; a full reformat remains a separate decision. Pin clang-format so local and CI output agree. Keep the clang-tidy allowlist curated rather than enabling whole families, and add checks one at a time after fixing their findings. Use Ubuntu clang-tidy-18 because it is the available distro tool even though local validation used LLVM 22.1.3. Run sanitizers only on Linux because `XUI_SANITIZE` is a no-op under MSVC.
+- Verification: the workflow parses with PyYAML and reports jobs `build`, `format`, `tidy`, `fuzz`, and `install-consumer`; actionlint 1.7.12 reports no findings. The changed-line format check passes against `master`. clang-tidy 22.1.3 reports 0 warnings on 25/25 source files with warnings-as-errors. The CI-equivalent fuzz configure/build succeeded on Windows and the smoke counts passed: 3000 parser iterations x 3 sources (625 accepted, 8375 rejected, 0 crashes; slowest input 9.02 ms), layout seeds 1..300 x 10 steps (incremental == full), and paint seeds 1..300 x 50 primitives (reordered == naive pixel-for-pixel). The CI-equivalent Release configure/build/install passed, the source-path grep found 0 hits, and the external consumer printed `Xui package consumer: ok`. The `dev` preset rebuilt and `ctest --preset dev` passed **1/1** in 24.83 s.
+- Limits/status: local verification is Windows/MSVC only. The hosted Linux/macOS jobs, clang-tidy-18, and actual ASan/UBSan execution have not run; the branch is not pushed. A cross-version clang-tidy difference between LLVM 22.1.3 locally and clang-tidy-18 in CI remains possible. The tree is still not whole-file clang-format clean (91/92 files), and the changed-line check intentionally preserves that status quo.
+- Next: push the branch or open a PR so the hosted jobs run; fix any Linux/macOS or clang-tidy-18 findings they surface. Decide separately whether to schedule a whole-tree reformat.
+
+## 2026-11-13 — Install/export the portable CMake package
+
+- Audit: the project was source-tree-only and had no install rules or package config. The vendored FreeType, HarfBuzz, LunaSVG, and PlutoVG projects already provide their own install rules and CMake package configs, and the public API lives under `include/xui`. The optional GLFW/OpenGL adapters are not needed by portable consumers.
+- Changes: added `XUI_INSTALL` (defaults to `PROJECT_IS_TOP_LEVEL`) and `GNUInstallDirs`; gave internal targets export names; installed the static portable libraries, public headers, license files, and a versioned `XuiTargets`/`XuiConfig` package under `lib/cmake/Xui`; switched public include directories to `BUILD_INTERFACE`/`INSTALL_INTERFACE`; made the text/image adapters use the exported vendored targets; and added the `cmake/package-consumer/` fixture, which configures only through `find_package(Xui CONFIG REQUIRED)` and links `xui::widgets`.
+- Decisions/trade-offs: install only the portable libraries and leave the optional GLFW/OpenGL backends source-tree-only so the package does not impose a window-system or OpenGL dependency. Reuse the vendored dependencies' own installed configs via `find_dependency` instead of re-exporting their targets. Expose friendly names (`xui::widgets`, `xui::core`, `xui::text`, and so on) while retaining the internal build target names. The installed libraries are static, so consumers must use a compatible configuration and runtime; no runtime dependency was added.
+- Verification: the `dev` preset reconfigured and built successfully after the export changes. `cmake --install` to a temporary prefix completed, and the external consumer configured with `CMAKE_PREFIX_PATH`, built, and printed `Xui package consumer: ok`. The committed consumer fixture uses the same `find_package`/`xui::widgets` path. This is Windows/MSVC verification only.
+- Limits/status: no Linux/macOS install or consumer verification, no hosted CI result, and no compatibility/versioning policy beyond `SameMajorVersion`. The package excludes the optional GLFW/OpenGL backends.
+- Next: add CI format, clang-tidy, fuzz, and package-consumer jobs, then validate the workflow and Windows-equivalent commands locally.
+
+## 2026-11-13 — Remove generated GLFW docs and duplicate text sample; add font license
+
+- Audit: `libs/glfw-3.5.1/docs/html/` was generated Doxygen output (195 files) and is not read by the build because `GLFW_BUILD_DOCS` is forced off. `examples/text/text.xui` and `text.xss` are byte-identical to the button demo assets, and `text_demo.cpp` differs only in the filenames it loads. The Roboto font's name table declares SIL Open Font License 1.1, contradicting the earlier Apache-2.0 placeholder in `THIRD_PARTY_NOTICES.md`.
+- Changes: deleted the generated GLFW HTML while keeping the upstream Markdown/Doxyfile sources; removed the duplicate `examples/text` target and its `add_subdirectory`; added `examples/assets/Roboto.LICENSE.txt` with the upstream OFL 1.1 copyright and license text; corrected the third-party inventory to name Roboto 3.015 and OFL 1.1.
+- Decisions/trade-offs: `examples/button` remains the canonical minimal sample rather than maintaining two identical tutorials. GLFW's documentation sources remain available for regenerating HTML, but generated output is no longer tracked. The license inventory now follows the font binary's own metadata rather than the earlier unverified assumption.
+- Verification: the `dev` preset reconfigured and rebuilt `xui_tests`, `xui_glfw_demo`, `xui_game_demo`, and all three fuzz targets. `ctest --preset dev` passed **1/1** in 33.19 s. Smoke runs completed without failures: parser fuzzing **1000 iterations**, layout fuzzing **100 seeds x 5 steps**, paint fuzzing **100 seeds x 40 primitives**.
+- Limits/status: Windows/MSVC only; no visible GUI run or Linux/macOS verification. The font license was verified from the embedded name table and matched against Google Fonts' upstream OFL file, not reviewed by legal counsel.
+- Next: add install/export packaging and CI format, static-analysis, and fuzz jobs.
+
+## 2026-11-13 — Repository layout audit and C++/CMake restructure
+
+- Audit: the checkout is a mature C++23 UI framework, not a machine-learning project, so Data Science/MLOps layouts (top-level `data/`, `notebooks/`, `experiments/`, `configs/`, `pyproject.toml`) do not apply. The audit found misplaced or root-level artifacts: vendored GLFW under `examples/lib/`, fuzz harnesses in `benchmarks/`, showcase sources/assets loose in `examples/`, the shared demo font under `examples/layout/`, a generated demo PNG at the repository root, duplicated per-example asset-copy blocks, and Windows-only `C:/Windows/Fonts/comic.ttf` paths in the button and text demos. Standard editor/format, CMake preset, and third-party notice files were absent.
+- Changes: moved `examples/lib/glfw-3.5.1/` to `libs/glfw-3.5.1/`; moved `examples/glfw_demo.cpp`, `showcase.xui`, `showcase.xss`, and the demo image assets into `examples/showcase/`; moved `benchmarks/fuzz_{parsers,layout,paint}.cpp` into `fuzz/`; moved `examples/layout/Roboto.ttf` to `examples/assets/Roboto.ttf`. Added `.clang-format`, `.editorconfig`, `.gitattributes`, `CMakePresets.json` (`dev`, `release`, `minimal`), `THIRD_PARTY_NOTICES.md`, `cmake/XuiWarnings.cmake`, `cmake/XuiExampleAssets.cmake`, per-example `showcase`/`composites` build files, and `fuzz/CMakeLists.txt` plus `fuzz/README.md`. Added the `XUI_BUILD_FUZZERS` option, switched the GLFW source path to `libs/`, reused one multi-config-safe asset-copy helper, updated test/benchmark/doc paths, and pointed the button/text demos at the bundled Roboto font instead of Windows system fonts.
+- Decisions/trade-offs: adopted the conventional C++/CMake library layout (`include/`, `src/`, `backends/`, `tests/`, `benchmarks/`, `examples/`, `fuzz/`, `docs/`, `plan/`, `libs/`, `cmake/`) rather than imposing ML directories. Kept the existing `libs/` name to avoid a 5,000+ file vendored-path rewrite. `examples/text` was initially kept because it was a built target; the follow-up entry above removed it after confirming its assets were byte-identical to the button sample. Historical records in this file retain the paths they used at the time; current build files and guides use the new paths. No tracked source, test, or asset was deleted.
+- Verification: a fresh Visual Studio 18 Debug configure succeeded after the moves, and the full default target set (tests, benchmarks, fuzzers, examples) built incrementally with warnings-as-errors. The direct suite reports **221 tests, 0 failed**, matching the pre-restructure baseline. A separate `cmake --preset dev` Ninja build with MSVC 19.51 completed **238/238** steps, including `fuzz_*`, all benchmarks, all six example executables, and their asset copies; `ctest --preset dev` passed **1/1** in 31.63 s. Project-owned Markdown links resolve; `git diff --check` reports no whitespace errors.
+- Limits/status: verification is Windows/MSVC only. No visible GUI smoke run, Linux/macOS build, or CI run was performed for this path-only restructure. `build/dev` is a local, ignored preset tree. Generated GLFW Doxygen HTML remained tracked pending an explicit deletion decision, and the bundled Roboto font license notice was added in the follow-up entry above.
+- Next: decide whether to delete the generated GLFW documentation and the redundant `examples/text` target; add the Roboto upstream notice; add an install/export package config; add format, static-analysis, and fuzz-target CI jobs; then run the normal CI matrix on Linux/macOS/Windows.
+
 ## 2026-10-29 — Integrate DockPanel headers and scope native tear-off painting
 
 - Diagnosis: the built-in `DockHeader:selected` rule set a white background, which won over the resting blue header in the state cascade. Header corner radius was resolved as one value in the chrome painter, leaving rounded bottom corners and a detached-looking seam. DockPanel children reserved header height by adding it to authored top padding, creating excess space. Native tear-off painted dock chrome for the chosen panel but the retained painter still visited unrelated nodes; inherited outer ScrollView clips also remained active. This let main-window siblings bleed into the secondary surface and could clip the tear-off's own contents.

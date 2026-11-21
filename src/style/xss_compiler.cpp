@@ -62,16 +62,19 @@ Menu { resting: { bg: #ffffff, fg: #242424, border: 1px solid #d1d1d1, radius: 6
 Tooltip { resting: { bg: #292929, fg: #ffffff, border: 1px solid #292929, radius: 4px, pad: 6px 8px, font-size: 12px } }
 TitleBar { resting: { bg: #f5f5f5, fg: #242424, pad: 4px, gap: 4px } }
 TitleButton { resting: { fg: #424242, radius: 4px } hover: { bg: #e5e5e5 } pressed: { bg: #d6d6d6 } }
-DockHost { resting: { bg: #f5f5f5, fg: #242424, radius: 6px, pad: 4px } }
-DockPanel { resting: { bg: #ffffff, fg: #242424, border: 1px solid #c8c8c8, radius: 6px, pad: 10px, shadow: 0px 6px 18px 2px #00000038 } }
-DockHeader { resting: { bg: #e8f3fc, fg: #0f6cbd, border: 1px solid #b7d5f5, radius: 6px 6px 0px 0px, pad: 10px, font-size: 13px }
-  hover: { bg: #d8ebfc } selected: { fg: #0f6cbd, font-weight: 600 }
-  floating: { font-weight: 600 } dragging: { bg: #c6e1fa, border: 1px solid #0f6cbd } }
-DockTab { resting: { bg: #e8f3fc, fg: #616161, border: 1px solid #d1d1d1, radius: 6px 6px 0px 0px, pad: 10px, font-size: 13px }
-  hover: { bg: #ebebeb, fg: #242424 } selected: { fg: #0f6cbd, border: 1px solid #0f6cbd, font-weight: 600 } }
-DockCloseButton { resting: { fg: #616161, radius: 4px, pad: 5px } hover: { bg: #c42b1c, fg: #ffffff } }
-DockSplitter { resting: { bg: #c8c8c8 } hover: { bg: #0f6cbd } pressed: { bg: #115ea3 } }
-DockPreview { resting: { bg: #0f6cbd44, border: 1px solid #0f6cbd, radius: 4px } }
+DockHost { resting: { bg: #eef1f5, fg: #242424, radius: 8px, pad: 4px } }
+DockPanel { resting: { bg: #ffffff, fg: #242424, border: 1px solid #dfe3e8, radius: 8px, pad: 10px, shadow: 0px 14px 34px 2px #0f172a30 } }
+DockHeader { resting: { bg: #f7f9fc, fg: #424242, border: 1px solid #dfe3e8, radius: 7px 7px 0px 0px, pad: 7px 10px, font-size: 12px, font-weight: 600 }
+  hover: { bg: #eef3f9 } pressed: { bg: #e4ebf4 } selected: { fg: #0f6cbd, font-weight: 600 }
+  floating: { fg: #242424 }
+  dragging: { bg: #dcebfa, border: 1px solid #8ab6e8 } disabled: { opacity: 0.5 } }
+DockTab { resting: { bg: #f7f9fc, fg: #616161, border: 1px solid #00000000, radius: 6px 6px 0px 0px, pad: 7px 10px, font-size: 12px }
+  hover: { bg: #eef3f9, fg: #242424 } selected: { fg: #0f6cbd, border: 1px solid #cfe0f2, font-weight: 600 }
+  pressed: { bg: #e4ebf4 } disabled: { opacity: 0.5 } }
+DockCloseButton { resting: { bg: #00000000, fg: #616161, radius: 4px, pad: 5px, align: Center }
+  hover: { bg: #c42b1c, fg: #ffffff } pressed: { bg: #a4262c, fg: #ffffff } disabled: { opacity: 0.4 } }
+DockSplitter { resting: { bg: #00000000 } hover: { bg: #0f6cbd55 } pressed: { bg: #0f6cbd88 } dragging: { bg: #0f6cbd88 } }
+DockPreview { resting: { bg: #0f6cbd22, border: 1px solid #0f6cbd, radius: 6px } dragging: { bg: #0f6cbd33, border: 1px solid #0f6cbd } }
 Button, ToggleButton, CheckBox, CheckItem, Switch, RadioGroup, TextBox, TextArea, NumberField, SearchField,
 Dropdown, DatePicker, ColorPicker, Slider, Tabs, Tab, Menu, MenuItem, KeybindField, SegmentedControl, Stepper, Rating, Breadcrumb {
   focus-visible: { outline: 2px solid #0f6cbd, outline-offset: 2px }
@@ -102,7 +105,10 @@ Dropdown, DatePicker, ColorPicker, Slider, Tabs, Tab, Menu, MenuItem, KeybindFie
 			for (const auto& r : m_a.rules) compileRule(r);
 			for (const Pending& p : m_pending)
 				if (!m_sh.findKeyframes(p.name)) {
-					std::vector<std::string_view> names; for (const auto& k : m_sh.m_kf) names.push_back(m_in.view(k.name));
+					std::vector<std::string_view> names;
+					names.reserve(m_sh.m_kf.size());
+					for (const auto& k : m_sh.m_kf)
+						names.push_back(m_in.view(k.name));
 					std::string s = didYouMean(m_in.view(p.name), names);
 					m_d.error(p.off, p.len, "unknown keyframes '" + std::string(m_in.view(p.name)) + "'", s.empty() ? "define it with `keyframes name { ... }`" : "did you mean '" + s + "'?");
 				}
@@ -161,7 +167,10 @@ Dropdown, DatePicker, ColorPicker, Slider, Tabs, Tab, Menu, MenuItem, KeybindFie
 				if (env.defs.count(e.name)) return evalToken(env, e.name);
 				std::string_view n = m_in.view(e.name);
 				if (n.find('.') == std::string_view::npos) return Atom::ident(e.name);   // bare enum word: Primary, solid, center
-				std::vector<std::string_view> names; for (StrId s : env.order) names.push_back(m_in.view(s));
+				std::vector<std::string_view> names;
+				names.reserve(env.order.size());
+				for (StrId s : env.order)
+					names.push_back(m_in.view(s));
 				std::string s = didYouMean(n, names);
 				err(e.off, e.len, "unknown token '" + std::string(n) + "'", s.empty() ? "" : "did you mean '" + s + "'?");
 				return std::nullopt;
@@ -437,7 +446,10 @@ Dropdown, DatePicker, ColorPicker, Slider, Tabs, Tab, Menu, MenuItem, KeybindFie
 		void compileKeyframes(const xss::KeyframesAst& k) {
 			if (m_sh.findKeyframes(k.name)) { err(k.off, k.len, "duplicate keyframes '" + std::string(m_in.view(k.name)) + "'"); return; }
 			KeyframesDef def; def.name = k.name; def.frameFirst = static_cast<u32>(m_sh.m_frames.size());
-			std::vector<const xss::FrameAst*> fs; for (const auto& f : k.frames) fs.push_back(&f);
+			std::vector<const xss::FrameAst*> fs;
+			fs.reserve(k.frames.size());
+			for (const auto& f : k.frames)
+				fs.push_back(&f);
 			std::stable_sort(fs.begin(), fs.end(), [](auto* a, auto* b) { return a->t < b->t; });
 			for (const auto* f : fs) {
 				std::vector<Declaration> ds;

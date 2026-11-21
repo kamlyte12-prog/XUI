@@ -174,6 +174,8 @@ namespace xui {
 		std::optional<UiValue> value(std::string_view id) const;
 		std::vector<std::string> dockPanelIds() const;
 		Rect dockPanelRect(std::string_view id) const;
+		/// Largest authored corner radius of a panel's resolved style, used for native tear-off windows.
+		f32 dockPanelRadius(std::string_view id) const;
 		f32 dockPanelHeaderHeight(std::string_view id) const;
 		std::string_view dockPanelTitle(std::string_view id) const;
 		bool dockPanelUsesNativeTitleBar(std::string_view id) const;
@@ -332,6 +334,14 @@ namespace xui {
 			Rect contentArea{};
 			f32 gutter = 5.f;
 		};
+		// One contiguous floating-panel subtree in the overlay paint order. The chrome
+		// for a floating panel is emitted immediately before the next group's body so a
+		// front panel body can occlude a back panel's title bar.
+		struct DockPaintGroup {
+			u32 hostIndex = 0xFFFFFFFFu;
+			u32 panelOrder = 0xFFFFFFFFu;
+			u32 begin = 0, end = 0;
+		};
 
 		static Size measureLeaf(void* context, NodeId node, Constraint constraint);
 		Size measure(NodeId node, Constraint constraint) const;
@@ -426,6 +436,7 @@ namespace xui {
 		std::chrono::steady_clock::time_point m_titleLastDown{};
 		std::vector<u32> m_dockOrderScratch;
 		std::vector<u32> m_paintOrderScratch;
+		std::vector<DockPaintGroup> m_dockPaintGroups;
 		std::vector<DockHostState> m_dockHosts;
 		StyleSetId m_tooltipStyleSet;
 		std::vector<GlyphQuad> m_glyphScratch;

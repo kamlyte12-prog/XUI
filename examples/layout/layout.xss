@@ -2,7 +2,7 @@ tokens {
     color.canvas = #111827
     color.text = #f9fafb
     color.muted = #cbd5e1
-    color.page = #916920
+    color.page = #4652c2
 }
 
 Window { resting: { bg: color.canvas, fg: color.text, font-size: 16px } }

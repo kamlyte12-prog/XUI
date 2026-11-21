@@ -555,7 +555,7 @@ Button.primary {
 CheckItem.check-item { resting: { fg: #f8fafc, size: 260px 36px } hover: { bg: #263752 } checked: { fg: #60a5fa } }
 ```
 
-The full property/value table is in the [styling reference](styling-reference.md). The [showcase](../examples/showcase.xui) and [stylesheet](../examples/showcase.xss) group runtime-supported objects into named sections, including docking, Grid tracks, and Stack overlays. They include disabled/state examples, attached tooltips, and interactive values reflected in neighboring text. The showcase asset/runtime test parses and lays out each section; visible interactive appearance still requires a desktop smoke test. The [cross-platform sample](../tests/fixtures/cross_platform.xui) and [controls sample](../tests/fixtures/controls.xui) are test fixtures that also serve as focused format references.
+The full property/value table is in the [styling reference](styling-reference.md). The [showcase](../examples/showcase/showcase.xui) and [stylesheet](../examples/showcase/showcase.xss) group runtime-supported objects into named sections, including docking, Grid tracks, and Stack overlays. They include disabled/state examples, attached tooltips, and interactive values reflected in neighboring text. The showcase asset/runtime test parses and lays out each section; visible interactive appearance still requires a desktop smoke test. The [cross-platform sample](../tests/fixtures/cross_platform.xui) and [controls sample](../tests/fixtures/controls.xui) are test fixtures that also serve as focused format references.
 
 ## Mode pickers, values, and navigation
 

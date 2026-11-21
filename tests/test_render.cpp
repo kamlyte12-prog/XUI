@@ -79,6 +79,58 @@ TEST(render_half_pixel_edges_get_half_coverage_when_snapping_is_off) {
 	CHECK(std::abs(int(im.px(5, 5)[3]) - 128) <= 1); CHECK(std::abs(int(im.px(15, 5)[3]) - 128) <= 1);
 	CHECK_EQ(int(im.px(8, 5)[3]), 255); CHECK_EQ(int(im.px(4, 5)[3]), 0); CHECK_EQ(int(im.px(16, 5)[3]), 0);
 }
+TEST(render_axis_aligned_separators_snap_edges_to_pixel_boundaries) {
+	Env e(40, 30);
+	Painter p;
+	p.begin(40, 30, 1);
+	p.line({5, 9.2f}, {35, 9.2f}, 1.f, {1, 1, 1, 1});
+	const Image horizontal = e.draw(p);
+	for (u32 x = 7; x < 34; ++x) {
+		CHECK_EQ(int(horizontal.px(x, 9)[3]), 255);
+		CHECK_EQ(int(horizontal.px(x, 8)[3]), 0);
+		CHECK_EQ(int(horizontal.px(x, 10)[3]), 0);
+	}
+	Painter v;
+	v.begin(40, 30, 1);
+	v.line({14.3f, 5}, {14.3f, 25}, 1.f, {1, 1, 1, 1});
+	const Image vertical = e.draw(v);
+	for (u32 y = 7; y < 24; ++y) {
+		CHECK_EQ(int(vertical.px(14, y)[3]), 255);
+		CHECK_EQ(int(vertical.px(13, y)[3]), 0);
+		CHECK_EQ(int(vertical.px(15, y)[3]), 0);
+	}
+}
+TEST(render_fractional_dpi_line_width_rounds_to_whole_pixels) {
+	Env e(120, 40);
+	Painter p;
+	p.begin(120, 40, 1.5f);
+	p.line({8, 6.4f}, {72, 6.4f}, 1.f, {1, 1, 1, 1}); // 9.6 physical y, 1.5 physical px wide
+	const Image im = e.draw(p);
+	for (u32 x = 16; x < 104; ++x) {
+		CHECK_EQ(int(im.px(x, 9)[3]), 255);
+		CHECK_EQ(int(im.px(x, 10)[3]), 255);
+		CHECK_EQ(int(im.px(x, 8)[3]), 0);
+		CHECK_EQ(int(im.px(x, 11)[3]), 0);
+	}
+}
+TEST(render_line_snapping_can_be_disabled_for_geometry_authoring) {
+	Env e(40, 20);
+	Painter p(Painter::Options{true, false});
+	p.begin(40, 20, 1);
+	p.line({5, 9.2f}, {35, 9.2f}, 1.f, {1, 1, 1, 1});
+	const Image im = e.draw(p);
+	CHECK(int(im.px(20, 9)[3]) > 0);
+	CHECK(int(im.px(20, 9)[3]) < 240); // fractional coverage survives when snapping is off
+}
+TEST(render_diagonal_lines_keep_analytic_coverage) {
+	Env e(60, 40);
+	Painter p;
+	p.begin(60, 40, 1);
+	p.line({8, 8}, {50, 32}, 1.f, {1, 1, 1, 1});
+	const Image im = e.draw(p);
+	const double length = std::hypot(42.0, 24.0);
+	CHECK(near(alphaSum(im), length + kPi * 0.25, 3.0)); // axis snapping must not distort sloped geometry
+}
 TEST(render_per_corner_radii_land_on_the_right_corners) {
 	// Every subset of {TL,TR,BR,BL}: exactly the rounded corners lose their corner pixel, the others keep it.
 	Env e(50, 50);
@@ -188,7 +240,8 @@ TEST(image_decoder_reads_png_and_lunasvg_rasterizes_vector_assets) {
 	if (imageSupportAvailable()) {
 		CHECK(readImage(temp.string(), decoded));
 		CHECK_EQ(decoded.width, 2u); CHECK_EQ(decoded.height, 1u); CHECK(decoded.rgba == source.rgba);
-		const std::filesystem::path svgPath = std::filesystem::path(XUI_EXAMPLE_DIR) / "xui-demo-image.svg";
+		const std::filesystem::path svgPath =
+			std::filesystem::path(XUI_EXAMPLE_DIR) / "showcase" / "xui-demo-image.svg";
 		SvgImage svg; std::string error;
 		CHECK(svg.load(svgPath.string(), &error));
 		CHECK(svg.valid()); CHECK_NEAR(svg.intrinsicWidth(), 192.f, 0.01f); CHECK_NEAR(svg.intrinsicHeight(), 128.f, 0.01f);
@@ -210,6 +263,94 @@ TEST(render_stale_or_missing_texture_does_not_crash) {
 	p.glyphRun(dead, &q, 1, { 2, 2 }, { 1, 1, 1, 1 }); p.image(TextureHandle{}, { 10, 10, 5, 5 }, { 0, 0, 1, 1 });
 	Image im = e.draw(p);
 	CHECK_EQ(int(im.px(5, 5)[3]), 255);                                              // behaves as a white texture
+}
+
+TEST(painter_rounded_clip_emits_shapes_only_where_corners_are_touched) {
+	Painter p;
+	p.begin(200, 200, 2.f);
+	p.pushClip({20, 20, 80, 80}, CornerRadii::all(10));
+	p.fillRect({20, 20, 12, 12}, {1, 1, 1, 1}); // over the top-left corner arc
+	p.fillRect({60, 60, 20, 20}, {1, 1, 1, 1}); // interior: rounding cannot change a pixel
+	p.popClip();
+	DrawList dl = p.finish();
+	CHECK_EQ(dl.nCmds, 2u);
+	if (dl.nCmds != 2u)
+		return;
+	const u32 shaped = dl.cmds[0].clipShape != kNoClipShape ? 0u : 1u;
+	CHECK(dl.cmds[shaped].clipShape != kNoClipShape);
+	CHECK_EQ(dl.cmds[1u - shaped].clipShape, kNoClipShape); // corner-free primitive keeps the plain path
+	CHECK_EQ(dl.nClipShapes, 1u);
+	if (dl.nClipShapes != 1u)
+		return;
+	const ClipShape& shape = dl.clipShapes[dl.cmds[shaped].clipShape];
+	CHECK_EQ(shape.count, 1u);
+	// physical pixels: centre (120,120), half size 80, radii 10dp * 2 dpi
+	CHECK_NEAR(shape.rounds[0].cx, 120.f, 0.01f);
+	CHECK_NEAR(shape.rounds[0].cy, 120.f, 0.01f);
+	CHECK_NEAR(shape.rounds[0].hx, 80.f, 0.01f);
+	CHECK_NEAR(shape.rounds[0].r[0], 20.f, 0.01f);
+}
+TEST(painter_rounded_clips_nest_dedupe_and_cap) {
+	Painter p;
+	p.begin(400, 400, 1.f);
+	p.pushClip({40, 40, 300, 300}, CornerRadii::all(12));
+	p.pushClip({40, 40, 300, 300}, CornerRadii::all(12)); // same shape twice: emitted once
+	p.fillRect({40, 40, 20, 20}, {1, 1, 1, 1});
+	DrawList deduped = p.finish();
+	CHECK_EQ(deduped.nClipShapes, 1u);
+	if (deduped.nClipShapes == 1u)
+		CHECK_EQ(deduped.clipShapes[0].count, 1u);
+
+	Painter q;
+	q.begin(400, 400, 1.f);
+	q.pushClip({10, 10, 380, 380}, CornerRadii::all(20));
+	q.pushClip({20, 20, 340, 340}, CornerRadii::all(16));
+	q.fillRect({20, 20, 20, 20}, {1, 1, 1, 1}); // touches both top-left arcs
+	DrawList nested = q.finish();
+	CHECK_EQ(nested.nClipShapes, 1u);
+	if (nested.nClipShapes == 1u)
+		CHECK_EQ(nested.clipShapes[0].count, 2u);
+
+	Painter r;
+	r.begin(400, 400, 1.f);
+	for (u32 i = 0; i < 6; ++i) { // more rounded ancestors than the cap allows
+		const f32 inset = f32(i) * 10.f;
+		r.pushClip({inset, inset, 400.f - 2.f * inset, 400.f - 2.f * inset}, CornerRadii::all(8));
+	}
+	r.fillRect({0, 0, 400, 400}, {1, 1, 1, 1}); // spans every corner square
+	DrawList capped = r.finish();
+	CHECK_EQ(capped.nClipShapes, 1u);
+	if (capped.nClipShapes != 1u)
+		return;
+	CHECK_EQ(capped.clipShapes[0].count, ClipShape::kMaxRounds);
+	// At capacity the most restrictive (smallest) shapes stay: insets 20..50 of 0..50, half sizes 180..150.
+	f32 widest = 0.f;
+	for (u32 i = 0; i < capped.clipShapes[0].count; ++i)
+		widest = std::max(widest, capped.clipShapes[0].rounds[i].hx);
+	CHECK_NEAR(widest, 180.f, 0.01f);
+}
+TEST(render_rounded_parent_clip_masks_a_child_filling_its_bounds) {
+	Env e(80, 80);
+	Painter p;
+	p.begin(80, 80, 1);
+	p.pushClip({10, 10, 60, 60}, CornerRadii::all(20));
+	p.fillRect({0, 0, 80, 80}, {0, 1, 0, 1}); // child background covering the whole parent
+	p.popClip();
+	const Image rounded = e.draw(p);
+	CHECK_EQ(int(rounded.px(10, 10)[3]), 0); // corner square outside the arc
+	CHECK_EQ(int(rounded.px(69, 69)[3]), 0);
+	CHECK_EQ(int(rounded.px(40, 40)[3]), 255); // interior unaffected
+	CHECK_EQ(int(rounded.px(40, 11)[3]), 255); // straight top edge between the arcs
+	CHECK_EQ(int(rounded.px(10, 40)[3]), 255); // straight left edge
+
+	Painter q;
+	q.begin(80, 80, 1); // control: a square clip keeps the corner
+	q.pushClip({10, 10, 60, 60});
+	q.fillRect({0, 0, 80, 80}, {0, 1, 0, 1});
+	q.popClip();
+	const Image square = e.draw(q);
+	CHECK_EQ(int(square.px(10, 10)[3]), 255);
+	CHECK_EQ(int(square.px(69, 69)[3]), 255);
 }
 
 // ---- Painter semantics --------------------------------------------------------------------------------

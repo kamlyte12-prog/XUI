@@ -4,6 +4,18 @@ Xui is an experimental C++23 UI framework. `.xui` files describe widget structur
 
 The bundled interactive example uses GLFW and OpenGL. Start with the [user documentation index](docs/README.md) for setup, file formats, widgets, and troubleshooting. Agent instructions, architecture notes, and the roadmap are in [`plan/`](plan/README.md); coding agents should read [`AGENTS.md`](AGENTS.md) first.
 
+## Repository layout
+
+- `include/xui/` — public headers and the stable facade.
+- `src/` — implementation grouped by subsystem (`core`, `lang`, `layout`, `render`, `text`, `ui`).
+- `backends/` — optional GLFW window adapter and OpenGL draw-list renderer.
+- `examples/` — one directory per runnable sample, plus shared demo assets in `examples/assets/`.
+- `tests/` — unit, runtime, golden-image, and fixture assets.
+- `benchmarks/` — performance harnesses; `fuzz/` — deterministic parser/layout/paint fuzzers.
+- `libs/` — pinned vendored source dependencies; see [third-party notices](THIRD_PARTY_NOTICES.md).
+- `docs/` — user guides; `plan/` — agent context, roadmap, and change history.
+- `.github/workflows/` — CI matrix; `.github/scripts/` — CI helpers such as the changed-line format check; `cmake/` — shared CMake policy modules and the installed-package consumer fixture.
+
 ## Getting started
 
 This example uses the GLFW/OpenGL backend targets from `backends/`. Put a TrueType font at `font.ttf`, then build the program with `xui_widgets`, `xui_backend_glfw`, and `xui_backend_opengl` linked. The CMake setup for the bundled demo is in [`examples/CMakeLists.txt`](examples/CMakeLists.txt); implementations are [`GlDrawListRenderer`](backends/opengl/gl_drawlist_renderer.hpp) and [`GlfwPlatform`](backends/glfw/glfw_platform.hpp).
@@ -65,13 +77,13 @@ Button.primary {
 }
 ```
 
-For a complete build setup and asset instructions, see [Getting started](docs/getting-started.md). The sample uses the current `xui::Xui` facade; custom backends can implement the same [`Renderer`](docs/architecture.md#implement-xuirenderer) and [`Platform`](docs/architecture.md#implement-xuiplatform) interfaces.
+For a complete build setup and asset instructions, see [Getting started](docs/getting-started.md). The sample uses the current `xui::Xui` facade; custom backends can implement the same [`Renderer`](docs/architecture.md#implement-xuirenderer) and [`Platform`](docs/architecture.md#implement-xuiplatform) interfaces. To install the portable libraries for another CMake project, see [Install and consume the package](docs/getting-started.md#install-and-consume-the-package).
 
 ## Showcase
 
 ![Xui GLFW/OpenGL showcase](docs/showcase.png)
 
-The screenshot shows the themed showcase window with a tabbed layout, checklist, splitter, and live value readouts. The complete demo is defined in [`showcase.xui`](examples/showcase.xui) and [`showcase.xss`](examples/showcase.xss), and wired by [`glfw_demo.cpp`](examples/glfw_demo.cpp). See the [widget reference](docs/widgets.md) for supported controls and their behavior.
+The screenshot shows the themed showcase window with a tabbed layout, checklist, splitter, and live value readouts. The complete demo is defined in [`showcase.xui`](examples/showcase/showcase.xui) and [`showcase.xss`](examples/showcase/showcase.xss), and wired by [`glfw_demo.cpp`](examples/showcase/glfw_demo.cpp). See the [widget reference](docs/widgets.md) for supported controls and their behavior.
 
 ## Game UI example
 
@@ -83,4 +95,5 @@ The screenshot shows the themed showcase window with a tabbed layout, checklist,
 - [Project plan](plan/plan.md): current status, risks, and roadmap.
 - [Change tracking](plan/tracking.md): implementation decisions and verification history.
 - [Contributing](CONTRIBUTING.md)
+- [Third-party notices](THIRD_PARTY_NOTICES.md)
 - [License](LICENSE.md)

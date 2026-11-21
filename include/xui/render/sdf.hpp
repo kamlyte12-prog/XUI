@@ -118,6 +118,18 @@ namespace xui::sdf {
 		}
 		return {};
 	}
+	/// Combined coverage of the rounded clips attached to a draw command. Multiplying the per-shape coverages
+	/// approximates the intersection; identical nested shapes are deduplicated by the painter.
+	inline f32 clipCoverage(f32 px, f32 py, const ClipShape& shape) {
+		f32 c = 1.f;
+		for (u32 i = 0; i < shape.count; ++i) {
+			const ClipRound& r = shape.rounds[i];
+			c *= coverage(roundRectDist(px - r.cx, py - r.cy, r.hx, r.hy, r.r));
+			if (c <= 0.f)
+				return 0.f;
+		}
+		return c;
+	}
 	/// Source-over for premultiplied colours.
 	inline Rgba over(Rgba src, Rgba dst) { const f32 k = 1.f - src.a; return { src.r + dst.r * k, src.g + dst.g * k, src.b + dst.b * k, src.a + dst.a * k }; }
 }

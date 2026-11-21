@@ -55,7 +55,7 @@ Input travels in the opposite direction: `Platform::pumpEvents()` yields normali
 
 ## Backend-neutral coordinate and event contract
 
-The `Platform` contract documents pointer coordinates and logical client dimensions in logical pixels with a top-left origin. `windowSizePixels()` reports physical framebuffer dimensions. `dpiScale()` maps logical size to physical pixels. `WindowDesc` carries the resolved initial title, size, decorations choice, optional shared GL context window, and preferred custom-chrome corner radius. Events include their originating `WindowHandle`; pointer events can also carry desktop logical coordinates for moving a tear-off between windows. `windowClientScreenOrigin`, `screenToClient`, and `setWindowPositionLogical` support this mapping. The GLFW Windows backend applies the radius through DWM when accepted and excludes outside-corner hit pixels on restored windows; other platforms retain rectangular corners. Concrete platforms normalize native coordinates before returning events.
+The `Platform` contract documents pointer coordinates and logical client dimensions in logical pixels with a top-left origin. `windowSizePixels()` reports physical framebuffer dimensions. `dpiScale()` maps logical size to physical pixels. `WindowDesc` carries the resolved initial title, size, decorations choice, optional shared GL context window, and preferred custom-chrome corner radius. Events include their originating `WindowHandle`; pointer events can also carry desktop logical coordinates for moving a tear-off between windows. `windowClientScreenOrigin`, `screenToClient`, and `setWindowPositionLogical` support this mapping. The GLFW adapter derives its screen-to-logical conversion from window size, framebuffer size, and `glfwGetWindowContentScale()`, enables `GLFW_SCALE_TO_MONITOR` so `WindowDesc` sizes stay logical, normalizes pointer and window positions, and emits `DpiChange` from the content-scale callback so a window moved across monitors re-lays out at the new scale. The GLFW Windows backend applies the radius through DWM when accepted and excludes outside-corner hit pixels on restored windows; other platforms retain rectangular corners. Concrete platforms normalize native coordinates before returning events.
 
 The runtime does not handle native messages. The platform queues and returns `xui::Event` values, including `MouseMove`, `MouseDown`, `MouseUp`, `Wheel`, `KeyDown`, `TextInput`, `Resize`, `DpiChange`, `CloseRequest`, and `Quit`. File/IME event data is platform-owned according to the interface comments and must stay valid for the documented period.
 
@@ -74,10 +74,10 @@ See [`renderer.hpp`](../include/xui/render/renderer.hpp). A concrete renderer mu
 1. `init(RendererDesc)` and `shutdown()` for device/surface lifetime.
 2. `resize(width, height, dpiScale)` for physical framebuffer changes.
 3. `createTexture`, `updateTexture`, and `destroyTexture`. `A8` stores glyph coverage; `RGBA8` stores color textures. Preserve handle validity/lifetime semantics.
-4. `beginFrame(FrameInfo)`, `submit(DrawList)`, `endFrame()`, and `present()`. Consume commands, vertices, indices, scissor clips, texture references, and custom commands in draw-list order.
+4. `beginFrame(FrameInfo)`, `submit(DrawList)`, `endFrame()`, and `present()`. Consume commands, vertices, indices, scissor clips, texture references, custom commands, and optional rounded clip shapes in draw-list order.
 5. `caps()` with only capabilities the renderer implements.
 
-`DrawList` data is temporary and remains valid only until the next painter frame. Copy or consume it synchronously. Honor framebuffer pixel dimensions and premultiplied-alpha conventions used by the draw-list renderer. The optional custom-command callback is installed with `setCustomHandler()`.
+`DrawList` data is temporary and remains valid only until the next painter frame. Copy or consume it synchronously. Honor framebuffer pixel dimensions and premultiplied-alpha conventions used by the draw-list renderer. The optional custom-command callback is installed with `setCustomHandler()`. A command's `clip` rectangle is its conservative scissor bound; when `clipShape` is set, it indexes `DrawList::clipShapes`, a list of up to four rounded rectangles whose per-corner radii the renderer multiplies into sample coverage. A renderer that cannot sample those shapes may keep the scissor bound, which preserves containment but loses the anti-aliased corner.
 
 For optional multi-window support, implement `createSurface`, `destroySurface`, `makeSurfaceCurrent`, and `resizeSurface`. `init()` creates the primary surface; `primarySurface()` returns its handle. Ordinary frame methods target whichever surface is current. The platform creates a secondary window with `WindowDesc.shareContextWith` set to the primary window when graphics resources must be shared. A backend may return an invalid surface handle; `xui::Xui` then leaves an `os-window` DockPanel in the in-app float layer. Existing single-surface renderer implementations remain source-compatible.
 
@@ -87,7 +87,7 @@ The bundled `GlDrawListRenderer` is in [`backends/opengl/gl_drawlist_renderer.cp
 
 Framework implementations and public headers remain under `src/` and `include/xui/`. Optional concrete adapters live at the repository root under `backends/`: `backends/glfw/` implements `Platform`, and `backends/opengl/` implements `Renderer`. The example application itself stays in `examples/` and links the `xui_backend_glfw` and `xui_backend_opengl` targets declared by [`backends/CMakeLists.txt`](../backends/CMakeLists.txt). The existing `XUI_BUILD_GLFW_EXAMPLE` option continues to enable these adapters for the demo; `XUI_BUILD_GLFW_BACKEND=ON` can select the adapters without building examples. They are not linked into the core framework targets.
 
-The interactive `showcase.xui`/`.xss` pair stays in `examples/` because the GLFW demo and runtime asset tests both use it. Focused `cross_platform.*` and `controls.*` fixtures live under `tests/fixtures/`; tests load them from `XUI_TEST_FIXTURE_DIR`, and user guides link those same files as syntax examples. Other test-authored UI snippets remain inline in their owning tests.
+The interactive `showcase.xui`/`.xss` pair lives in `examples/showcase/` with the GLFW demo application and its image assets because the runtime asset tests use the same files. Focused `cross_platform.*` and `controls.*` fixtures live under `tests/fixtures/`; tests load them from `XUI_TEST_FIXTURE_DIR`, and user guides link those same files as syntax examples. Other test-authored UI snippets remain inline in their owning tests.
 
 ## Implement `xui::Platform`
 
@@ -96,6 +96,7 @@ See [`platform.hpp`](../include/xui/platform/platform.hpp). Implement:
 - `init` / `shutdown` and `createWindow` / `destroyWindow`.
 - Title, logical client size, physical framebuffer size, DPI, and opaque native handles.
 - `windowVisible()` for hidden/minimized timer policy. It defaults to `true`; implement it when the backend can query visibility so the facade can pause animation clocks while hidden.
+- `setWindowVisible()` to show or hide a created window. Native tear-off surfaces are created hidden, painted once, then revealed through this method; the default implementation is a no-op.
 - A normalized event queue through `pumpEvents()` and a blocking/non-busy `waitEvents(timeoutSec)`.
 - Monotonic `time()`, cursor and clipboard methods.
 - GL context activation (`makeGlCurrent`, `nativeGlContext`) and `swapBuffers`; use safe no-ops when your platform/renderer pair does not need them.

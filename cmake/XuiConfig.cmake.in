@@ -1,0 +1,15 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# Vendored dependencies are installed by their own CMake projects alongside Xui.
+find_dependency(freetype CONFIG)
+find_dependency(harfbuzz CONFIG)
+if(@XUI_ENABLE_IMAGE_SUPPORT@)
+  find_dependency(Threads)
+  find_dependency(lunasvg CONFIG)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/XuiTargets.cmake")
+
+check_required_components(Xui)

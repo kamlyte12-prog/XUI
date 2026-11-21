@@ -112,7 +112,7 @@ Grid("120px|1fr|2fr")[rows: "auto|40px", gap: 8px, pad: 10px] {
 }
 ```
 
-Track templates and cell placement are structural layout in `.xui`. Use `.xss gap`, `pad`, `min-size`, `max-size`, and other ordinary layout style properties for reusable defaults; an authored `.xui` value takes precedence. The explicit track limit is eight per axis. See the [Grid widget reference](widgets.md#grid) and the [showcase layout page](../examples/showcase.xui).
+Track templates and cell placement are structural layout in `.xui`. Use `.xss gap`, `pad`, `min-size`, `max-size`, and other ordinary layout style properties for reusable defaults; an authored `.xui` value takes precedence. The explicit track limit is eight per axis. See the [Grid widget reference](widgets.md#grid) and the [showcase layout page](../examples/showcase/showcase.xui).
 
 ### Stack overlays
 
@@ -222,4 +222,4 @@ Component calls may mix positional arguments before named arguments, but not aft
 - Add stable IDs only when app code needs to read a control value or target a unique style.
 - Keep long body copy in `Text`; it wraps to its measured width and clips to its widget bounds. Give its parent a width constraint and enough vertical space.
 - Check widget support in the [object reference](widgets.md) before relying on a parser-accepted name.
-- Start from the [cross-platform fixture](../tests/fixtures/cross_platform.xui) and its [stylesheet](../tests/fixtures/cross_platform.xss), or the [full showcase](../examples/showcase.xui).
+- Start from the [cross-platform fixture](../tests/fixtures/cross_platform.xui) and its [stylesheet](../tests/fixtures/cross_platform.xss), or the [full showcase](../examples/showcase/showcase.xui).

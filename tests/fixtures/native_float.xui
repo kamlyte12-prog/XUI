@@ -1,0 +1,12 @@
+// Fixture for the native tear-off (floatMode: "os-window") lifecycle test.
+Window(title: "Native float", size: 480x320) {
+  DockHost[id: "host", width: 100%, height: 100%, gutter: 8px] {
+    DockPanel(title: "Main")[id: "main", region: "Center", preferredSize: 240x240, closable: false] {
+      Text("Docked body")
+    }
+    DockPanel(title: "Tear-off")[id: "tear-off", region: "Right", target: "main", floating: true,
+              floatMode: "os-window", nativeTitleBar: false, closable: true, preferredSize: 240x180] {
+      Text("Floating body")
+    }
+  }
+}

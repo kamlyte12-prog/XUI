@@ -16,6 +16,7 @@ This file helps agents locate implementation layers without duplicating the publ
 | `xui_widgets` — widget runtime | `include/xui/ui/runtime.hpp`, `src/ui/runtime.cpp` | Materialized widgets, state, layout integration, events and paint generation. |
 | Optional backend targets | `backends/glfw/*`, `backends/opengl/*` | GLFW window/input adapter and OpenGL draw-list renderer. They implement the public interfaces and link to framework targets; they are not part of the core libraries. |
 | `xui_tests` | `tests/` | Unit, runtime, layout, render, text, parser and golden-image checks. |
+| Benchmarks and fuzzers | `benchmarks/`, `fuzz/` | Stage-level performance harnesses and deterministic parser/layout/paint fuzz checks. |
 
 ## Change boundaries
 

@@ -75,7 +75,8 @@ namespace xui {
 		}
 	}
 
-	void SoftRenderer::drawQuad(const Vertex& tl, const Vertex& br, const Recti& clip, const Tex* tex) {
+	void SoftRenderer::drawQuad(const Vertex& tl, const Vertex& br, const Recti& clip, const Tex* tex,
+								const ClipShape* shape) {
 		const i32 cx0 = std::max<i32>(0, clip.x), cy0 = std::max<i32>(0, clip.y);
 		const i32 cx1 = std::min<i32>(i32(m_w), clip.x + clip.w), cy1 = std::min<i32>(i32(m_h), clip.y + clip.h);
 		const f32 w = br.x - tl.x, h = br.y - tl.y;
@@ -96,7 +97,14 @@ namespace xui {
 			for (i32 px = px0; px < px1; ++px) {
 				const f32 cx = f32(px) + 0.5f, tx = (cx - tl.x) / w;
 				f.x = cx; f.y = cy; f.u = tl.u + (br.u - tl.u) * tx; f.v = tl.v + (br.v - tl.v) * ty;
-				const sdf::Rgba src = sdf::shade(f, sampler);
+				sdf::Rgba src = sdf::shade(f, sampler);
+				if (shape) {
+					const f32 cover = sdf::clipCoverage(cx, cy, *shape);
+					src.r *= cover;
+					src.g *= cover;
+					src.b *= cover;
+					src.a *= cover;
+				}
 				if (src.a <= 0.f && src.r <= 0.f && src.g <= 0.f && src.b <= 0.f) continue;
 				u8* d = &m_fb[(std::size_t(py) * m_w + std::size_t(px)) * 4];
 				const sdf::Rgba dst{ f32(d[0]) / 255.f, f32(d[1]) / 255.f, f32(d[2]) / 255.f, f32(d[3]) / 255.f };
@@ -112,8 +120,10 @@ namespace xui {
 			const DrawCmd& cmd = dl.cmds[c];
 			if (cmd.kind == DrawCmd::Custom) { if (m_custom) m_custom(m_customCtx, cmd.customId, cmd.clip); continue; }
 			const Tex* tex = find(cmd.tex);
+			const ClipShape* shape = cmd.clipShape < dl.nClipShapes ? &dl.clipShapes[cmd.clipShape] : nullptr;
 			for (u32 i = cmd.idxOffset; i + 6 <= cmd.idxOffset + cmd.idxCount; i += 6)
-				drawQuad(dl.verts[dl.idx[i]], dl.verts[dl.idx[i + 2]], cmd.clip, tex);   // quads: indices 0,1,2,0,2,3 -> TL and BR
+				drawQuad(dl.verts[dl.idx[i]], dl.verts[dl.idx[i + 2]], cmd.clip, tex,
+						 shape); // quads: indices 0,1,2,0,2,3 -> TL and BR
 		}
 	}
 

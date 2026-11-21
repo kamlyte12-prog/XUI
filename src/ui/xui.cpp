@@ -270,6 +270,9 @@ namespace xui {
 						if (value) if (const auto* dock = std::get_if<DockPanelValue>(&*value)) {
 							DockPanelValue inApp = *dock;
 							inApp.floating = true;
+							// The OS window is going away: stop requesting one, otherwise reconciliation
+							// would immediately recreate it and the panel could never be closed.
+							inApp.osWindow = false;
 							m_runtime.setDockPanelNativeSurface(floating->id, false);
 							m_runtime.setValue(floating->id, inApp);
 						}
@@ -396,6 +399,9 @@ namespace xui {
 				redraw = true;
 			}
 			if (visible && redraw) {
+				// Programmatic dock changes (startup profiles, value-API calls that float a panel)
+				// have no input event to trigger reconciliation; do it for every frame that draws.
+				reconcileFloatingPanels();
 				renderFrame();
 				redraw = false;
 			}
@@ -465,7 +471,11 @@ namespace xui {
 			const Vec2 logicalSize = m_platform->windowSizeLogical(floating.window);
 			const Vec2i surfacePixels = m_platform->windowSizePixels(floating.window);
 			const f32 surfaceDpi = m_platform->dpiScale(floating.window);
-			if (!m_platform->windowVisible(floating.window) || logicalSize.x <= 0 || logicalSize.y <= 0 || surfacePixels.x <= 0 || surfacePixels.y <= 0) continue;
+			// A tear-off window is created hidden and painted once before it is revealed; after
+			// that, a hidden or minimized window pauses painting like the main window does.
+			if ((floating.shown && !m_platform->windowVisible(floating.window)) || logicalSize.x <= 0 ||
+				logicalSize.y <= 0 || surfacePixels.x <= 0 || surfacePixels.y <= 0)
+				continue;
 			m_platform->makeGlCurrent(floating.window);
 			if (!m_renderer->makeSurfaceCurrent(floating.surface)) continue;
 			m_renderer->resizeSurface(floating.surface, u32(surfacePixels.x), u32(surfacePixels.y), surfaceDpi);
@@ -478,6 +488,10 @@ namespace xui {
 			const DrawList panelDraw = m_painter.finish();
 			m_renderer->beginFrame({ u32(surfacePixels.x), u32(surfacePixels.y), surfaceDpi, Color{0.04f, 0.05f, 0.08f, 1}, m_stats.frames });
 			m_renderer->submit(panelDraw); m_renderer->endFrame(); m_renderer->present(); m_platform->swapBuffers(floating.window);
+			if (!floating.shown) { // first frame is in the back buffer: reveal without a blank flash
+				m_platform->setWindowVisible(floating.window, true);
+				floating.shown = true;
+			}
 			presented = true;
 		}
 		m_platform->makeGlCurrent(m_window);
@@ -504,8 +518,12 @@ namespace xui {
 			desc.title = m_runtime.dockPanelTitle(id); desc.width = std::max(160u, u32(std::lround(panelRect.w)));
 			desc.height = std::max(100u, u32(std::lround(panelRect.h)));
 			desc.minWidth = 120; desc.minHeight = 80; desc.glContext = m_options.glContext;
-			desc.shareContextWith = m_window; desc.visible = true;
+			desc.shareContextWith = m_window;
+			desc.visible = false;
 			desc.decorations = m_runtime.dockPanelUsesNativeTitleBar(id);
+			// Match the native window's corner treatment to the panel body so the surface does not
+			// show square corners around a rounded panel.
+			desc.cornerRadius = m_runtime.dockPanelRadius(id);
 			const WindowHandle secondary = m_platform->createWindow(desc);
 			if (!secondary.valid()) continue;
 			const Vec2 mainOrigin = m_platform->windowClientScreenOrigin(m_window);

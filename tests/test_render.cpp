@@ -265,6 +265,94 @@ TEST(render_stale_or_missing_texture_does_not_crash) {
 	CHECK_EQ(int(im.px(5, 5)[3]), 255);                                              // behaves as a white texture
 }
 
+TEST(painter_rounded_clip_emits_shapes_only_where_corners_are_touched) {
+	Painter p;
+	p.begin(200, 200, 2.f);
+	p.pushClip({20, 20, 80, 80}, CornerRadii::all(10));
+	p.fillRect({20, 20, 12, 12}, {1, 1, 1, 1}); // over the top-left corner arc
+	p.fillRect({60, 60, 20, 20}, {1, 1, 1, 1}); // interior: rounding cannot change a pixel
+	p.popClip();
+	DrawList dl = p.finish();
+	CHECK_EQ(dl.nCmds, 2u);
+	if (dl.nCmds != 2u)
+		return;
+	const u32 shaped = dl.cmds[0].clipShape != kNoClipShape ? 0u : 1u;
+	CHECK(dl.cmds[shaped].clipShape != kNoClipShape);
+	CHECK_EQ(dl.cmds[1u - shaped].clipShape, kNoClipShape); // corner-free primitive keeps the plain path
+	CHECK_EQ(dl.nClipShapes, 1u);
+	if (dl.nClipShapes != 1u)
+		return;
+	const ClipShape& shape = dl.clipShapes[dl.cmds[shaped].clipShape];
+	CHECK_EQ(shape.count, 1u);
+	// physical pixels: centre (120,120), half size 80, radii 10dp * 2 dpi
+	CHECK_NEAR(shape.rounds[0].cx, 120.f, 0.01f);
+	CHECK_NEAR(shape.rounds[0].cy, 120.f, 0.01f);
+	CHECK_NEAR(shape.rounds[0].hx, 80.f, 0.01f);
+	CHECK_NEAR(shape.rounds[0].r[0], 20.f, 0.01f);
+}
+TEST(painter_rounded_clips_nest_dedupe_and_cap) {
+	Painter p;
+	p.begin(400, 400, 1.f);
+	p.pushClip({40, 40, 300, 300}, CornerRadii::all(12));
+	p.pushClip({40, 40, 300, 300}, CornerRadii::all(12)); // same shape twice: emitted once
+	p.fillRect({40, 40, 20, 20}, {1, 1, 1, 1});
+	DrawList deduped = p.finish();
+	CHECK_EQ(deduped.nClipShapes, 1u);
+	if (deduped.nClipShapes == 1u)
+		CHECK_EQ(deduped.clipShapes[0].count, 1u);
+
+	Painter q;
+	q.begin(400, 400, 1.f);
+	q.pushClip({10, 10, 380, 380}, CornerRadii::all(20));
+	q.pushClip({20, 20, 340, 340}, CornerRadii::all(16));
+	q.fillRect({20, 20, 20, 20}, {1, 1, 1, 1}); // touches both top-left arcs
+	DrawList nested = q.finish();
+	CHECK_EQ(nested.nClipShapes, 1u);
+	if (nested.nClipShapes == 1u)
+		CHECK_EQ(nested.clipShapes[0].count, 2u);
+
+	Painter r;
+	r.begin(400, 400, 1.f);
+	for (u32 i = 0; i < 6; ++i) { // more rounded ancestors than the cap allows
+		const f32 inset = f32(i) * 10.f;
+		r.pushClip({inset, inset, 400.f - 2.f * inset, 400.f - 2.f * inset}, CornerRadii::all(8));
+	}
+	r.fillRect({0, 0, 400, 400}, {1, 1, 1, 1}); // spans every corner square
+	DrawList capped = r.finish();
+	CHECK_EQ(capped.nClipShapes, 1u);
+	if (capped.nClipShapes != 1u)
+		return;
+	CHECK_EQ(capped.clipShapes[0].count, ClipShape::kMaxRounds);
+	// At capacity the most restrictive (smallest) shapes stay: insets 20..50 of 0..50, half sizes 180..150.
+	f32 widest = 0.f;
+	for (u32 i = 0; i < capped.clipShapes[0].count; ++i)
+		widest = std::max(widest, capped.clipShapes[0].rounds[i].hx);
+	CHECK_NEAR(widest, 180.f, 0.01f);
+}
+TEST(render_rounded_parent_clip_masks_a_child_filling_its_bounds) {
+	Env e(80, 80);
+	Painter p;
+	p.begin(80, 80, 1);
+	p.pushClip({10, 10, 60, 60}, CornerRadii::all(20));
+	p.fillRect({0, 0, 80, 80}, {0, 1, 0, 1}); // child background covering the whole parent
+	p.popClip();
+	const Image rounded = e.draw(p);
+	CHECK_EQ(int(rounded.px(10, 10)[3]), 0); // corner square outside the arc
+	CHECK_EQ(int(rounded.px(69, 69)[3]), 0);
+	CHECK_EQ(int(rounded.px(40, 40)[3]), 255); // interior unaffected
+	CHECK_EQ(int(rounded.px(40, 11)[3]), 255); // straight top edge between the arcs
+	CHECK_EQ(int(rounded.px(10, 40)[3]), 255); // straight left edge
+
+	Painter q;
+	q.begin(80, 80, 1); // control: a square clip keeps the corner
+	q.pushClip({10, 10, 60, 60});
+	q.fillRect({0, 0, 80, 80}, {0, 1, 0, 1});
+	q.popClip();
+	const Image square = e.draw(q);
+	CHECK_EQ(int(square.px(10, 10)[3]), 255);
+	CHECK_EQ(int(square.px(69, 69)[3]), 255);
+}
+
 // ---- Painter semantics --------------------------------------------------------------------------------
 TEST(painter_scales_by_dpi_and_snaps) {
 	Painter p; p.begin(200, 200, 2.f); p.fillRect({ 10.2f, 10.2f, 20, 20 }, { 1, 1, 1, 1 });

@@ -111,6 +111,12 @@ namespace xui {
 		/// Whether a window can currently be seen. Minimized/hidden windows may pause visual timers.
 		/// Platforms without visibility state can keep the default and report true.
 		virtual bool windowVisible(WindowHandle) const { return true; }
+		/// Show or hide a top-level window without destroying it. Used to create native floating
+		/// panels hidden and reveal them only after their first frame is drawn, so a newly torn-off
+		/// panel never flashes an unpainted (black) client area. Defaults to a no-op.
+		virtual void setWindowVisible(WindowHandle, bool visible) {
+			(void)visible;
+		}
 		/// Screen-space client origin and position/size controls for native floating windows.
 		/// Defaults keep older backends source-compatible and report unsupported geometry.
 		virtual Vec2 windowClientScreenOrigin(WindowHandle) const { return {}; }

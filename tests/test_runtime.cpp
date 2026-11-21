@@ -918,6 +918,59 @@ Button.overlay-action { resting: { pad: 0px, bg: #00CC44FF, fg: #FFFFFFFF, borde
 		std::cout << "Dock native-surface proof: scoped subtree pixel header=(110,10) blue; child=(180,60) green; no sibling paint or ancestor clip.\n";
 	}
 
+	TEST(ui_runtime_rounded_parent_masks_child_background_in_corners) {
+		constexpr std::string_view xuiSource = R"(
+Window(size: 200x160) {
+  Panel[id: "rounded", class: "rounded", width: 120px, height: 120px] {
+    Panel[id: "child", class: "child", width: 100%, height: 100%]
+  }
+}
+)";
+		constexpr std::string_view xssSource = R"(
+Window { resting: { pad: 0px, bg: #0000FFFF } }
+Panel.rounded { resting: { pad: 0px, bg: #101820FF, radius: 28px, border: 0px solid #00000000 } }
+Panel.child { resting: { pad: 0px, bg: #00FF00FF, border: 0px solid #00000000 } }
+)";
+		StringInterner strings;
+		auto document = parseXui(xuiSource, "rounded-parent.xui", strings);
+		auto styles = compileXss(xssSource, "rounded-parent.xss", strings);
+		CHECK(document.has_value());
+		CHECK(styles.has_value());
+		if (!document || !styles)
+			return;
+		TextSystem text;
+		UiRuntime ui;
+		std::string error;
+		CHECK(ui.build(*document, *styles, strings, text, {}, error));
+		if (!error.empty())
+			return;
+		ui.layout(200.f, 160.f);
+		const Rect parent = UiRuntimeFontWeightProbe::bounds(ui, "rounded");
+		CHECK(parent.w == 120.f && parent.h == 120.f);
+		SoftRenderer renderer;
+		CHECK(renderer.init({200, 160, 1.f, nullptr, false}));
+		Painter painter;
+		painter.begin(200, 160, 1.f);
+		ui.paint(painter);
+		renderer.beginFrame({200, 160, 1.f, Color{0.f, 0.f, 1.f, 1.f}, 1});
+		renderer.submit(painter.finish());
+		renderer.endFrame();
+		const Image image = renderer.snapshot();
+		auto at = [&](f32 x, f32 y) { return image.px(static_cast<u32>(x), static_cast<u32>(y)); };
+		const u8* topLeft = at(parent.x + 1.f, parent.y + 1.f);
+		const u8* bottomRight = at(parent.right() - 2.f, parent.bottom() - 2.f);
+		const u8* insideArc = at(parent.x + 12.f, parent.y + 12.f);
+		const u8* middle = at(parent.x + 60.f, parent.y + 60.f);
+		// The child fills the parent edge to edge; only the rounded clip keeps it off the corners.
+		CHECK(topLeft && topLeft[1] < 40 && topLeft[2] > 180);
+		CHECK(bottomRight && bottomRight[1] < 40 && bottomRight[2] > 180);
+		CHECK(insideArc && insideArc[1] > 180 && insideArc[2] < 80);
+		CHECK(middle && middle[1] > 180 && middle[2] < 80);
+		std::cout << "Rounded parent proof: child green fills the body but corners (" << parent.x + 1.f << ','
+				  << parent.y + 1.f << ") and (" << parent.right() - 2.f << ',' << parent.bottom() - 2.f
+				  << ") stay clear colour.\n";
+	}
+
 	TEST(ui_runtime_floating_dock_panel_paints_above_chrome_and_owns_pointer) {
 		constexpr std::string_view xuiSource = R"(
 Window(size: 460x320) {
@@ -2683,6 +2736,53 @@ TEST(xui_facade_scheduled_application_tick_runs_on_ui_loop) {
 	CHECK_EQ(app.run({ 0.025, false }), 0);
 	CHECK(probe.calls >= 3);
 	CHECK(probe.elapsed > 0.0);
+	app.shutdown();
+}
+
+TEST(xui_facade_native_tear_off_is_created_hidden_then_revealed) {
+	Xui app;
+	const auto xuiPath = (std::filesystem::path(XUI_TEST_FIXTURE_DIR) / "native_float.xui").string();
+	const auto xssPath = (std::filesystem::path(XUI_TEST_FIXTURE_DIR) / "native_float.xss").string();
+	CHECK(app.loadXui(xuiPath));
+	CHECK(app.loadXss(xssPath));
+	if (!app.lastError().empty()) {
+		std::cerr << app.lastError() << '\n';
+		return;
+	}
+	NullRenderer renderer;
+	NullPlatform platform;
+	CHECK(app.attach(renderer, platform));
+	CHECK_EQ(platform.liveWindowCount(), 1u);
+	CHECK_EQ(app.run({0.05, true}), 0);
+	// A floatMode: "os-window" panel owns a second native window. It is created hidden, painted
+	// once, and only then revealed so the client area never flashes an unpainted (black) surface.
+	CHECK_EQ(platform.liveWindowCount(), 2u);
+	CHECK_EQ(platform.hiddenCreateCount(), 1u);
+	CHECK_EQ(platform.showCount(), 1u);
+	CHECK_EQ(renderer.surfaceCount(), 1u);
+	const WindowHandle tearOff = platform.lastCreatedWindow();
+	CHECK(tearOff.valid());
+	CHECK(platform.windowVisible(tearOff));
+	// The platform rounds the tear-off window like the panel body it contains.
+	CHECK_NEAR(platform.lastCornerRadius(), 12.f, 0.01f);
+	// Closing the native window drops the surface and re-homes the panel as an in-app float;
+	// it must not be recreated by the next reconciliation pass.
+	Event quit{};
+	quit.type = EventType::Quit;
+	quit.window = tearOff;
+	platform.pushEvent(quit);
+	CHECK_EQ(app.run({0.05, true}), 0);
+	CHECK_EQ(platform.liveWindowCount(), 1u);
+	const auto value = app.runtime().value("tear-off");
+	CHECK(value.has_value());
+	if (value) {
+		const auto* panel = std::get_if<DockPanelValue>(&*value);
+		CHECK(panel != nullptr);
+		if (panel) {
+			CHECK(panel->floating);
+			CHECK(!panel->osWindow);
+		}
+	}
 	app.shutdown();
 }
 

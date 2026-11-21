@@ -11,8 +11,30 @@ namespace xui {
 		struct Recorded { std::vector<Vertex> verts; std::vector<u32> idx; std::vector<DrawCmd> cmds; };
 
 		bool init(const RendererDesc& d) override { m_desc = d; m_inited = true; return true; }
-		void shutdown() override { m_inited = false; m_textures.clear(); }
+		void shutdown() override {
+			m_inited = false;
+			m_textures.clear();
+			m_surfaceSerial = 0;
+		}
 		void resize(u32 w, u32 h, f32 dpi) override { m_desc.width = w; m_desc.height = h; m_desc.dpiScale = dpi; }
+		/// Extra targets are accepted but not rasterised into: frame state is shared, which is enough
+		/// to exercise multi-surface code paths headlessly (tear-off windows, embedded panes).
+		RenderSurfaceHandle createSurface(const RenderSurfaceDesc&) override {
+			return {++m_surfaceSerial, 1};
+		}
+		void destroySurface(RenderSurfaceHandle) override {}
+		bool makeSurfaceCurrent(RenderSurfaceHandle h) override {
+			return h.valid();
+		}
+		bool resizeSurface(RenderSurfaceHandle h, u32, u32, f32 dpi) override {
+			if (!h.valid())
+				return false;
+			m_desc.dpiScale = dpi;
+			return true;
+		}
+		u32 surfaceCount() const {
+			return m_surfaceSerial;
+		}
 		TextureHandle createTexture(const TextureDesc& d) override;
 		void updateTexture(TextureHandle, const void*, Recti) override { ++m_textureUpdates; }
 		void destroyTexture(TextureHandle h) override;
@@ -34,6 +56,7 @@ namespace xui {
 		struct Tex { u32 w = 0, h = 0; TextureFormat fmt = TextureFormat::RGBA8; bool alive = false; u32 gen = 1; };
 		RendererDesc m_desc; FrameInfo m_frame; Recorded m_last;
 		std::vector<Tex> m_textures; std::size_t m_liveTextures = 0;
+		u32 m_surfaceSerial = 0;
 		bool m_inited = false, m_inFrame = false;
 		u32 m_drawCallsThisFrame = 0, m_drawCallsLastFrame = 0, m_textureUpdates = 0; u64 m_frames = 0;
 		CustomDrawFn m_custom = nullptr; void* m_customCtx = nullptr;

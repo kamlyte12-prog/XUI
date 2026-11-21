@@ -17,6 +17,7 @@ public:
 	xui::Vec2i windowSizePixels(xui::WindowHandle) const override;
 	xui::f32 dpiScale(xui::WindowHandle) const override;
 	bool windowVisible(xui::WindowHandle) const override;
+	void setWindowVisible(xui::WindowHandle, bool visible) override;
 	xui::Vec2 windowClientScreenOrigin(xui::WindowHandle) const override;
 	xui::Vec2 windowPositionLogical(xui::WindowHandle) const override;
 	bool setWindowPositionLogical(xui::WindowHandle, xui::Vec2) override;

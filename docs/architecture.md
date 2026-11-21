@@ -74,10 +74,10 @@ See [`renderer.hpp`](../include/xui/render/renderer.hpp). A concrete renderer mu
 1. `init(RendererDesc)` and `shutdown()` for device/surface lifetime.
 2. `resize(width, height, dpiScale)` for physical framebuffer changes.
 3. `createTexture`, `updateTexture`, and `destroyTexture`. `A8` stores glyph coverage; `RGBA8` stores color textures. Preserve handle validity/lifetime semantics.
-4. `beginFrame(FrameInfo)`, `submit(DrawList)`, `endFrame()`, and `present()`. Consume commands, vertices, indices, scissor clips, texture references, and custom commands in draw-list order.
+4. `beginFrame(FrameInfo)`, `submit(DrawList)`, `endFrame()`, and `present()`. Consume commands, vertices, indices, scissor clips, texture references, custom commands, and optional rounded clip shapes in draw-list order.
 5. `caps()` with only capabilities the renderer implements.
 
-`DrawList` data is temporary and remains valid only until the next painter frame. Copy or consume it synchronously. Honor framebuffer pixel dimensions and premultiplied-alpha conventions used by the draw-list renderer. The optional custom-command callback is installed with `setCustomHandler()`.
+`DrawList` data is temporary and remains valid only until the next painter frame. Copy or consume it synchronously. Honor framebuffer pixel dimensions and premultiplied-alpha conventions used by the draw-list renderer. The optional custom-command callback is installed with `setCustomHandler()`. A command's `clip` rectangle is its conservative scissor bound; when `clipShape` is set, it indexes `DrawList::clipShapes`, a list of up to four rounded rectangles whose per-corner radii the renderer multiplies into sample coverage. A renderer that cannot sample those shapes may keep the scissor bound, which preserves containment but loses the anti-aliased corner.
 
 For optional multi-window support, implement `createSurface`, `destroySurface`, `makeSurfaceCurrent`, and `resizeSurface`. `init()` creates the primary surface; `primarySurface()` returns its handle. Ordinary frame methods target whichever surface is current. The platform creates a secondary window with `WindowDesc.shareContextWith` set to the primary window when graphics resources must be shared. A backend may return an invalid surface handle; `xui::Xui` then leaves an `os-window` DockPanel in the in-app float layer. Existing single-surface renderer implementations remain source-compatible.
 
@@ -96,6 +96,7 @@ See [`platform.hpp`](../include/xui/platform/platform.hpp). Implement:
 - `init` / `shutdown` and `createWindow` / `destroyWindow`.
 - Title, logical client size, physical framebuffer size, DPI, and opaque native handles.
 - `windowVisible()` for hidden/minimized timer policy. It defaults to `true`; implement it when the backend can query visibility so the facade can pause animation clocks while hidden.
+- `setWindowVisible()` to show or hide a created window. Native tear-off surfaces are created hidden, painted once, then revealed through this method; the default implementation is a no-op.
 - A normalized event queue through `pumpEvents()` and a blocking/non-busy `waitEvents(timeoutSec)`.
 - Monotonic `time()`, cursor and clipboard methods.
 - GL context activation (`makeGlCurrent`, `nativeGlContext`) and `swapBuffers`; use safe no-ops when your platform/renderer pair does not need them.

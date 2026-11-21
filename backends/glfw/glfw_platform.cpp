@@ -151,6 +151,15 @@ bool GlfwPlatform::windowVisible(WindowHandle h) const {
 		glfwGetWindowAttrib(window->native, GLFW_VISIBLE) == GLFW_TRUE &&
 		glfwGetWindowAttrib(window->native, GLFW_ICONIFIED) != GLFW_TRUE;
 }
+void GlfwPlatform::setWindowVisible(WindowHandle h, bool visible) {
+	Window* rec = find(h);
+	if (!rec || !rec->native)
+		return;
+	if (visible)
+		glfwShowWindow(rec->native);
+	else
+		glfwHideWindow(rec->native);
+}
 Vec2 GlfwPlatform::windowPositionLogical(WindowHandle h) const {
 	const Window* rec = find(h);
 	if (!rec || !rec->native)
@@ -505,6 +514,13 @@ namespace {
 		case WM_NCACTIVATE:
 			// Native activation must not repaint a caption for our client-drawn frame.
 			if (window && window->customChrome) return TRUE;
+			break;
+		case WM_ERASEBKGND:
+			// The client area is a GL surface: erasing it with the class brush paints a flash of
+			// black on resize/restore/tear-off before the next frame lands. Report the erase as
+			// handled and let the renderer own every client pixel.
+			if (window && window->customChrome)
+				return 1;
 			break;
 		case WM_NCHITTEST:
 			if (window && window->customChrome) {

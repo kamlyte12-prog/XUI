@@ -266,6 +266,8 @@ int main(int argc, char** argv) {
 			profileCase = "transform";
 		else if (arg == "--profile-docking")
 			profileCase = "docking";
+		else if (arg == "--profile-os-window")
+			profileCase = "os-window";
 		else if (arg == "--profile-menubar")
 			profileCase = "menubar";
 		else if (arg == "--profile-images")
@@ -321,6 +323,19 @@ int main(int argc, char** argv) {
 					floating.bounds = bounds;
 					app.runtime().setValue(id, floating);
 				}
+			}
+		}
+		app.runtime().layout(1080.f, 760.f);
+	} else if (profileCase == "os-window") {
+		// Exercises the native tear-off path: the Preview panel is authored with
+		// floatMode: "os-window" and a client-drawn title bar.
+		app.runtime().setValue("demo-sections", xui::u32{6});
+		if (auto value = app.runtime().value("dock-preview")) {
+			if (auto panel = std::get_if<xui::DockPanelValue>(&*value)) {
+				xui::DockPanelValue floating = *panel;
+				floating.floating = true;
+				floating.bounds = xui::Rect{80.f, 240.f, 320.f, 240.f};
+				app.runtime().setValue("dock-preview", floating);
 			}
 		}
 		app.runtime().layout(1080.f, 760.f);

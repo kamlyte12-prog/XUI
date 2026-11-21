@@ -2532,6 +2532,14 @@ namespace xui {
 			const LayoutStyle& style = m_layout.style(m_nodes[host.node].layout);
 			return Vec2{rect.x + style.border.l + style.padding.l, rect.y + style.border.t + style.padding.t};
 		};
+		// Corner radii of a node's resolved style. Used both when painting its own background and
+		// when clipping descendants: a child may never paint past a rounded parent boundary.
+		auto nodeRadii = [&](const Node& node) {
+			if (!node.style.has(PropId::Radius))
+				return CornerRadii{};
+			const StyleValue& radius = node.style.get(PropId::Radius);
+			return CornerRadii{number(radius, 0), number(radius, 1), number(radius, 2), number(radius, 3)};
+		};
 		auto drawDockChrome = [&](const Node& owner, StyleSetId set, Rect bounds, StateMask states,
 								  std::string_view label, f32 inset) {
 			PropTable style;
@@ -2571,6 +2579,15 @@ namespace xui {
 			if (!panelLayout.active || panelLayout.bounds.empty())
 				return;
 			const Rect group = panelLayout.bounds;
+			// Pointer tracking exists only for the main window. Inside a native tear-off surface
+			// the stored position lives in a different coordinate space, so testing it would
+			// light up whatever chrome happens to sit under the main window's cursor.
+			auto pointerOver = [&](const Rect& rect) {
+				return !m_paintDockPanelScope && !panel.disabled && rect.contains(m_pointerPosition);
+			};
+			// The header/tab chrome is opaque, so without a rounded clip it paints square pixels
+			// over the panel body's rounded top corners.
+			painter.pushClip({origin.x + group.x, origin.y + group.y, group.w, group.h}, nodeRadii(panel));
 			const u32 count = host.tree.panelCount(panelIndex);
 			if (panelLayout.floating || count <= 1) {
 				const Rect header{origin.x + group.x, origin.y + group.y, group.w,
@@ -2581,7 +2598,7 @@ namespace xui {
 					states |= stateBit(State::Selected);
 				if (panelLayout.floating)
 					states |= stateBit(State::Floating);
-				if (!panel.disabled && header.contains(m_pointerPosition))
+				if (pointerOver(header))
 					states |= stateBit(State::Hover);
 				if (m_dockCandidate == panelIndex)
 					states |= stateBit(State::Pressed) | stateBit(State::Dragging);
@@ -2591,7 +2608,7 @@ namespace xui {
 					const Rect close{header.right() - side, header.y, side, side};
 					StateMask closeStates = stateBit(State::Resting) |
 											(panel.disabled ? stateBit(State::Disabled) : stateBit(State::Enabled));
-					if (!panel.disabled && close.contains(m_pointerPosition))
+					if (pointerOver(close))
 						closeStates |= stateBit(State::Hover);
 					drawDockChrome(panel, panel.dockCloseStyleSet, close, closeStates, "×", 0.f);
 				}
@@ -2637,6 +2654,7 @@ namespace xui {
 					}
 				}
 			}
+			painter.popClip();
 		};
 		auto paintScrollBarNode = [&](u32 index) {
 			Node& node = m_nodes[index];
@@ -2653,9 +2671,16 @@ namespace xui {
 			for (u32 parent = node.parentIndex; parent != 0xFFFFFFFFu && parent < m_nodes.size();
 				 parent = m_nodes[parent].parentIndex)
 				if (m_nodes[parent].scrollView) {
-					painter.pushClip(m_layout.absRect(m_nodes[parent].layout));
+					painter.pushClip(m_layout.absRect(m_nodes[parent].layout), nodeRadii(m_nodes[parent]));
 					++scrollbarClips.count;
 				}
+			// Keep the track/thumb inside the scroll view's own rounded corners.
+			const Rect scrollRect = m_layout.absRect(node.layout);
+			const CornerRadii scrollRadii = nodeRadii(node);
+			if (scrollRadii.any()) {
+				painter.pushClip(scrollRect, scrollRadii);
+				++scrollbarClips.count;
+			}
 			const bool always = node.scrollBarVisibility == 1;
 			const f32 radius = node.style.has(PropId::Radius)
 								   ? number(node.style.get(PropId::Radius), 0, node.scrollBarSize * 0.5f)
@@ -2681,6 +2706,7 @@ namespace xui {
 			const u32 count = m_layout.childCount(tabs.layout);
 			if (!count)
 				return;
+			painter.pushClip(bounds, nodeRadii(tabs));
 			u32 ordinal = 0;
 			for (NodeId child = m_layout.firstChild(tabs.layout); child.valid();
 				 child = m_layout.nextSibling(child), ++ordinal) {
@@ -2706,6 +2732,7 @@ namespace xui {
 				}
 				drawLabel(tab.tabTitle, header, tab.font, tabStyle, Color::fromRGBA8(0xDDE7F8FFu), 8.f, false);
 			}
+			painter.popClip();
 		};
 		// Floating panels paint as one unit: body, then their own title bar, close button,
 		// scrollbars and tabs. Emitting the chrome per group keeps it above its own body while
@@ -2842,27 +2869,49 @@ namespace xui {
 			// Floating panel bodies live above docked content and its chrome.
 			painter.setLayer(useDockOverlay && overlayPanel != 0xFFFFFFFFu ? 2u : 0u);
 			if (overlayPanel != 0xFFFFFFFFu) {
-				painter.pushClip(m_paintDockPanelScope ? m_layout.absRect(m_nodes[overlayPanel].layout)
-					: Rect{ 0.f, 0.f, m_lastLayoutWidth, m_lastLayoutHeight });
+				// The scope itself stays a plain rect: the panel's own body is the rounded shape,
+				// so masking it again would square/darken its anti-aliased border.
+				Rect scopeClip{0.f, 0.f, m_lastLayoutWidth, m_lastLayoutHeight};
+				if (m_paintDockPanelScope)
+					scopeClip = m_layout.absRect(m_nodes[overlayPanel].layout);
+				painter.pushClip(scopeClip);
 				++scrollClips.count;
-				for (u32 parent = node.parentIndex; parent != 0xFFFFFFFFu && parent < m_nodes.size(); parent = m_nodes[parent].parentIndex) {
-					if (parent == overlayPanel) {
-						if (nodeIndex != overlayPanel) {
-							painter.pushClip(m_layout.absRect(m_nodes[overlayPanel].layout));
-							++scrollClips.count;
-						}
-						break;
-					}
-					if (m_nodes[parent].scrollView) {
-						painter.pushClip(m_layout.absRect(m_nodes[parent].layout));
+				if (m_paintDockPanelScope) {
+					// A native tear-off surface contains this panel and nothing else: its ancestors
+					// live in the main window, so their scroll/rounded clips must not cut the panel.
+					if (nodeIndex != overlayPanel) {
+						const Rect panelClip = m_layout.absRect(m_nodes[overlayPanel].layout);
+						painter.pushClip(panelClip, nodeRadii(m_nodes[overlayPanel]));
 						++scrollClips.count;
 					}
+				} else {
+					for (u32 parent = node.parentIndex; parent != 0xFFFFFFFFu && parent < m_nodes.size();
+						 parent = m_nodes[parent].parentIndex) {
+						if (parent == overlayPanel) {
+							if (nodeIndex != overlayPanel) {
+								const Rect panelClip = m_layout.absRect(m_nodes[overlayPanel].layout);
+								painter.pushClip(panelClip, nodeRadii(m_nodes[overlayPanel]));
+								++scrollClips.count;
+							}
+							break;
+						}
+						const Node& ancestor = m_nodes[parent];
+						const CornerRadii radii = nodeRadii(ancestor);
+						if (ancestor.scrollView || radii.any()) {
+							painter.pushClip(m_layout.absRect(ancestor.layout), radii);
+							++scrollClips.count;
+						}
+					}
 				}
-			}
-			else {
+			} else {
 				for (u32 parent = node.parentIndex; parent != 0xFFFFFFFFu && parent < m_nodes.size(); parent = m_nodes[parent].parentIndex) {
-					if (m_nodes[parent].scrollView || m_nodes[parent].dockPanel) {
-						painter.pushClip(m_layout.absRect(m_nodes[parent].layout));
+					const Node& ancestor = m_nodes[parent];
+					const CornerRadii radii = nodeRadii(ancestor);
+					// Scroll containers and dock panels clip their content in both axes; any other
+					// rounded ancestor additionally masks the rounded corners so a child background
+					// can never paint past them.
+					if (ancestor.scrollView || ancestor.dockPanel || radii.any()) {
+						painter.pushClip(m_layout.absRect(ancestor.layout), radii);
 						++scrollClips.count;
 					}
 				}
@@ -5779,6 +5828,18 @@ namespace xui {
 		return {};
 	}
 
+	f32 UiRuntime::dockPanelRadius(std::string_view id) const {
+		for (const Node& node : m_nodes) {
+			if (!node.dockPanel || !node.id.v || m_strings->view(node.id) != id)
+				continue;
+			if (!node.style.has(PropId::Radius))
+				return 0.f;
+			const StyleValue& radius = node.style.get(PropId::Radius);
+			return std::max({number(radius, 0), number(radius, 1), number(radius, 2), number(radius, 3)});
+		}
+		return 0.f;
+	}
+
 	f32 UiRuntime::dockPanelHeaderHeight(std::string_view id) const {
 		for (const Node& node : m_nodes)
 			if (node.dockPanel && node.id.v && m_strings->view(node.id) == id) return node.dockHeaderHeight;
@@ -5980,6 +6041,12 @@ namespace xui {
 				DockHostState* host = dockHostForPanel(panelIndex);
 				if (!host || !host->tree.contains(panelIndex)) return false;
 				const bool wasFloating = host->tree.floating(panelIndex);
+				// floatMode is a policy, not a dock structure: closing a native tear-off window
+				// writes osWindow=true|false through this API, and the facade reconciles surfaces
+				// against it. Keep it out of the dock handler notification below.
+				const bool policyChanged = requested->osWindow != node.dockOsWindow;
+				if (policyChanged)
+					node.dockOsWindow = requested->osWindow;
 				if (requested->floating) {
 					Rect floating = requested->bounds;
 					if (floating.w <= 0.f) floating.w = std::max(1.f, node.dockPreferredSize.x);
@@ -5998,10 +6065,12 @@ namespace xui {
 					changed |= host->tree.reorder(panelIndex, requested->order);
 					if (requested->active) changed |= host->tree.activate(panelIndex);
 				}
-				if (!changed) return true;
-				updateDockHostLayout(*host, true);
+				if (!changed && !policyChanged)
+					return true;
+				if (changed)
+					updateDockHostLayout(*host, true);
 				addDockDamage(*host);
-				if (notify) {
+				if (notify && changed) {
 					fireDockHandler(panelIndex, requested->floating ? node.undockHandler : node.dockHandler);
 					if (node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
 				}

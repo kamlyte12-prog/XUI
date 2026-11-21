@@ -2,6 +2,35 @@
 
 This file records project changes, design decisions, trade-offs, current status, and next steps. It is updated as implementation work lands.
 
+## 2026-11-20 - Rounded-corner AA, child clipping, and native tear-off lifecycle
+
+### Audit and root causes
+
+- Rounded corners were rectangular: ancestor clipping used axis-aligned scissors only, while the analytic rounded-rectangle coverage path applied just to the widget's own body. A child background painted into the parent's corner square and the visible arc was effectively unsampled at the boundary, which read as pixelation.
+- The native tear-off surface painted the panel with the main window's ancestor clips still active, so only the top 124 px of a 400x300 surface were filled. The window was also revealed before its first paint, `WM_ERASEBKGND` used the class brush, and GL state (blend, unpack alignment, depth/cull) was not restored when the new context became current. The header close button stayed in hover because pointer tracking only exists for the main window.
+- Closing a native float writes `floatMode`/`osWindow` through the value API. `setValue` dropped `osWindow`, so the close looked like a dock change, fired handlers, and reconciliation recreated the window.
+
+### Changes and decisions
+
+- The painter's clip stack now carries per-corner radii and emits a per-command `ClipShape` of at most four rounded rectangles. Shapes that no primitive corner can touch are filtered out, identical shapes are deduped, and at the cap the smallest-area (most restrictive) shapes stay. Scissor rectangles remain the conservative bound and the fast path.
+- The soft renderer multiplies sample coverage by each clip shape's signed-distance coverage; the OpenGL renderer uploads the four rect/radii pairs and does the same in the fragment shader. This keeps the existing analytic SDF coverage (`cov(d) = clamp(0.5 - d, 0, 1)`) as the only anti-aliasing path; 4x MSAA is intentionally not enabled.
+- The runtime pushes a rounded clip for every ancestor with `radius > 0` in addition to ScrollView/dock-panel rectangle clips. A node's own body is never clipped by its own radius, avoiding a second mask over an already anti-aliased edge. A native tear-off surface skips the former window's ancestors and clips its children with the panel's own radius.
+- Native floats are created hidden, painted once, and then revealed through `Platform::setWindowVisible`. Custom-chrome windows report `WM_ERASEBKGND` as handled, `applyContextState()` restores GL state on every surface activation, hover states are suppressed in scoped paint, and the window's corner radius comes from `DockPanel`'s `.xss` radius.
+- `DockPanelValue::osWindow` is returned and persisted as a policy change with no dock handler notification, so a closed native window stays closed. Floating-panel reconciliation runs in the visible draw block so programmatically created/value-API floats get their native windows too.
+
+### Verification
+
+- `cmake --build --preset dev` succeeds; `ctest --preset dev --output-on-failure` passes 1/1; the direct suite reports **235 tests, 0 failed**.
+- New regressions cover clip-shape emission/filtering, nesting/deduping/capping, a soft-rendered child masked by a rounded parent, runtime corner pixels for a child filling its rounded parent, and the native tear-off hidden-create/reveal/close lifecycle through `NullRenderer`/`NullPlatform` (including the panel's radius and the `osWindow` policy).
+- The `--profile-os-window` showcase paints the full 400x300 tear-off surface; scripted `WM_CLOSE` destroyed the window and the panel returned as an in-app float without recreation (`after_close.png`). `--profile-docking` was recaptured with no visual change in chrome or layering.
+- The changed-line format gate is clean with clang-format 22.1.3. While the tree was dirty the check used a single merge-base sha so it saw the working tree, not just committed trees.
+
+### Limits and next steps
+
+- Visible native move/resize/redock and continuous border-drag resize remain unexercised; the scripted close and full-surface capture do not establish interaction cadence.
+- The capture host has one 125% monitor, so cross-monitor `DpiChange` and mixed-DPI tear-off movement remain unverified. Linux/macOS compile in hosted CI but their native tear-off behavior is not visually exercised.
+- More than four rounded ancestors on one command keep the most restrictive shapes; that is conservative but can square an outer arc when four inner ones already apply.
+
 ## 2026-11-19 — Format gate scoped to code the change owns
 
 ### Audit and root causes

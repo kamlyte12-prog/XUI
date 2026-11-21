@@ -174,6 +174,8 @@ namespace xui {
 		std::optional<UiValue> value(std::string_view id) const;
 		std::vector<std::string> dockPanelIds() const;
 		Rect dockPanelRect(std::string_view id) const;
+		/// Largest authored corner radius of a panel's resolved style, used for native tear-off windows.
+		f32 dockPanelRadius(std::string_view id) const;
 		f32 dockPanelHeaderHeight(std::string_view id) const;
 		std::string_view dockPanelTitle(std::string_view id) const;
 		bool dockPanelUsesNativeTitleBar(std::string_view id) const;

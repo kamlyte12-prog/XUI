@@ -14,17 +14,42 @@ namespace xui {
 
 	WindowHandle NullPlatform::createWindow(const WindowDesc& d) {
 		m_cornerRadius = d.cornerRadius;
+		if (!d.visible)
+			++m_hiddenCreates;
 		for (u32 i = 0; i < m_wins.size(); ++i)
 			if (!m_wins[i].alive) {
-				m_wins[i] = { std::string(d.title), d.width, d.height, true, m_wins[i].gen };
-				return { i, m_wins[i].gen };
+				m_wins[i] = {std::string(d.title), d.width, d.height, true, d.visible, m_wins[i].gen};
+				m_lastCreated = {i, m_wins[i].gen};
+				return m_lastCreated;
 			}
-		m_wins.push_back({ std::string(d.title), d.width, d.height, true, 1 });
-		return { u32(m_wins.size() - 1), 1 };
+		m_wins.push_back({std::string(d.title), d.width, d.height, true, d.visible, 1});
+		m_lastCreated = {u32(m_wins.size() - 1), 1};
+		return m_lastCreated;
 	}
 
 	void NullPlatform::destroyWindow(WindowHandle h) {
 		if (Win* w = find(h)) { w->alive = false; ++w->gen; }
+	}
+
+	bool NullPlatform::windowVisible(WindowHandle h) const {
+		const Win* w = find(h);
+		return w && w->visible;
+	}
+
+	void NullPlatform::setWindowVisible(WindowHandle h, bool visible) {
+		Win* w = find(h);
+		if (!w)
+			return;
+		if (visible && !w->visible)
+			++m_showCount;
+		w->visible = visible;
+	}
+
+	u32 NullPlatform::liveWindowCount() const {
+		u32 count = 0;
+		for (const Win& w : m_wins)
+			count += w.alive ? 1u : 0u;
+		return count;
 	}
 
 	void NullPlatform::setWindowTitle(WindowHandle h, std::string_view t) {

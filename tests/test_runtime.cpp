@@ -607,6 +607,38 @@ DockPreview { resting: { bg: #5386d866, border: 1px solid #69a7ff, radius: 4px }
 		restore.floating = false; restore.targetPanel = "editor"; restore.region = DockZone::Center; restore.active = true;
 		CHECK(ui.setValue("console", restore));
 		CHECK(!std::get<DockPanelValue>(*ui.value("console")).floating);
+		DockPanelValue inspectorPlacement = std::get<DockPanelValue>(*ui.value("inspector"));
+		inspectorPlacement.targetPanel = "editor";
+		inspectorPlacement.region = DockZone::Left;
+		CHECK(ui.setValue("inspector", inspectorPlacement));
+		const std::string dockedSnapshot = ui.dumpLayout();
+		UiRuntime restoredDocked;
+		std::string dockedError;
+		CHECK(restoredDocked.build(*document, *styles, strings, text, {}, dockedError));
+		restoredDocked.layout(640.f, 420.f);
+		CHECK(restoredDocked.loadLayout(dockedSnapshot));
+		const auto restoredInspector = restoredDocked.value("inspector");
+		CHECK(restoredInspector.has_value());
+		if (restoredInspector)
+			CHECK(restoredDocked.bounds({4, 1}).right() <= restoredDocked.bounds({2, 1}).x + 0.1f);
+		floating = std::get<DockPanelValue>(*ui.value("console"));
+		floating.floating = true;
+		floating.bounds = {72.f, 48.f, 310.f, 190.f};
+		CHECK(ui.setValue("console", floating));
+		const std::string layoutSnapshot = ui.dumpLayout();
+		UiRuntime restored;
+		std::string restoreError;
+		CHECK(restored.build(*document, *styles, strings, text, {}, restoreError));
+		restored.layout(640.f, 420.f);
+		CHECK(restored.loadLayout(layoutSnapshot));
+		const auto restoredConsole = restored.value("console");
+		CHECK(restoredConsole.has_value());
+		if (restoredConsole) {
+			const auto restoredPanel = std::get<DockPanelValue>(*restoredConsole);
+			CHECK(restoredPanel.floating);
+			CHECK_NEAR(restoredPanel.bounds.x, 72.f, 0.01f);
+			CHECK_NEAR(restoredPanel.bounds.w, 310.f, 0.01f);
+		}
 	}
 
 	TEST(ui_runtime_os_window_float_policy_paints_one_panel_and_can_redock_by_drop_point) {
@@ -702,7 +734,10 @@ Window(size: 520x360) {
 		const Vec2 closePoint{ panel.right() - 15.f, panel.y + 15.f };
 		CHECK(ui.pointerDown(closePoint));
 		ui.pointerUp(closePoint);
-		CHECK(!ui.value("tool").has_value());
+		const auto closedValue = ui.value("tool");
+		CHECK(closedValue.has_value());
+		if (closedValue)
+			CHECK(std::get<DockPanelValue>(*closedValue).closed);
 	}
 
 	TEST(ui_runtime_floating_panel_raise_matches_content_paint_and_hit_order) {
@@ -1477,6 +1512,48 @@ TEST(ui_runtime_f4_draw_batch_counter_is_independent_of_fps_sampling) {
 	CHECK(!ui.drawBatchCounterEnabled());
 }
 
+TEST(ui_runtime_fps_overlay_reports_clip_cap_fallbacks_only_when_hit) {
+	constexpr std::string_view xuiSource = R"(Window(size: 240x120) { FpsCounter[id: "fps"] })";
+	constexpr std::string_view xssSource = R"(FpsCounter { resting: { fg: #ffffffff } })";
+	StringInterner strings;
+	auto document = parseXui(xuiSource, "fps-cap.xui", strings);
+	CHECK(document.has_value());
+	if (!document)
+		return;
+	auto styles = compileXss(xssSource, "fps-cap.xss", strings);
+	CHECK(styles.has_value());
+	if (!styles)
+		return;
+	TextSystem text;
+	UiRuntime ui;
+	std::string error;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error));
+	if (!error.empty())
+		return;
+	ui.layout(240.f, 120.f);
+	CHECK(ui.keyDown(Key::F4));
+	ui.setDrawBatchCount(7);
+	Painter painter;
+
+	painter.begin(240, 120, 1.f);
+	ui.paint(painter, 1.f);
+	(void)painter.finish();
+	CHECK_EQ(std::string(ui.controlText("fps")), std::string("Batches: 7"));
+
+	// A frame that exceeded the rounded-clip cap appends a diagnostic without changing the
+	// common label; clearing the counter returns to the plain text.
+	ui.setClipShapeCapFallbacks(2);
+	painter.begin(240, 120, 1.f);
+	ui.paint(painter, 1.f);
+	(void)painter.finish();
+	CHECK_EQ(std::string(ui.controlText("fps")), std::string("Batches: 7 | ClipCaps: 2"));
+	ui.setClipShapeCapFallbacks(0);
+	painter.begin(240, 120, 1.f);
+	ui.paint(painter, 1.f);
+	(void)painter.finish();
+	CHECK_EQ(std::string(ui.controlText("fps")), std::string("Batches: 7"));
+}
+
 TEST(ui_runtime_xss_keyframes_tick_only_while_visible_animation_runs) {
 	constexpr std::string_view xuiSource = R"(Window(size: 240x120) { Panel[id: "animated", class: "animated", width: 160px, height: 48px] })";
 	constexpr std::string_view xssSource = R"(
@@ -1600,6 +1677,71 @@ TEST(ui_runtime_transform_moves_paint_and_hit_testing_together) {
 	const Rect original = ui.bounds({ 1, 1 });
 	CHECK(ui.pointerDown({ original.x + original.w * 0.5f + 40.f, original.y + original.h * 0.5f }));
 	CHECK(ui.pointerUp({ original.x + original.w * 0.5f + 40.f, original.y + original.h * 0.5f }));
+	CHECK_EQ(calls, 1u);
+}
+
+TEST(ui_runtime_transformed_tabs_align_header_hover_and_click_hitboxes) {
+	constexpr std::string_view xuiSource = R"(Window(size: 260x140) {
+  Tabs[id: "sections", class: "shifted", selected: 0, change: onChange, width: 180px, height: 110px] {
+    Tab[title: "First"] { Text("First page") }
+    Tab[title: "Second"] { Text("Second page") }
+  }
+})";
+	constexpr std::string_view xssSource = R"(
+Tabs.shifted { resting: { transform: translate(40px, 12px) } }
+Tab { resting: { bg: #112233ff } hover: { bg: #aabbccff } }
+)";
+	StringInterner strings;
+	auto document = parseXui(xuiSource, "tabs-transform.xui", strings);
+	CHECK(document.has_value());
+	if (!document)
+		return;
+	auto styles = compileXss(xssSource, "tabs-transform.xss", strings);
+	CHECK(styles.has_value());
+	if (!styles)
+		return;
+	TextSystem text;
+	UiRuntime ui;
+	std::string error;
+	u32 calls = 0;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error));
+	if (!error.empty())
+		return;
+	ui.setEventHandler(
+		[](void* context, std::string_view name) {
+			if (name == "onChange")
+				++*static_cast<u32*>(context);
+		},
+		&calls);
+	ui.layout(260.f, 140.f);
+	const Rect tabs = ui.bounds({1, 1});
+	Painter painter;
+	const u32 hoverColor = Color::fromRGBA8(0xaabbccffu).toRGBA8();
+	auto hoverPaintedAt = [&](f32 left) {
+		painter.begin(260, 140, 1.f);
+		ui.paint(painter);
+		const DrawList hovered = painter.finish();
+		for (u32 i = 0; i < hovered.nVerts; ++i) {
+			const Vertex& vertex = hovered.verts[i];
+			if (vertex.c0 == hoverColor && std::abs(vertex.x - left) < 0.01f &&
+				std::abs(vertex.y - (tabs.y + 12.f)) < 0.01f)
+				return true;
+		}
+		return false;
+	};
+	const Vec2 firstHeader{tabs.x + 40.f + tabs.w * 0.25f, tabs.y + 12.f + 16.f};
+	const Vec2 secondHeader{tabs.x + 40.f + tabs.w * 0.75f, tabs.y + 12.f + 16.f};
+	CHECK(ui.pointerMove(firstHeader));
+	CHECK(hoverPaintedAt(tabs.x + 40.f));
+	CHECK(ui.pointerMove(secondHeader)); // Adjacent headers share the same Tabs hit target but must repaint on switch.
+	CHECK(hoverPaintedAt(tabs.x + 40.f + tabs.w * 0.5f));
+	const Vec2 pageInterior{tabs.x + 40.f + 24.f, tabs.y + 12.f + 72.f};
+	CHECK(ui.pointerMove(pageInterior)); // Moving over the active page's own children clears header hover.
+	CHECK(!hoverPaintedAt(tabs.x + 40.f + tabs.w * 0.5f));
+	CHECK(ui.pointerMove(secondHeader));
+	CHECK(hoverPaintedAt(tabs.x + 40.f + tabs.w * 0.5f));
+	CHECK(ui.pointerDown(secondHeader));
+	CHECK_EQ(std::get<u32>(*ui.value("sections")), 1u);
 	CHECK_EQ(calls, 1u);
 }
 
@@ -1793,6 +1935,27 @@ TEST(xui_facade_loads_assets_attaches_backends_and_runs_frames) {
 	CHECK(!app.window().valid());
 }
 
+TEST(xui_facade_exposes_validation_warnings_and_can_opt_into_errors) {
+	const auto base = std::filesystem::temp_directory_path() / "xui-schema-warning-tests";
+	std::filesystem::create_directories(base);
+	const auto xuiPath = base / "unsupported.xui";
+	{
+		std::ofstream file(xuiPath, std::ios::binary);
+		file << "Window(resizable: false) {}";
+	}
+	Xui app;
+	CHECK(app.loadXui(xuiPath.string()));
+	CHECK_EQ(app.validationWarnings().size(), std::size_t{1});
+	if (!app.validationWarnings().empty())
+		CHECK_EQ(app.validationWarnings().front().items().size(), std::size_t{1});
+	XuiOptions options;
+	options.warningsAsErrors = true;
+	Xui strict(options);
+	CHECK(!strict.loadXui(xuiPath.string()));
+	CHECK(strict.lastError().find("error: 'resizable' is accepted on Window but is not implemented") !=
+		  std::string::npos);
+}
+
 TEST(xui_facade_resolves_window_defaults_with_fieldwise_precedence) {
 	auto runCase = [](std::string_view xuiSource, std::string_view xssSource, XuiOptions options,
 		std::string_view expectedTitle, u32 expectedWidth, u32 expectedHeight) {
@@ -1933,6 +2096,25 @@ Button.primary {
 	CHECK_EQ(presses, 1u);
 	text.atlas()->shutdown();
 	renderer.shutdown();
+}
+
+TEST(ui_load_assets_exposes_schema_warnings_and_supports_opt_in_strict_validation) {
+	constexpr std::string_view xuiSource = R"(Window(size: 180x100) { Text("Paragraph")[maxLines: 2] })";
+	StringInterner strings;
+	UiAssetBundle assets;
+	std::string error;
+	CHECK(loadUiAssets(xuiSource, "", strings, assets, error));
+	CHECK(error.empty());
+	CHECK_EQ(assets.validationWarnings.size(), std::size_t{1});
+	if (!assets.validationWarnings.empty()) {
+		const auto warnings = assets.validationWarnings.front().items();
+		CHECK_EQ(warnings.size(), std::size_t{1});
+		if (!warnings.empty())
+			CHECK(warnings.front().severity == Severity::Warning);
+	}
+	UiAssetBundle strictAssets;
+	CHECK(!loadUiAssets(xuiSource, "", strings, strictAssets, error, "<memory>.xui", "<memory>.xss", {true}));
+	CHECK(error.find("error: 'maxLines' is accepted on Text but is not implemented") != std::string::npos);
 }
 
 TEST(ui_runtime_resolves_stylesheet_percent_lengths_once) {
@@ -2157,8 +2339,16 @@ ColorPicker.control { resting: { size: 220px 36px, bg: #223344, fg: #ffffff } ho
 )";
 	StringInterner strings; UiAssetBundle assets; std::string error;
 	CHECK(loadUiAssets(xuiSource, xssSource, strings, assets, error));
-	TextSystem text; UiRuntime ui;
+	SoftRenderer renderer;
+	CHECK(renderer.init({400, 400, 1.f, nullptr, false}));
+	TextSystem text;
+	CHECK(text.initAtlas(&renderer));
+	const std::string fontBytes = readTestFont();
+	const FontHandle font = text.loadFont(fontBytes, &error);
+	CHECK(font.valid());
+	UiRuntime ui;
 	CHECK(ui.build(assets.document, assets.styles, strings, text, {}, error));
+	CHECK(ui.setFont(font, error));
 	ui.layout(400, 400);
 	std::vector<std::string> events;
 	ui.setEventHandler([](void* context, std::string_view name) { static_cast<std::vector<std::string>*>(context)->emplace_back(name); }, &events);
@@ -2212,6 +2402,20 @@ ColorPicker.control { resting: { size: 220px 36px, bg: #223344, fg: #ffffff } ho
 	}
 	CHECK(ui.controlText("accent").starts_with("#"));
 	CHECK(ui.pointerDown({ picker.x + 90.f,popupY + 283.f })); // HEX field is active again
+	ui.pointerUp({picker.x + 90.f, popupY + 283.f});
+	CHECK(ui.pointerDown({picker.x + 90.f, popupY + 283.f})); // select all from the value editor
+	CHECK(ui.keyDown(Key::Home));
+	CHECK(ui.keyDown(Key::End, static_cast<u8>(Mod::Shift), nullptr));
+	NullPlatform mouseSelectionClipboard;
+	CHECK(ui.keyDown(static_cast<Key>('C'), static_cast<u8>(Mod::Ctrl), &mouseSelectionClipboard));
+	CHECK_EQ(mouseSelectionClipboard.clipboardText(), ui.controlText("accent"));
+	CHECK(ui.keyDown(Key::A, static_cast<u8>(Mod::Ctrl), nullptr));
+	NullPlatform pickerClipboard;
+	CHECK(ui.keyDown(static_cast<Key>('C'), static_cast<u8>(Mod::Ctrl), &pickerClipboard));
+	CHECK_EQ(pickerClipboard.clipboardText(), ui.controlText("accent"));
+	CHECK(ui.keyDown(static_cast<Key>('X'), static_cast<u8>(Mod::Ctrl), &pickerClipboard));
+	CHECK(ui.keyDown(static_cast<Key>('V'), static_cast<u8>(Mod::Ctrl), &pickerClipboard));
+	CHECK(ui.controlText("accent").starts_with("#"));
 	CHECK(ui.keyDown(Key::A, static_cast<u8>(Mod::Ctrl), nullptr));
 	CHECK(ui.textInput("#ff00ff80"));
 	CHECK(ui.controlColor("accent").r > 0.99f && ui.controlColor("accent").b > 0.99f);
@@ -2219,6 +2423,8 @@ ColorPicker.control { resting: { size: 220px 36px, bg: #223344, fg: #ffffff } ho
 	CHECK(ui.controlText("accent").starts_with("rgb"));
 	CHECK(std::get<Color>(*ui.value("accent")) == ui.controlColor("accent"));
 	ui.pointerUp({ picker.x + 10.f,popupY + 170.f });
+	text.atlas()->shutdown();
+	renderer.shutdown();
 }
 
 TEST(ui_runtime_slider_change_fires_for_each_live_drag_value) {
@@ -2247,7 +2453,7 @@ TEST(ui_runtime_text_fields_check_box_tabs_and_delayed_tooltips) {
 	constexpr std::string_view xuiSource = R"(
 Window(title: "Inputs", size: 480x360) {
   Column {
-    TextBox[id: "name", value: "A", placeholder: "Name", maxLength: 6, tooltip: "Type a short name", tooltipShowDelay: 100, tooltipHideDelay: 200, tooltipTrigger: "hover", change: onChange]
+    TextBox[id: "name", value: "A", placeholder: "Name", maxLength: 6, tooltip: "Type a short name", tooltipShowDelay: 100, tooltipHideDelay: 200, tooltipTrigger: "hover", change: onChange, filter: rejectBang]
   TextArea[id: "notes", value: "", placeholder: "Notes", maxLength: 20, tabSize: 2, tooltip: "Use multiple lines", tooltipDisabled: true, change: onChange]
     CheckBox(label: "Enabled")[id: "enabled", checked: true, change: onChange]
     Tabs[id: "pages", selected: 0, change: onChange] {
@@ -2278,6 +2484,20 @@ Tooltip { resting: { bg: #202a40, fg: #ffffff, pad: 6px, radius: 4px } }
 
 	std::vector<std::string> events;
 	ui.setEventHandler([](void* context, std::string_view name) { static_cast<std::vector<std::string>*>(context)->emplace_back(name); }, &events);
+	u32 validationCalls = 0;
+	ui.setInputValidationHandler([](void* context, std::string_view handler, std::string_view id,
+		std::string_view proposed, std::string& errorMessage) {
+		++*static_cast<u32*>(context);
+		if (handler == "rejectBang" && id == "name" && proposed.find('!') != std::string_view::npos) {
+			errorMessage = "Exclamation marks are not allowed";
+			return false;
+		}
+		if (handler == "rejectBang" && id == "name" && proposed.empty()) {
+			errorMessage = "Name cannot be empty";
+			return false;
+		}
+		return true;
+	}, &validationCalls);
 	CHECK(ui.setValue("name", std::string("XYZZ")));
 	CHECK(std::get<std::string>(*ui.value("name")) == "XYZZ");
 	CHECK(!ui.setValue("name", true));
@@ -2296,7 +2516,12 @@ Tooltip { resting: { bg: #202a40, fg: #ffffff, pad: 6px, radius: 4px } }
 	CHECK(ui.pointerMove({ name.x + 10, name.y + 10 }));
 	const Vec2 namePoint{ name.x + 10, name.y + 10 };
 	CHECK(ui.pointerDown(namePoint));
+	CHECK(ui.textInput('!'));
+	CHECK_EQ(std::get<std::string>(*ui.value("name")), "A");
+	CHECK_EQ(ui.controlError("name"), "Exclamation marks are not allowed");
+	CHECK_EQ(validationCalls, 1u);
 	CHECK(ui.textInput('B'));
+	CHECK(ui.controlError("name").empty());
 	CHECK(std::get<std::string>(*ui.value("name")) == "AB");
 	CHECK(ui.keyDown(Key::Backspace));
 	CHECK(std::get<std::string>(*ui.value("name")) == "A");
@@ -2313,6 +2538,10 @@ Tooltip { resting: { bg: #202a40, fg: #ffffff, pad: 6px, radius: 4px } }
 	CHECK_EQ(std::get<std::string>(*ui.value("name")), "");
 	CHECK(ui.textInput("replace"));
 	CHECK_EQ(std::get<std::string>(*ui.value("name")), "replac");
+	CHECK(ui.keyDown(Key::A, static_cast<u8>(Mod::Ctrl), nullptr));
+	CHECK(ui.keyDown(Key::Backspace));
+	CHECK_EQ(std::get<std::string>(*ui.value("name")), "replac");
+	CHECK_EQ(ui.controlError("name"), "Name cannot be empty");
 	CHECK(ui.keyDown(Key::A, static_cast<u8>(Mod::Ctrl), nullptr));
 	CHECK(ui.textInput('X'));
 	CHECK_EQ(std::get<std::string>(*ui.value("name")), "X");
@@ -2341,6 +2570,28 @@ Tooltip { resting: { bg: #202a40, fg: #ffffff, pad: 6px, radius: 4px } }
 	CHECK(ui.keyDown(Key::Enter));
 	CHECK(ui.textInput('N'));
 	CHECK(std::get<std::string>(*ui.value("notes")) == "\nN");
+	CHECK(ui.setValue("notes", std::string("alpha beta  gamma!")));
+	CHECK(ui.keyDown(Key::Home, static_cast<u8>(Mod::Super), nullptr));
+	CHECK(ui.keyDown(Key::Right, static_cast<u8>(Mod::Super), nullptr));
+	CHECK(ui.keyDown(Key::Right, static_cast<u8>(Mod::Ctrl) | static_cast<u8>(Mod::Shift), nullptr));
+	CHECK(ui.keyDown(static_cast<Key>('C'), static_cast<u8>(Mod::Super), &clipboard));
+	CHECK_EQ(clipboard.clipboardText(), "beta  ");
+	CHECK(ui.keyDown(Key::Home, static_cast<u8>(Mod::Ctrl), nullptr));
+	CHECK(!ui.keyDown(Key::Backspace, static_cast<u8>(Mod::Ctrl), nullptr));
+	CHECK(ui.keyDown(Key::Right, static_cast<u8>(Mod::Ctrl), nullptr));
+	CHECK(ui.keyDown(Key::Backspace, static_cast<u8>(Mod::Ctrl), nullptr));
+	CHECK_EQ(std::get<std::string>(*ui.value("notes")), "beta  gamma!");
+	CHECK(ui.setValue("notes", std::string("alpha beta  gamma!")));
+	CHECK(ui.keyDown(Key::Home, static_cast<u8>(Mod::Ctrl), nullptr));
+	CHECK(ui.keyDown(Key::Right, static_cast<u8>(Mod::Ctrl), nullptr));
+	CHECK(ui.keyDown(Key::Delete, static_cast<u8>(Mod::Ctrl), nullptr));
+	CHECK_EQ(std::get<std::string>(*ui.value("notes")), "alpha gamma!");
+	CHECK(ui.keyDown(static_cast<Key>('Z'), static_cast<u8>(Mod::Ctrl), nullptr));
+	CHECK_EQ(std::get<std::string>(*ui.value("notes")), "alpha beta  gamma!");
+	CHECK(ui.keyDown(static_cast<Key>('Y'), static_cast<u8>(Mod::Ctrl), nullptr));
+	CHECK_EQ(std::get<std::string>(*ui.value("notes")), "alpha gamma!");
+	CHECK(ui.imeCompose("候補", 0, 3));
+	CHECK(ui.imeCompose(""));
 	CHECK(ui.setValue("notes", std::string("first\nsecond")));
 	CHECK(ui.keyDown(Key::Home));
 	CHECK(ui.keyDown(Key::Backspace));
@@ -2520,6 +2771,7 @@ TEST(showcase_example_assets_parse_validate_and_build) {
 	CHECK(ui.value("task-layout").has_value());
 	CHECK(ui.value("task-resize").has_value());
 	CHECK(ui.value("query").has_value());
+	CHECK(ui.value("due-date").has_value());
 	CHECK(ui.value("delay").has_value());
 	CHECK(ui.value("whitespace-toggle").has_value());
 	CHECK(ui.value("live-sync").has_value());
@@ -2552,6 +2804,16 @@ TEST(showcase_example_assets_parse_validate_and_build) {
 		if (found == runtimeIndexById.end()) return Rect{};
 		return ui.bounds({ found->second, 1 });
 		};
+	// DatePicker shares popup routing with optional-data widgets, but has no option list.
+	// Select its authored tab first, then open it to exercise the payload-index allocation
+	// path used after the P1 sidecar refactor.
+	CHECK(ui.setValue("demo-sections", u32(3)));
+	ui.layout(1080, 760);
+	const Rect dateBounds = rectFor("due-date");
+	const Vec2 datePoint{dateBounds.x + dateBounds.w * 0.5f, dateBounds.y + dateBounds.h * 0.5f};
+	CHECK(dateBounds.w > 0.f && dateBounds.h > 0.f);
+	CHECK(ui.pointerDown(datePoint));
+	CHECK(ui.pointerUp(datePoint));
 	auto separatedVertically = [](Rect a, Rect b) { return a.empty() || b.empty() || a.bottom() <= b.y + 0.01f; };
 
 	const Rect name = rectFor("display-name"), passphrase = rectFor("passphrase"), readOnly = rectFor("readonly-field");
@@ -2720,6 +2982,32 @@ TEST(tetris_game_example_assets_parse_validate_and_build) {
 	CHECK(ui.bounds(ui.root()).w > 0.f);
 }
 
+TEST(calculator_example_assets_parse_validate_and_layout) {
+	const std::string xuiSource = readExample("calculator/calculator.xui");
+	const std::string xssSource = readExample("calculator/calculator.xss");
+	CHECK(!xuiSource.empty());
+	CHECK(!xssSource.empty());
+	StringInterner strings;
+	UiAssetBundle assets;
+	std::string error;
+	CHECK(loadUiAssets(xuiSource, xssSource, strings, assets, error, "calculator.xui", "calculator.xss"));
+	if (!error.empty()) {
+		std::cerr << error << '\n';
+		return;
+	}
+	TextSystem text;
+	UiRuntime ui;
+	CHECK(ui.build(assets.document, assets.styles, strings, text, {}, error));
+	if (!error.empty()) {
+		std::cerr << error << '\n';
+		return;
+	}
+	ui.layout(400.f, 665.f);
+	CHECK(ui.bounds(ui.root()).w > 0.f);
+	CHECK(ui.value("display").has_value());
+	CHECK(ui.nodeCount() >= 40u);
+}
+
 TEST(xui_facade_scheduled_application_tick_runs_on_ui_loop) {
 	Xui app;
 	const auto xuiPath = (std::filesystem::path(XUI_TEST_FIXTURE_DIR) / "cross_platform.xui").string();
@@ -2765,8 +3053,7 @@ TEST(xui_facade_native_tear_off_is_created_hidden_then_revealed) {
 	CHECK(platform.windowVisible(tearOff));
 	// The platform rounds the tear-off window like the panel body it contains.
 	CHECK_NEAR(platform.lastCornerRadius(), 12.f, 0.01f);
-	// Closing the native window drops the surface and re-homes the panel as an in-app float;
-	// it must not be recreated by the next reconciliation pass.
+	// Closing the native window closes the panel and must not recreate the surface.
 	Event quit{};
 	quit.type = EventType::Quit;
 	quit.window = tearOff;
@@ -2779,7 +3066,7 @@ TEST(xui_facade_native_tear_off_is_created_hidden_then_revealed) {
 		const auto* panel = std::get_if<DockPanelValue>(&*value);
 		CHECK(panel != nullptr);
 		if (panel) {
-			CHECK(panel->floating);
+			CHECK(panel->closed);
 			CHECK(!panel->osWindow);
 		}
 	}
@@ -2819,6 +3106,10 @@ ScrollView { resting: { scroll-behavior: instant, scrollbar-visibility: always, 
 	CHECK(ui.scrollOffset("outer").y > 0.f);
 	CHECK(counts[1] > 0u);
 	CHECK(std::get<Vec2>(*ui.value("outer")) == ui.scrollOffset("outer"));
+	const f32 afterWheel = ui.scrollOffset("outer").y;
+	ui.updateTimers(std::chrono::steady_clock::now() + std::chrono::milliseconds(80));
+	CHECK(ui.scrollOffset("outer").y > afterWheel); // wheel input carries a short, decaying momentum tail
+	CHECK(ui.setValue("outer", UiValue{Vec2{0.f, 0.f}}));
 	CHECK(ui.scrollIntoView("last", false)); CHECK(ui.scrollOffset("outer").y > 0.f);
 	const u32 beforeProgrammatic = counts[1];
 	CHECK(ui.setValue("outer", UiValue{ Vec2{0.f, 0.f} })); CHECK(ui.scrollOffset("outer") == Vec2{});
@@ -2834,11 +3125,93 @@ ScrollView { resting: { scroll-behavior: instant, scrollbar-visibility: always, 
 	CHECK(ui.scrollWheel({ inner.x + 20.f, inner.y + 20.f }, { 0.f, -2.f }));
 	CHECK(ui.scrollOffset("outer").y > 0.f); // at its limit, inner lets the outer view consume
 	CHECK(ui.scrollTo("outer", { 0.f, 0.f }, false));
-	CHECK(ui.pointerDown({ outer.right() - 5.f, outer.y + 15.f }));
-	CHECK(ui.pointerMove({ outer.right() - 5.f, outer.y + 35.f }));
+	CHECK(ui.pointerDown({outer.right() - 5.f, outer.bottom() - 15.f})); // track paging works outside the thumb
 	CHECK(ui.scrollOffset("outer").y > 0.f);
-	CHECK(ui.pointerUp({ outer.right() - 5.f, outer.y + 35.f }));
+	CHECK(ui.pointerMove({outer.right() - 5.f, outer.bottom() - 35.f}));
+	CHECK(ui.scrollOffset("outer").y > 0.f);
+	CHECK(ui.pointerUp({outer.right() - 5.f, outer.bottom() - 35.f}));
 	CHECK(ui.scrollTo("outer", { 0.f, 10000.f }, false)); CHECK(ui.scrollOffset("outer").y < 10000.f);
+	const Vec2 beforeReducedMotion = ui.scrollOffset("outer");
+	ui.setReducedMotion(true);
+	CHECK(ui.scrollOffset("outer") == beforeReducedMotion);
+	CHECK(ui.scrollTo("outer", {0.f, 8.f}, true));
+	CHECK(ui.scrollOffset("outer").y == 8.f); // reduced motion settles smooth requests immediately
+}
+
+TEST(ui_runtime_shift_tab_focus_and_accessibility_tree_dump) {
+	constexpr std::string_view source = R"(
+Window(size: 320x160) {
+  Row {
+    Button(label: "First action")[id: "first", press: onFirst, width: 120px, height: 36px]
+    Button(label: "Second action")[id: "second", press: onSecond, width: 140px, height: 36px]
+  }
+  TextBox[id: "secret", value: "hidden value", password: true, tooltip: "Password", tooltipFollowCursor: true]
+}
+)";
+	StringInterner strings;
+	auto document = parseXui(source, "accessibility.xui", strings);
+	auto styles = compileXss("", "accessibility.xss", strings);
+	CHECK(document.has_value());
+	CHECK(styles.has_value());
+	if (!document || !styles)
+		return;
+	TextSystem text;
+	UiRuntime ui;
+	std::string error;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error));
+	if (!error.empty())
+		return;
+	ui.layout(320.f, 160.f);
+	std::vector<std::string> events;
+	ui.setEventHandler(
+		[](void* context, std::string_view event) {
+			static_cast<std::vector<std::string>*>(context)->emplace_back(event);
+		},
+		&events);
+	CHECK(ui.keyDown(Key::Tab, static_cast<u8>(Mod::Shift), nullptr)); // starts at the last focusable control
+	CHECK(ui.keyDown(Key::Tab, static_cast<u8>(Mod::Shift), nullptr)); // then moves backward to the second button
+	CHECK(ui.keyDown(Key::Enter));
+	CHECK_EQ(events.size(), 1u);
+	CHECK(events.back() == "onSecond");
+	const std::string tree = ui.dumpAccessibilityTree();
+	CHECK(tree.find("\"role\":\"button\"") != std::string::npos);
+	CHECK(tree.find("\"label\":\"First action\"") != std::string::npos);
+	CHECK(tree.find("\"id\":\"second\"") != std::string::npos);
+	CHECK(tree.find("hidden value") == std::string::npos); // password content is never exported
+	CHECK(tree.find("\"children\":[") != std::string::npos);
+}
+
+TEST(ui_runtime_keyboard_shortcuts_float_and_redock_active_panel) {
+	constexpr std::string_view source = R"(
+Window(size: 520x320) {
+  DockHost[id: "workspace", width: 100%, height: 100%] {
+    DockPanel(title: "Editor", region: "Center")[id: "editor"] { Text("Editor") }
+    DockPanel(title: "Inspector", region: "Right", target: "editor")[id: "inspector"] { Text("Inspector") }
+  }
+}
+)";
+	StringInterner strings;
+	auto document = parseXui(source, "dock-shortcuts.xui", strings);
+	auto styles = compileXss("", "dock-shortcuts.xss", strings);
+	CHECK(document.has_value());
+	CHECK(styles.has_value());
+	if (!document || !styles)
+		return;
+	TextSystem text;
+	UiRuntime ui;
+	std::string error;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error));
+	if (!error.empty())
+		return;
+	ui.layout(520.f, 320.f);
+	const u8 mods = static_cast<u8>(Mod::Ctrl) | static_cast<u8>(Mod::Shift);
+	CHECK(ui.keyDown(static_cast<Key>('F'), mods, nullptr));
+	const bool editorFloats = std::get<DockPanelValue>(*ui.value("editor")).floating;
+	const bool inspectorFloats = std::get<DockPanelValue>(*ui.value("inspector")).floating;
+	CHECK(editorFloats || inspectorFloats);
+	CHECK(ui.keyDown(static_cast<Key>('D'), mods, nullptr));
+	CHECK(!std::get<DockPanelValue>(*ui.value("editor")).floating);
+	CHECK(!std::get<DockPanelValue>(*ui.value("inspector")).floating);
 }
 
 TEST(ui_runtime_can_activate_stylesheet_themes) {

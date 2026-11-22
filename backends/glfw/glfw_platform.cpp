@@ -9,6 +9,7 @@
 #endif
 #include <windows.h>
 #include <dwmapi.h>
+#include <imm.h>
 #endif
 #include <glfw/glfw_platform.hpp>
 #ifdef _WIN32
@@ -105,6 +106,7 @@ WindowHandle GlfwPlatform::createWindow(const WindowDesc& d) {
 	glfwSetWindowUserPointer(native, &m_windows.back());
 	glfwSetWindowSizeCallback(native, onSize);
 	glfwSetWindowContentScaleCallback(native, onContentScale);
+	glfwSetWindowFocusCallback(native, onFocus);
 	glfwSetCursorPosCallback(native, onCursor);
 	glfwSetCursorEnterCallback(native, onCursorEnter);
 	glfwSetScrollCallback(native, onScroll);
@@ -144,6 +146,14 @@ f32 GlfwPlatform::dpiScale(WindowHandle h) const {
 	if (!rec || !rec->native)
 		return 1.f;
 	return glfwScale(rec->native).content.x;
+}
+bool GlfwPlatform::prefersReducedMotion() const {
+#ifdef _WIN32
+	BOOL animationsEnabled = TRUE;
+	if (SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animationsEnabled, 0))
+		return animationsEnabled == FALSE;
+#endif
+	return false;
 }
 bool GlfwPlatform::windowVisible(WindowHandle h) const {
 	const Window* window = find(h);
@@ -347,6 +357,30 @@ void GlfwPlatform::setResizeInset(WindowHandle h, f32 pixels) {
 	if (Window* w = find(h)) w->resizeInset = std::clamp(pixels, 0.f, 64.f);
 }
 
+void GlfwPlatform::setImeCursorRect(WindowHandle h, Rect rect) {
+#ifdef _WIN32
+	Window* window = find(h);
+	if (!window || !window->native || rect.empty()) return;
+	const f32 scale = dpiScale(h);
+	HIMC context = ImmGetContext(glfwGetWin32Window(window->native));
+	if (!context) return;
+	const POINT point{static_cast<LONG>(std::lround(rect.x * scale)),
+		static_cast<LONG>(std::lround(rect.bottom() * scale))};
+	COMPOSITIONFORM composition{};
+	composition.dwStyle = CFS_POINT;
+	composition.ptCurrentPos = point;
+	ImmSetCompositionWindow(context, &composition);
+	CANDIDATEFORM candidate{};
+	candidate.dwIndex = 0;
+	candidate.dwStyle = CFS_CANDIDATEPOS;
+	candidate.ptCurrentPos = point;
+	ImmSetCandidateWindow(context, &candidate);
+	ImmReleaseContext(glfwGetWin32Window(window->native), context);
+#else
+	(void)h; (void)rect;
+#endif
+}
+
 GlfwPlatform::Window* GlfwPlatform::find(WindowHandle h) { return h.index < m_windows.size() && m_windows[h.index].handle.gen == h.gen ? &m_windows[h.index] : nullptr; }
 const GlfwPlatform::Window* GlfwPlatform::find(WindowHandle h) const { return const_cast<GlfwPlatform*>(this)->find(h); }
 GlfwPlatform::Window* GlfwPlatform::record(GLFWwindow* w) { return static_cast<Window*>(glfwGetWindowUserPointer(w)); }
@@ -388,6 +422,12 @@ void GlfwPlatform::onContentScale(GLFWwindow* w, float xscale, float yscale) {
 	push(w, e);
 	if (r->liveResizeFn)
 		r->liveResizeFn(r->liveResizeContext);
+}
+
+void GlfwPlatform::onFocus(GLFWwindow* w, int focused) {
+	Event event{};
+	event.type = focused ? EventType::FocusGained : EventType::FocusLost;
+	push(w, event);
 }
 void GlfwPlatform::onCursor(GLFWwindow* w, double x, double y) {
 	const Vec2 point = logicalClientPoint(w, x, y);

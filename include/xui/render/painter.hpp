@@ -47,7 +47,9 @@ namespace xui {
 			bool reorder = true;      ///< tile-dependency batching (false = merge only with the immediately preceding batch)
 			bool snap = true;         ///< snap rect edges / glyph origins to whole physical pixels
 		};
-		struct Stats { u32 prims = 0, culled = 0, batches = 0, drawCalls = 0, vertices = 0, indices = 0; };
+		struct Stats {
+			u32 prims = 0, culled = 0, batches = 0, drawCalls = 0, vertices = 0, indices = 0, clipShapeCapFallbacks = 0;
+		};
 		static constexpr u32 kMaxLayers = 8;
 
 		Painter() : Painter(Options{}) {}

@@ -108,6 +108,11 @@ namespace xui {
 		virtual Vec2 windowSizeLogical(WindowHandle) const = 0;  ///< logical px
 		virtual Vec2i windowSizePixels(WindowHandle) const = 0;  ///< physical px (framebuffer)
 		virtual f32 dpiScale(WindowHandle) const = 0;
+		/// Report the operating system's reduced-motion preference when available.
+		/// Backends without a native preference API return false.
+		virtual bool prefersReducedMotion() const {
+			return false;
+		}
 		/// Whether a window can currently be seen. Minimized/hidden windows may pause visual timers.
 		/// Platforms without visibility state can keep the default and report true.
 		virtual bool windowVisible(WindowHandle) const { return true; }
@@ -146,6 +151,8 @@ namespace xui {
 		/// Such backends invoke this hook from their size callback to render each live step.
 		/// Default no-op keeps headless and non-modal backends unchanged.
 		virtual void setLiveResizeHook(WindowHandle, void (*)(void*), void*) {}
+		/// Position the native IME composition/candidate UI near an editor caret. Logical client pixels.
+		virtual void setImeCursorRect(WindowHandle, Rect) {}
 
 		// ---- client-drawn window chrome (TitleBar support) ---------------------------------------
 		// All defaults are conservative no-ops: a backend without custom-chrome support simply

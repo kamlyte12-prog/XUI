@@ -67,6 +67,9 @@ namespace xui {
 		TextureHandle texture() const { return m_tex; }
 		u32 size() const { return m_size; }
 		u32 glyphCount() const { return u32(m_entries.size()); }
+		u32 generation() const {
+			return m_generation;
+		}												///< changes whenever atlas coordinates may be repacked
 		u64 rasterCount() const { return m_rasters; }   ///< test/telemetry: how many actual rasterisations
 		void beginFrame();
 		const FrameStats& frameStats() const { return m_frameStats; }
@@ -87,6 +90,7 @@ namespace xui {
 		Renderer* m_renderer = nullptr;
 		TextureHandle m_tex;
 		u32 m_size = 0;
+		u32 m_generation = 0;
 		std::vector<Shelf> m_shelves;                  // skyline shelves, bottom-up
 		std::vector<Entry> m_entries;
 		std::vector<u32> m_index;                      // open addressing: entry slot + 1, 0 = empty

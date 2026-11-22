@@ -113,7 +113,18 @@ void main(){
 		if(i>=clipCount)break;
 		cc*=cov(rr(P-clipRect[i].xy,clipRect[i].zw,clipRadii[i]));
 	}
-	gl_FragColor=vec4(rgb,a)*cc;
+	// A rounded widget can exactly coincide with an inherited rounded clip (for example,
+	// an overlay panel filling its rounded parent). Multiplying both edge coverages squares
+	// the same AA ramp and makes that shared edge visibly darker/jagged. For round-rect
+	// primitives use the intersection coverage once; textured glyphs/images still multiply
+	// by the clip so their own alpha is preserved.
+	if(T<.5){
+		// Borders use C1 (C0 is intentionally transparent), so the shape's
+		// coverage must be capped by whichever round-rect color is actually visible.
+		float clipped=min(a,max(C0.a,C1.a)*cc);
+		float scale=a>0.0?clipped/a:0.0;
+		gl_FragColor=vec4(rgb*scale,clipped);
+	}else gl_FragColor=vec4(rgb,a)*cc;
 })GLSL";
 }
 bool GlDrawListRenderer::loadFunctions() {

@@ -201,6 +201,58 @@ TEST(xui_schema_catalogue) {
 	CHECK(validateSrc("Row[for: i in 0..3] { Text(\"{i}\") }").empty());
 	CHECK(has(validateSrc("component A { Slot(bogus: 1) }"), "Slot() only accepts"));
 }
+TEST(xui_schema_warns_on_accepted_but_unimplemented_values) {
+	constexpr std::string_view source = R"(
+Window(size: 320x240, resizable: false) {
+  Row[wrap: true] { Text("row") }
+  Column[wrap: true] {}
+  Grid("1fr")[rows: "auto|2fr"] {}
+  Text("text")[wrap: false, maxLines: 2]
+  Split[direction: Horizontal, collapsible: true] {
+    Panel(title: "panel", collapsed: true, collapsible: true) {}
+    Panel {}
+  }
+  Panel("positional title") {}
+  Button[label: "save", variant: "primary", icon: "save", loading: true]
+  ToggleButton[label: "mute", icon: "speaker"]
+  Slider[step: 0.1]
+  ProgressBar[indeterminate: true]
+  Dropdown[placeholder: "choose"]
+}
+)";
+	StringInterner in;
+	auto document = parseXui(source, "unsupported-values.xui", in);
+	CHECK(document.has_value());
+	if (!document)
+		return;
+	Program program;
+	program.files.push_back(std::move(*document));
+	auto validation = validate(program, XuiSchema::withCoreWidgets(), in);
+	CHECK(validation.has_value());
+	if (!validation)
+		return;
+	CHECK_EQ(validation->warnings.size(), std::size_t{1});
+	if (validation->warnings.size() == 1) {
+		const auto warnings = validation->warnings.front().items();
+		CHECK_EQ(warnings.size(), std::size_t{17});
+		for (const Diagnostic& warning : warnings)
+			CHECK(warning.severity == Severity::Warning);
+		const std::string formatted = validation->warnings.front().format();
+		CHECK(has(formatted, "warning: 'resizable' is accepted on Window but is not implemented"));
+		CHECK(has(formatted, "warning: 'maxLines' is accepted on Text but is not implemented"));
+		CHECK(has(formatted, "warning: 'title' is accepted on Panel but is not implemented"));
+		CHECK(has(formatted, "warning: 'loading' is accepted on Button but is not implemented"));
+		CHECK(has(formatted, "warning: 'step' is accepted on Slider but is not implemented"));
+		CHECK(has(formatted, "warning: 'indeterminate' is accepted on ProgressBar but is not implemented"));
+		CHECK(!has(formatted, "'rows' is accepted on Grid"));
+	}
+	auto strict = validate(program, XuiSchema::withCoreWidgets(), in, {true});
+	CHECK(!strict.has_value());
+	if (!strict) {
+		CHECK(has(strict.error().format(), "error: 'wrap' is accepted on Row but is not implemented"));
+		CHECK(has(strict.error().format(), "error: 'placeholder' is accepted on Dropdown but is not implemented"));
+	}
+}
 TEST(xui_schema_component_params) {
 	CHECK(validateSrc("component Card(title, note: \"\") { Panel(title: title) { Slot() } }\nCard(\"a\") { Text(\"b\") }\nCard(title: \"z\", note: \"n\")").empty());
 	CHECK(has(validateSrc("component Card(title) { Panel(title: title) }\nCard()"), "missing required parameter 'title' for component Card"));

@@ -100,10 +100,20 @@ namespace xui {
 				sdf::Rgba src = sdf::shade(f, sampler);
 				if (shape) {
 					const f32 cover = sdf::clipCoverage(cx, cy, *shape);
-					src.r *= cover;
-					src.g *= cover;
-					src.b *= cover;
-					src.a *= cover;
+					if (static_cast<Prim>(tl.prim) == Prim::RoundRect) {
+						const f32 shapeAlpha = std::max(sdf::unpack(tl.c0).a, sdf::unpack(tl.c1).a);
+						const f32 clippedAlpha = std::min(src.a, shapeAlpha * cover);
+						const f32 scale = src.a > 0.f ? clippedAlpha / src.a : 0.f;
+						src.r *= scale;
+						src.g *= scale;
+						src.b *= scale;
+						src.a = clippedAlpha;
+					} else {
+						src.r *= cover;
+						src.g *= cover;
+						src.b *= cover;
+						src.a *= cover;
+					}
 				}
 				if (src.a <= 0.f && src.r <= 0.f && src.g <= 0.f && src.b <= 0.f) continue;
 				u8* d = &m_fb[(std::size_t(py) * m_w + std::size_t(px)) * 4];

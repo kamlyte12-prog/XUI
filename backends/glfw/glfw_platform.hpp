@@ -16,6 +16,7 @@ public:
 	xui::Vec2 windowSizeLogical(xui::WindowHandle) const override;
 	xui::Vec2i windowSizePixels(xui::WindowHandle) const override;
 	xui::f32 dpiScale(xui::WindowHandle) const override;
+	bool prefersReducedMotion() const override;
 	bool windowVisible(xui::WindowHandle) const override;
 	void setWindowVisible(xui::WindowHandle, bool visible) override;
 	xui::Vec2 windowClientScreenOrigin(xui::WindowHandle) const override;
@@ -47,6 +48,7 @@ public:
 	bool windowMaximized(xui::WindowHandle) const override;
 	void closeWindow(xui::WindowHandle) override;
 	void setResizeInset(xui::WindowHandle, xui::f32 pixels) override;
+	void setImeCursorRect(xui::WindowHandle, xui::Rect rect) override;
 
 	/// One GLFW window. Public so the file-local Win32 chrome helpers in the .cpp can operate
 	/// on records without exposing windows.h types in this header.
@@ -67,6 +69,7 @@ private:
 #endif
 	static void onSize(GLFWwindow*, int, int);
 	static void onContentScale(GLFWwindow*, float, float);
+	static void onFocus(GLFWwindow*, int);
 	static void onCursor(GLFWwindow*, double, double);
 	static void onCursorEnter(GLFWwindow*, int);
 	static void onScroll(GLFWwindow*, double, double);

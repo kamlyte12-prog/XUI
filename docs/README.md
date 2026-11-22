@@ -27,4 +27,6 @@ The [showcase](../examples/showcase/showcase.xui) and [stylesheet](../examples/s
 
 The [Card composition sample](../examples/composites/README.md) has its own `xui_component_demo` GLFW target so its imports, parts, slots, and forwarded action can be tried as a runnable app.
 
+The [Calculator demo](../examples/calculator/README.md) demonstrates a compact, interactive four-column keypad with arithmetic, memory controls, and keyboard input.
+
 Parser/schema acceptance does not guarantee runtime support. The [widget reference](widgets.md) labels objects that are not materialized by `UiRuntime`; only runtime-backed objects should be treated as interactive controls.

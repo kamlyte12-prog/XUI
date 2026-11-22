@@ -11,6 +11,7 @@
 #include <chrono>
 
 namespace xui {
+	using XuiKeyHandler = bool (*)(void* context, Key key, u8 modifiers);
 
 	struct XuiOptions {
 		std::string appName = "xui-app"; ///< Application identity passed to the platform when supported.
@@ -18,6 +19,7 @@ namespace xui {
 		u32 width = 720, height = 440; ///< Fallback initial client size in logical pixels.
 		u32 minWidth = 128, minHeight = 96; ///< Native minimum client dimensions in logical pixels.
 		bool resizable = true; ///< Allow platform window resizing.
+		bool warningsAsErrors = false; ///< Fail `.xui` loading when schema validation reports unsupported properties.
 		bool visible = true; ///< Show the created window immediately.
 		bool glContext = true; ///< Request a graphics context from platforms that use one.
 		bool vsync = false; ///< Request vertical synchronization from the renderer.
@@ -74,6 +76,13 @@ namespace xui {
 
 		/// Set the callback used by `.xui` event properties; callbacks receive the authored handler name.
 		void setEventHandler(UiEventFn handler, void* context);
+		/// Set the synchronous filter/validator callback for editable text and value fields.
+		void setInputValidationHandler(UiInputValidationFn handler, void* context);
+		/// Set an optional app-level key handler. Return true to consume a key before widgets see it.
+		void setKeyHandler(XuiKeyHandler handler, void* context) {
+			m_keyHandler = handler;
+			m_keyContext = context;
+		}
 		/// Schedule an application update on the event loop. A zero interval disables it; hidden windows pause it.
 		/// The callback runs on the UI thread and receives actual elapsed seconds since its previous call.
 		void setTickHandler(XuiTickFn handler, void* context, u32 intervalMs);
@@ -92,6 +101,10 @@ namespace xui {
 		WindowHandle window() const { return m_window; }
 		/// Diagnostic from the last failed load, attach, or run operation.
 		const std::string& lastError() const { return m_error; }
+		/// Warnings from the most recently loaded `.xui` document (empty when none were reported).
+		const std::vector<DiagnosticList>& validationWarnings() const {
+			return m_assets.validationWarnings;
+		}
 		/// Frame and elapsed-time summary from the most recent `run()` call.
 		const XuiRunStats& lastRunStats() const { return m_stats; }
 
@@ -133,6 +146,10 @@ namespace xui {
 		std::string m_draggingFloatingPanel;
 		UiEventFn m_eventHandler = nullptr;
 		void* m_eventContext = nullptr;
+		UiInputValidationFn m_inputValidationHandler = nullptr;
+		void* m_inputValidationContext = nullptr;
+		XuiKeyHandler m_keyHandler = nullptr;
+		void* m_keyContext = nullptr;
 		XuiTickFn m_tickHandler = nullptr;
 		void* m_tickContext = nullptr;
 		u32 m_tickIntervalMs = 0;

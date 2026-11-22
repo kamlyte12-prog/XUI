@@ -60,6 +60,7 @@ namespace xui {
 											   [&](const ClipRound& existing) { return existing == round; });
 			if (anyRadius && !duplicate) {
 				if (state.roundCount == ClipShape::kMaxRounds) {
+					++m_stats.clipShapeCapFallbacks;
 					// At capacity, keep the most restrictive (smallest) enclosing shapes. Ancestor
 					// walks may push inner-to-outer, so position is not a reliable proxy; the
 					// conservative scissor still bounds whatever is dropped.

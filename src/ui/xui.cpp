@@ -129,13 +129,15 @@ namespace xui {
 
 	bool Xui::loadXui(std::string_view path) {
 		if (m_attached) { setError("The UI document must be loaded before attach()."); return false; }
+		m_assets.validationWarnings.clear();
 		auto program = xui::loadXui(path, readImportedPath, nullptr, m_strings);
 		if (!program) { setError(program.error().format()); return false; }
-		auto valid = validate(*program, XuiSchema::withCoreWidgets(), m_strings);
+		auto valid = validate(*program, XuiSchema::withCoreWidgets(), m_strings, {m_options.warningsAsErrors});
 		if (!valid) { setError(valid.error().format()); return false; }
 		if (program->files.empty()) { setError("The .xui loader returned no documents."); return false; }
 		m_program = std::move(*program);
 		m_assets.document = m_program.files.front();
+		m_assets.validationWarnings = std::move(valid->warnings);
 		std::error_code pathError;
 		const std::filesystem::path absolutePath = std::filesystem::absolute(std::filesystem::path(path), pathError);
 		m_assetDirectory = (pathError ? std::filesystem::path(path) : absolutePath).parent_path().string();
@@ -232,6 +234,8 @@ namespace xui {
 			setError("Could not activate the requested .xss theme."); shutdown(); return false;
 		}
 		m_runtime.setEventHandler(m_eventHandler, m_eventContext);
+		m_runtime.setInputValidationHandler(m_inputValidationHandler, m_inputValidationContext);
+		m_runtime.setReducedMotion(m_platform->prefersReducedMotion());
 		m_attached = true;
 		m_primarySurface = m_renderer->primarySurface();
 		reconcileFloatingPanels();
@@ -269,7 +273,7 @@ namespace xui {
 						const auto value = m_runtime.value(floating->id);
 						if (value) if (const auto* dock = std::get_if<DockPanelValue>(&*value)) {
 							DockPanelValue inApp = *dock;
-							inApp.floating = true;
+							inApp.closed = true;
 							// The OS window is going away: stop requesting one, otherwise reconciliation
 							// would immediately recreate it and the panel could never be closed.
 							inApp.osWindow = false;
@@ -347,7 +351,9 @@ namespace xui {
 					redraw |= m_runtime.scrollWheel({ event.x, event.y }, { event.dx, event.dy });
 					break;
 				case EventType::KeyDown:
-					if (!((event.key == Key::F3 || event.key == Key::F4) && event.repeat))
+					if (m_keyHandler && m_keyHandler(m_keyContext, event.key, event.mods))
+						redraw = true;
+					else if (!((event.key == Key::F3 || event.key == Key::F4) && event.repeat))
 						redraw |= m_runtime.keyDown(event.key, event.mods, m_platform);
 					break;
 				case EventType::TextInput:
@@ -355,14 +361,25 @@ namespace xui {
 					else if (event.text && *event.text) redraw |= m_runtime.textInput(event.text);
 					break;
 				case EventType::ImeCommit:
+					m_runtime.imeCompose({});
 					if (event.text && *event.text) redraw |= m_runtime.textInput(event.text);
 					else redraw |= m_runtime.textInput(event.codepoint);
+					break;
+				case EventType::ImeCompose:
+					redraw |= m_runtime.imeCompose(event.text ? event.text : "", event.selStart, event.selEnd);
+					break;
+				case EventType::FocusLost:
+					redraw |= m_runtime.cancelImeComposition();
 					break;
 				case EventType::Resize:
 				case EventType::DpiChange: resized = true; redraw = true; break;
 				case EventType::Tick: redraw = true; break;
 				default: break;
 				}
+			if (m_platform) {
+				const Rect imeRect = m_runtime.imeCursorRect();
+				if (!imeRect.empty()) m_platform->setImeCursorRect(event.window.valid() ? event.window : m_window, imeRect);
+			}
 				reconcileFloatingPanels();
 			}
 			if (!running) break;
@@ -445,6 +462,7 @@ namespace xui {
 		const f32 dpi = m_platform->dpiScale(m_window);
 		m_text.beginFrame();
 		m_runtime.setDrawBatchCount(m_painter.stats().drawCalls);
+		m_runtime.setClipShapeCapFallbacks(m_painter.stats().clipShapeCapFallbacks);
 		bool presented = false;
 		if (pixels.x > 0 && pixels.y > 0) {
 			m_platform->makeGlCurrent(m_window);
@@ -563,6 +581,12 @@ namespace xui {
 	void Xui::setEventHandler(UiEventFn handler, void* context) {
 		m_eventHandler = handler; m_eventContext = context;
 		if (m_attached) m_runtime.setEventHandler(handler, context);
+	}
+
+	void Xui::setInputValidationHandler(UiInputValidationFn handler, void* context) {
+		m_inputValidationHandler = handler;
+		m_inputValidationContext = context;
+		if (m_attached) m_runtime.setInputValidationHandler(handler, context);
 	}
 
 	void Xui::setTickHandler(XuiTickFn handler, void* context, u32 intervalMs) {

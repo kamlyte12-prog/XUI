@@ -375,6 +375,44 @@ TEST(text_shaping_matches_pen_advance_sum) {
 	nr.shutdown();
 }
 
+TEST(text_layout_caches_utf8_caret_stops_for_wrapped_runs) {
+	FontFixture fx;
+	if (!fx.have()) return;
+	TextSystem text;
+	const FontHandle font = text.loadFont(fx.bytes);
+	CHECK(font.valid()); if (!font.valid()) return;
+	const std::string input = "A\xC3\xA9 B";
+	const TextLayout& layout = text.layout(font, input, 16.f, 14.f);
+	const std::size_t expectedOffsets[] = { 0, 1, 3, 4, 5 };
+	CHECK_EQ(layout.caretStops.size(), std::size(expectedOffsets));
+	for (std::size_t i = 0; i < std::size(expectedOffsets); ++i) {
+		CHECK_EQ(layout.caretStops[i].byteOffset, expectedOffsets[i]);
+		CHECK_EQ(layout.caretAt(static_cast<u32>(expectedOffsets[i])).byteOffset, expectedOffsets[i]);
+	}
+	CHECK(layout.lineStarts.size() > 1);
+	const TextLayout& ligatureText = text.layout(font, "office", 16.f);
+	CHECK_EQ(ligatureText.caretStops.size(), 7u);
+	for (const TextCaretStop& stop : ligatureText.caretStops) CHECK(std::isfinite(stop.x));
+	const std::string arabic = "\xD8\xB3\xD9\x84\xD8\xA7\xD9\x85"; // سلام
+	const TextLayout& rtl = text.layout(font, arabic, 16.f);
+	CHECK(!rtl.glyphs.empty());
+	CHECK(rtl.glyphs.front().rtl);
+	CHECK_EQ(rtl.caretStops.size(), 5u);
+	const TextLayout& wrappedRtl = text.layout(font, arabic + " " + arabic + " " + arabic, 16.f, 34.f);
+	CHECK(wrappedRtl.lineStarts.size() > 1);
+	CHECK_EQ(wrappedRtl.visualCaretStops.size(), wrappedRtl.caretStops.size());
+	for (std::size_t i = 1; i < wrappedRtl.visualCaretStops.size(); ++i) {
+		const TextCaretStop& previous = wrappedRtl.visualCaretStops[i - 1];
+		const TextCaretStop& current = wrappedRtl.visualCaretStops[i];
+		CHECK(previous.line < current.line || (previous.line == current.line && previous.x <= current.x));
+	}
+	const FontHandle fallback = text.loadFont(fx.bytes);
+	const u32 fallbackGeneration = text.fallbackGeneration();
+	CHECK(text.addFallbackFont(font, fallback));
+	CHECK_EQ(text.fallbackGeneration(), fallbackGeneration + 1);
+	CHECK_EQ(text.layout(font, "office", 16.f).glyphs.front().font, font);
+}
+
 TEST(text_frame_stats_count_cache_shaping_and_atlas_work) {
 #ifndef XUI_EXAMPLE_DIR
 	std::cout << "SKIP text frame counters: XUI_EXAMPLE_DIR is not configured\n";

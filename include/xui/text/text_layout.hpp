@@ -16,6 +16,7 @@
 #include <string_view>
 #include <memory>
 #include <cstdint>
+#include <array>
 #include <unordered_map>
 #include <vector>
 
@@ -28,11 +29,24 @@ namespace xui {
 		u32 glyph = 0;        ///< font glyph index
 		f32 x = 0, y = 0;     ///< pen position when drawn (bitmap offset applied by the painter)
 		f32 advance = 0;
+		FontHandle font;      ///< face used for this glyph (fallback fonts share the same atlas)
+		u32 clusterStart = 0, clusterEnd = 0; ///< UTF-8 byte range in the original text
+		u32 line = 0;
+		std::array<f32, 8> ligatureCarets{}; ///< shaped interior caret positions in run space
+		u8 ligatureCaretCount = 0;
+		bool rtl = false;
 	};
+
+	/// Caret position at a UTF-8 character boundary, stored with the shaped run so editor
+	/// painting and pointer hit-testing never need to shape every text prefix.
+	struct TextCaretStop { u32 byteOffset = 0, line = 0; f32 x = 0; };
 
 	/// A shaped, wrapped text run. `lineStarts[i]` indexes glyphs[] for the start of line i.
 	struct TextLayout {
 		std::vector<ShapedGlyph> glyphs;
+		std::vector<TextCaretStop> caretStops;
+		/// Same stops sorted by visual line and x coordinate for safe pointer hit-testing.
+		std::vector<TextCaretStop> visualCaretStops;
 		std::vector<u32> lineStarts;
 		std::vector<f32> lineWidths;       ///< pen advance per line, including trailing whitespace
 		f32 width = 0, height = 0;         ///< visual bounds (including glyph ink) and height (px)
@@ -40,6 +54,8 @@ namespace xui {
 		f32 inkLeft = 0;                    ///< visual left edge relative to the pen origin (px; can be negative)
 		f32 lineHeight = 0;             ///< line height used
 		u32 sizePx = 0;
+		/// Find the closest logical caret boundary. Offsets are UTF-8 byte positions.
+		TextCaretStop caretAt(u32 byteOffset) const;
 	};
 
 	/// Font registry + shaping/wrap cache. Owns the fonts and one shared glyph atlas.
@@ -62,6 +78,8 @@ namespace xui {
 		/// Return a cached variable-font instance at the requested CSS weight, or the original face
 		/// when it has no `wght` axis. Static-face fallback remains the caller's responsibility.
 		FontHandle fontAtWeight(FontHandle base, f32 weight, std::string* error = nullptr);
+		/// Append a fallback face, tried in order after @p family for unmapped code points.
+		bool addFallbackFont(FontHandle family, FontHandle fallback);
 		bool initAtlas(Renderer* r, u32 atlasSize = GlyphAtlas::kMinSize);
 		GlyphAtlas* atlas() { return &m_atlas; }
 		void beginFrame() { m_frameStats = {}; m_atlas.beginFrame(); }
@@ -72,6 +90,7 @@ namespace xui {
 		/// Cache + atlas + font stats for tests/telemetry.
 		std::size_t cacheCount() const { return m_used; }
 		u64 rasterCount() const { return m_atlas.rasterCount(); }
+		u32 fallbackGeneration() const { return m_fallbackGeneration; }
 		const FrameStats& frameStats() const { return m_frameStats; }
 
 	private:
@@ -91,15 +110,19 @@ namespace xui {
 		}
 
 		const TextLayout& shape(FontHandle fh, std::string_view text, const CacheKey& key);
+		FontHandle fontForCodepoint(FontHandle primary, u32 codepoint) const;
 
 		struct FontVariant { u32 base = 0; i32 coordinate = 0; FontHandle handle; };
+		struct FontFallback { FontHandle family; std::vector<FontHandle> faces; };
 		std::vector<std::unique_ptr<Font>> m_fonts;
 		std::vector<FontVariant> m_variants;
+		std::vector<FontFallback> m_fallbacks;
 		GlyphAtlas m_atlas;
 		FrameStats m_frameStats;
 		std::vector<CacheEntry> m_cache;
 		std::vector<u32> m_index;       // open addressing over m_cache: entry index + 1, 0 = empty
 		u32 m_used = 0;
+		u32 m_fallbackGeneration = 1;
 	};
 
 } // namespace xui

@@ -319,6 +319,7 @@ TEST(painter_rounded_clips_nest_dedupe_and_cap) {
 	}
 	r.fillRect({0, 0, 400, 400}, {1, 1, 1, 1}); // spans every corner square
 	DrawList capped = r.finish();
+	CHECK_EQ(r.stats().clipShapeCapFallbacks, 2u);
 	CHECK_EQ(capped.nClipShapes, 1u);
 	if (capped.nClipShapes != 1u)
 		return;

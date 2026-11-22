@@ -1,0 +1,44 @@
+tokens {
+  color.window = #202020
+  color.text = #f5f5f5
+  color.muted = #a7a7a7
+  color.key = #323232
+  color.key-hover = #3b3b3b
+  color.key-pressed = #454545
+  color.stroke = #252525
+  color.accent = #c6b8f5
+  color.accent-hover = #d3c8fa
+  color.accent-pressed = #b6a5ed
+}
+
+Window { resting: { bg: color.window, fg: color.text } }
+Column.calculator { resting: { bg: color.window } }
+Row.toolbar { resting: { align: Center } }
+Text.mode-title { resting: { fg: color.text, font-size: 24px, font-weight: 600, align: Start } }
+Button.toolbar-button {
+  resting: { bg: #00000000, fg: color.text, radius: 5px, font-size: 21px }
+  hover: { bg: color.key-hover }
+  pressed: { bg: color.key-pressed }
+}
+Text.expression { resting: { fg: color.muted, font-size: 16px, align: End } }
+Text.display { resting: { fg: color.text, font-size: 56px, align: End } }
+Button.memory-button {
+  resting: { bg: #00000000, fg: color.text, radius: 4px, font-size: 13px }
+  hover: { bg: color.key-hover }
+  pressed: { bg: color.key-pressed }
+}
+Button.memory-disabled { resting: { bg: #00000000, fg: #777777, radius: 4px, font-size: 13px } }
+Button.number-key, Button.function-key {
+  resting: { bg: color.key, fg: color.text, radius: 5px, border: 1px solid #292929, font-size: 20px }
+  hover: { bg: color.key-hover }
+  pressed: { bg: color.key-pressed }
+  focus: { border: 1px solid #ffffff55 }
+}
+Button.number-key { font-weight: 600 }
+Button.function-key { font-weight: 400 }
+Button.operator { font-size: 24px }
+Button.equals-key {
+  resting: { bg: color.accent, fg: #171329, radius: 5px, border: 1px solid #292929, font-size: 24px, font-weight: 600 }
+  hover: { bg: color.accent-hover }
+  pressed: { bg: color.accent-pressed }
+}

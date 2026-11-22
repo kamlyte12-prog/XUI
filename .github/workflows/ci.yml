@@ -121,6 +121,17 @@ jobs:
           echo "Checking formatting since $base"
           python3 .github/scripts/check_changed_format.py "$range"
 
+  docs:
+    name: docs
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the documented test count
+        # plan/plan.md owns the canonical total; keep it in step with tests/*.cpp
+        # instead of letting hand-edited numbers drift from the suite.
+        run: python3 tools/count_tests.py --check
+
   tidy:
     name: clang-tidy
     runs-on: ubuntu-24.04
@@ -182,13 +193,10 @@ jobs:
       - name: Build fuzzers
         run: cmake --build build --parallel --target fuzz_parsers fuzz_layout fuzz_paint
 
-      - name: Run fuzz smoke checks
+      - name: Run timed sanitizer fuzz soak
         env:
           UBSAN_OPTIONS: print_stacktrace=1
-        run: |
-          build/fuzz/fuzz_parsers 3000 12345
-          build/fuzz/fuzz_layout 1 300 10
-          build/fuzz/fuzz_paint 1 300 50
+        run: python3 tools/fuzz_soak.py --seconds 180
 
   install-consumer:
     name: install-consumer

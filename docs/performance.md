@@ -1,5 +1,9 @@
 # Performance and best practices
 
+## Keeping the documented test count current
+
+Run `python tools/count_tests.py` to count registered C++ `TEST(...)` cases. Run `python tools/count_tests.py --update` to refresh the generated test-count line in `plan/plan.md` after adding or removing tests.
+
 Xui is retained: it keeps a layout tree and caches measurements, resolves style sets at node creation/state changes, and redraws after events or requested ticks. Performance depends strongly on the renderer. The interactive examples use direct OpenGL draw-list rendering; `SoftRenderer` is a correctness/reference path.
 
 ## What measurements mean
@@ -26,7 +30,7 @@ The standalone Release benchmarks exercise more controlled stages. `bench_style`
 
 - Use a GPU renderer for interactive full-window redraws. The CPU `SoftRenderer` is deterministic but full-frame software rasterization is much slower.
 - Let the facade's event loop sleep when idle. Continuous redraw is intended for animation/profile use, not normal static UI.
-- Enabling FPS with F3 opts into continuous redraw so the displayed FPS measures rendered frame cadence. This intentionally raises CPU/GPU use while visible; turn it off with F3 for event-driven idle behavior. F4 adds the previous frame's draw-batch count without enabling continuous redraw.
+- Enabling FPS with F3 opts into continuous redraw so the displayed FPS measures rendered frame cadence. This intentionally raises CPU/GPU use while visible; turn it off with F3 for event-driven idle behavior. F4 adds the previous frame's draw-batch count without enabling continuous redraw. When the previous frame exceeded the rounded-clip shape cap, the same label appends `ClipCaps: N`; a non-zero value means some nested rounded ancestors collapsed into the smallest-area clip shapes, so flatten or reduce nested `radius` clipping if you see it.
 - Keep glyph atlases reusable and load fonts before `attach()` so atlas setup and glyph upload happen through the normal renderer lifecycle.
 - HarfBuzz shapes text only when the text-layout cache misses; subsequent paints reuse the cached advances/positions and atlas glyphs. Each variable weight has a distinct font/layout/atlas identity, so the first use of a new weight incurs its own shaping and glyph-raster work.
 - Avoid very large shadows or thousands of separately styled objects. Painter batches compatible draw commands, but each visible object still contributes geometry and style/layout work.

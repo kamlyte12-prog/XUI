@@ -31,13 +31,13 @@ Window(title: "Tasks", size: 900x600) {
 }
 ```
 
-The facade uses `title` and `size` to configure the initial native window. Per field, explicitly selected `XuiOptions` values take precedence, followed by `.xui` `Window(title, size)`, root `Window` `.xss` defaults (`window-title`, `size`), and then facade defaults. `resizable` is accepted by the schema, but native resize behavior comes from `XuiOptions`. Root `Window` styles also set client-surface paint; `radius` requests preferred native corner rounding where supported. See [window defaults and precedence](xui-guide.md#window-defaults-and-precedence).
+The facade uses `title` and `size` to configure the initial native window. Per field, explicitly selected `XuiOptions` values take precedence, followed by `.xui` `Window(title, size)`, root `Window` `.xss` defaults (`window-title`, `size`), and then facade defaults. `Window[resizable: ...]` currently emits a schema warning and has no effect; set `XuiOptions.resizable` to control native resizing. Root `Window` styles also set client-surface paint; `radius` requests preferred native corner rounding where supported. See [window defaults and precedence](xui-guide.md#window-defaults-and-precedence).
 
 The Window property `platformTopMenu: false` hides the platform's native title bar and opts into client-drawn chrome: the document must then contain a [`TitleBar`](#titlebar) widget, which becomes the draggable top menu with optional framework-drawn caption buttons. On backends that cannot host custom chrome (GLFW on macOS/Linux today), the native title bar is kept and the `TitleBar` renders as an ordinary bar without window dragging; see [platform caveats](#titlebar).
 
 ### `Column` and `Row`
 
-Vertical and horizontal flex-like flow containers. The schema accepts `gap` and `wrap` arguments/properties, but current arrangement uses `.xss gap` and does not wrap the flow. Use `.xss pad`, `align`, and `justify` to control arrangement; put `grow` on children that should take remaining main-axis space.
+Vertical and horizontal flex-like flow containers. `gap` is supported as a constructor argument or `.xss` layout style. The `wrap` property is accepted for forward compatibility and emits a schema warning because flow wrapping is not implemented; current arrangement keeps children on one line/column. Use `.xss pad`, `align`, and `justify` to control arrangement; put `grow` on children that should take remaining main-axis space.
 
 ```xui
 Row[class: "toolbar"] {
@@ -88,7 +88,7 @@ Containers measure their in-flow children and include their own padding/border, 
 
 ### `Panel`
 
-A vertical container commonly used as a styled surface. It is not independently draggable, dockable, or collapsible in the current runtime. The schema accepts `title`, `collapsed`, and `collapsible`, but the runtime does not implement those behaviors or paint the title argument; add a `Text` child for a visible heading.
+A vertical container commonly used as a styled surface. It is not independently draggable, dockable, or collapsible in the current runtime. `title`, `collapsed`, and `collapsible` are accepted for forward compatibility and each emits a schema warning because the runtime does not implement them; add a `Text` child for a visible heading.
 
 ```xui
 Panel[class: "card"] {
@@ -110,7 +110,7 @@ CheckList[class: "checklist"] {
 
 ### `Split`
 
-A layout container with a pointer-draggable gutter. `direction` is `Horizontal` (side-by-side) or `Vertical` (stacked). `ratio` sets the first pane's initial share and `gutter` is logical pixels. The schema accepts `collapsible`, but the runtime does not collapse panes. It is the framework's current resizable-panel primitive.
+A layout container with a pointer-draggable gutter. `direction` is `Horizontal` (side-by-side) or `Vertical` (stacked). `ratio` sets the first pane's initial share and `gutter` is logical pixels. `collapsible` is accepted for forward compatibility and emits a schema warning because pane collapsing is not implemented. It is the framework's current resizable-panel primitive.
 
 ```xui
 Split(direction: Horizontal)[ratio: 0.35, gutter: 8] {
@@ -172,7 +172,7 @@ Platform caveats:
 
 ### `Text`
 
-Displays literal text, wraps at the available content width, advances each line vertically, and clips glyphs to its box. It accepts `wrap` and `maxLines` in the schema, but these options are not currently evaluated; wrapping follows available width. Use a width constraint and a font loaded through `Xui::loadFont()`.
+Displays literal text, wraps at the available content width, advances each line vertically, and clips glyphs to its box. The `wrap` and `maxLines` properties are accepted for forward compatibility and emit schema warnings because they are not evaluated; wrapping follows available width and there is no line-count limit. Use a width constraint and a font loaded through `Xui::loadFont()`.
 
 ```xui
 Text("A long paragraph wraps inside the content column.")[class: "body"]
@@ -186,7 +186,7 @@ Displays a label, supports hover/pressed/focus/disabled styling, pointer activat
 Button(label: "Save", press: onSave)[class: "primary", align: Center]
 ```
 
-The runtime does not implement icon, loading, or variant rendering even though those names pass schema validation.
+`icon`, `loading`, and `variant` are accepted for forward compatibility and emit schema warnings because their rendering is not implemented.
 
 `Button` can also contain authored child nodes. In that form its label is taken from its children, and `size: auto` measures nested text/content plus `.xss` padding and gap; min/max constraints still clamp the measured size:
 
@@ -239,7 +239,7 @@ A push button with a persistent checked state, for on/off toolbar actions. `Togg
 ToggleButton.tool { resting: { size: 40px 32px, bg: #1d293b, fg: #dce6f8, radius: 6px } hover: { bg: #2b3d58 } checked: { bg: #2563eb, fg: #ffffff } disabled: { opacity: 0.45 } }
 ```
 
-The schema accepts `icon`, but the runtime does not render icons yet.
+`icon` is accepted for forward compatibility and emits a schema warning because ToggleButton icons are not rendered yet.
 
 ### `RadioGroup`
 
@@ -257,16 +257,16 @@ RadioGroup.radio { resting: { size: 240px 108px, fg: #60a5fa, font-size: 14px, p
 
 ### `TextBox`
 
-A single-line editable UTF-8 field. It supports initial `value`, `placeholder`, `maxLength` (Unicode code points), `readOnly`, `password`, `disabled`, `tooltip`, and `change`. Clicking focuses it; text input inserts UTF-8 text, including spaces. Backspace/Delete erase the previous/next code point, Shift+Left/Right/Home/End select text, and Ctrl+A/C/X/V select all, copy, cut, and paste through the platform clipboard interface. Typing or deleting while a selection exists replaces/removes that selection. Tab always moves keyboard focus and never inserts a tab character into a field; multi-line entry belongs in `TextArea`. A focused editable field shows a blinking caret: it blinks while the field is idle, stays solid while typing or moving the caret, and is hidden for read-only or disabled fields. An empty field activates the `.xss` `placeholder` state. Its authored `id` reads/writes a `std::string` through `value(id)` / `setValue(id, value)`.
+A single-line editable UTF-8 field. It supports initial `value`, `placeholder`, `maxLength` (Unicode code points), `readOnly`, `password`, `disabled`, `tooltip`, and `change`. Clicking focuses it; text input inserts UTF-8 text, including spaces. Backspace/Delete erase the previous/next code point; Ctrl/Cmd+Left/Right navigate by word; Ctrl/Cmd+Backspace/Delete erase the preceding/following word. Home/End move to the line edges and Ctrl/Cmd+Home/End move to the document edges. Shift extends a selection for these navigation keys. Ctrl/Cmd+A/C/X/V select all, copy, cut, and paste through the platform clipboard interface. Typing or deleting while a selection exists replaces/removes that selection. Tab always moves keyboard focus and never inserts a tab character into a field; multi-line entry belongs in `TextArea`. A focused editable field shows a blinking caret: it blinks while the field is idle, stays solid while typing or moving the caret, and is hidden for read-only or disabled fields. An empty field activates the `.xss` `placeholder` state. Its authored `id` reads/writes a `std::string` through `value(id)` / `setValue(id, value)`.
 
-For debugging text layout, `UiRuntime::setWhitespaceVisible(true)` renders spaces as a middle dot (·) and tabs as a right arrow (→) inside editable fields; caret and selection geometry are measured through the same substitution, so positions stay aligned with the drawn glyphs. The showcase demo exposes this as a checkbox.
+For debugging text layout, `UiRuntime::setWhitespaceVisible(true)` renders spaces as a middle dot (·) and tabs as a right arrow (→) inside editable fields; the showcase exposes this as a checkbox. Drag with the primary mouse button to select text; double-click selects a word and triple-click selects a line. Shift+Arrow/Home/End extends a keyboard selection. Ctrl+C/X/V/A and Cmd+C/X/V/A use the platform clipboard and select-all behavior. Selection uses a translucent foreground highlight clipped to the text content.
 
 ```xui
 TextBox[id: "email", value: "", placeholder: "name@example.com", maxLength: 120,
        tooltip: "Use your work email", change: onEmailChanged, class: "field"]
 ```
 
-Style the field's size, padding, font, foreground/background, border, radius, and `hover`, `focus`, `disabled`, or `placeholder` state in `.xss`. Text and selection are clipped to the content box; the caret scrolls horizontally when needed. User edits invoke `change`; programmatic `setValue` is silent unless `notify=true`. Mouse caret placement, drag selection, word navigation, undo, IME preedit display, validation, and native accessibility are not implemented. Password mode masks the display only; it does not encrypt stored text.
+Style the field's size, padding, font, foreground/background, border, radius, and `hover`, `focus`, `disabled`, `placeholder`, or `error` state in `.xss`. Text and selection are clipped to the content box; the caret scrolls horizontally when needed. Caret/selection positions are cached from shaped UTF-8 clusters and reused for paint and pointer hit-testing. User edits invoke `change`; programmatic `setValue` is silent unless `notify=true`. Ctrl/Cmd word navigation and deletion, bounded undo/redo, and platform-delivered IME preedit display are supported. Native candidate placement is implemented by the GLFW Windows backend; other platform implementations may leave the optional hook empty. Basic Arabic/Hebrew RTL shaping is available, but mixed-direction editing is not fully verified. `filter` and `validate` name synchronous application callbacks registered with `Xui::setInputValidationHandler`; they apply to TextBox, TextArea, NumberField, SearchField, and the ColorPicker value editor. Each receives the proposed complete string and authored ID and can reject it with an error message. Rejection leaves the edit unchanged and activates `.error`; read the message through `runtime().controlError(id)`. Password mode masks the display only; it does not encrypt stored text.
 
 ```xss
 TextBox.field {
@@ -284,10 +284,29 @@ A multiline editable field with the same `.xui` values and state styles as `Text
 
 ```xui
 TextArea[id: "notes", placeholder: "Add notes…", maxLength: 2000,
-        tooltip: "Keep the summary concise", change: onNotesChanged, class: "notes"]
+        tooltip: "Keep the summary concise", change: onNotesChanged,
+        filter: allowNotes, validate: validateNotes, class: "notes"]
 ```
 
-Style size, padding, font, foreground/background, border, radius, and shared control states in `.xss`; text, selection, and caret are clipped to the field. The single-line `TextBox` also filters non-printing control characters and retains its horizontal caret tracking. Undo, IME preedit display, drag selection, and mouse caret positioning remain future work.
+Style size, padding, font, foreground/background, border, radius, and shared control states in `.xss`; text, selection, and caret are clipped to the field. The single-line `TextBox` also filters non-printing control characters and retains its horizontal caret tracking. `maxLength` applies to typed and pasted Unicode code points. Undo and IME preedit display are supported; drag selection autoscrolls when the pointer moves outside the content bounds. Validation callbacks use the same `filter`/`validate` and `.error` state API as TextBox. Native accessibility remains future work. RTL shaping is currently a basic paragraph heuristic and complex mixed-direction editing has not been verified.
+
+Register validation by handler name on the facade. `filter` runs before `validate`; either can reject the whole proposed value. The callback runs synchronously on the UI thread for typing, paste, deletion, TextArea newline/tab insertion, and undo/redo. Returning `false` prevents the change and sets the control's error state until the next accepted edit.
+
+```cpp
+bool validateNotes(void*, std::string_view handler, std::string_view id,
+                   std::string_view proposed, std::string& error) {
+    if (handler == "validateNotes" && proposed.size() > 2000) {
+        error = "Notes are limited to 2000 bytes";
+        return false;
+    }
+    return true;
+}
+
+ui.setInputValidationHandler(validateNotes, nullptr);
+auto message = ui.runtime().controlError("notes");
+```
+
+`maxLength` counts Unicode code points, while application-specific validation decides its own limit semantics. `TextSystem::addFallbackFont(primary, fallback)` registers an ordered fallback face chain for missing glyphs; provide the font files explicitly.
 
 ```xss
 TextArea.notes { resting: { size: 420px 140px, pad: 10px, bg: #172033, fg: #f5f7ff, border: 1px solid #40506b, radius: 6px, font-size: 14px } focus: { border: 2px solid #70a7ff } placeholder: { fg: #929db1 } }
@@ -352,14 +371,14 @@ Add a string `tooltip: "…"` value to a runtime node. Tooltip behavior is confi
 ```xui
 Button(label: "Publish")[tooltip: "Publish the current draft", tooltipShowDelay: 300,
   tooltipHideDelay: 150, tooltipTrigger: "hover", tooltipHideOnClick: true,
-  tooltipDisabled: false, press: onPublish, class: "primary"]
+  tooltipDisabled: false, tooltipFollowCursor: true, press: onPublish, class: "primary"]
 ```
 
 ```xss
 Tooltip { resting: { bg: #202a40, fg: #f2f6ff, font-size: 13px, pad: 7px, radius: 5px } }
 ```
 
-`tooltipShowDelay` and `tooltipHideDelay` are milliseconds, clamped to 0–60,000. `tooltipTrigger` accepts `"hover"`, `"focus"`, `"both"`, or `"none"`. `tooltipHideOnClick` and `tooltipDisabled` are booleans. Setting `tooltipDisabled: true` prevents this target's tooltip from showing. A click hides a visible tooltip immediately when hide-on-click is enabled; the current target stays suppressed until it loses hover and focus. Popups suppress tooltip painting so an open dropdown/color picker stays unobscured. Tooltips are backend-neutral pointer-transparent overlays whose placement is clamped to the window; they are not standalone child nodes. Rich content and per-tooltip selectors are not available yet.
+`tooltipShowDelay` and `tooltipHideDelay` are milliseconds, clamped to 0–60,000. `tooltipTrigger` accepts `"hover"`, `"focus"`, `"both"`, or `"none"`. `tooltipHideOnClick`, `tooltipDisabled`, and `tooltipFollowCursor` are booleans. Setting `tooltipDisabled: true` prevents this target's tooltip from showing. With `tooltipFollowCursor: true`, the bubble follows the pointer with a small offset; otherwise it stays anchored below the target. A click hides a visible tooltip immediately when hide-on-click is enabled; the current target stays suppressed until it loses hover and focus. Popups suppress tooltip painting so an open dropdown/color picker stays unobscured. Tooltips are backend-neutral pointer-transparent overlays whose placement is clamped to the window; they are not standalone child nodes. Rich content and per-tooltip selectors are not available yet.
 
 ## Display controls
 
@@ -427,6 +446,10 @@ Normal widgets paint in `.xui` tree order: a parent paints before its children, 
 
 Open dropdown and color-picker popups sit above the tree and tab headers and receive pointer input inside their popup bounds. Clicking outside closes an open popup, then the exposed target receives that click. Tab headers sit above ordinary tree content. Tooltips are pointer-transparent and hidden while a popup is open. `Label`, `Badge`, `Spinner`, and `Image` nodes block pointer input like text and panels. RadioGroup rows and the SearchField clear region are part of their control: a click inside the group's bounds selects the row under the pointer, and a click on the clear region clears the field. Arbitrary `.xss z-index` and general container clipping are not implemented; pointer coordinates are clipped to the window, and inactive tabs are filtered consistently with painting.
 
+Keyboard focus follows authored interactive-node order. Tab and Shift+Tab move forward/backward and scroll the next target into view. Enter or Space activates the focused control; Escape closes an open popup/menu. Menus and tabs support arrow-key navigation, and TreeView supports arrow-key selection and expansion/collapse. Generic modal focus trapping and an OS-native screen-reader bridge are not implemented.
+
+`UiRuntime::dumpAccessibilityTree()` returns versioned JSON with authored-node parent/child links, inferred roles, labels, focus/disabled/selected/checked state, visibility, bounds, and safe text values. Password contents are excluded. This is an export for inspection/testing; it does not itself connect a platform accessibility API, and custom accessible names/roles are not authored yet.
+
 ## Reading and changing values
 
 Stateful controls with an authored `id` expose a typed `std::optional<UiValue>` from `ui.runtime().value(id)`. The alternatives are `bool` for `CheckItem` / `CheckBox` / `Switch` / `ToggleButton`, `f64` for `Slider` / `NumberField`, `std::string` for `Dropdown` / `RadioGroup` / `SearchField` / `TextBox` / `TextArea` / `Label` / `Badge` / identified `Text` nodes, `Color` for `ColorPicker`, and `u32` for the selected `Tabs` index. `setValue(id, value)` updates and redraws a control; `notify` defaults to `false`. User interaction invokes the authored `change` callback, where the application can read the current value.
@@ -442,7 +465,7 @@ Use unique authored IDs; duplicate IDs are not a supported lookup pattern.
 
 ### `Slider`
 
-A single-value range control. It supports pointer dragging, Tab focus, Left/Right keyboard steps, `value`, `min`, `max`, `disabled`, and `change: handler`. `step` passes schema validation, but keyboard movement currently uses a 5% range step. A change handler fires on pointer-down if the value changes, once for every distinct logical value reached while dragging, and once for each keyboard step. Pointer-up does not send a duplicate final change event. The value API always returns the current `f64`.
+A single-value range control. It supports pointer dragging, Tab focus, Left/Right keyboard steps, `value`, `min`, `max`, `disabled`, and `change: handler`. `step` is accepted for forward compatibility and emits a schema warning; keyboard movement currently uses a 5% range step. A change handler fires on pointer-down if the value changes, once for every distinct logical value reached while dragging, and once for each keyboard step. Pointer-up does not send a duplicate final change event. The value API always returns the current `f64`.
 
 ```xui
 Slider[value: 0.4, min: 0, max: 1, change: onVolume][class: "slider"]
@@ -464,7 +487,7 @@ if (const auto value = ui.runtime().value("volume")) {
 
 ### `ProgressBar`
 
-A display-only range bar with `value`, `min`, and `max`. It renders a track and proportional fill. The `indeterminate` schema property is not implemented; it does not animate or bind to another control.
+A display-only range bar with `value`, `min`, and `max`. It renders a track and proportional fill. `indeterminate` is accepted for forward compatibility and emits a schema warning; the bar does not animate or bind to another control.
 
 ```xui
 ProgressBar[value: 0.72, min: 0, max: 1][class: "progress"]
@@ -483,7 +506,7 @@ FpsCounter[showFrameTime: false, class: "fps-compact"]
 
 ### `Dropdown`
 
-A single-select dropdown. Supply pipe-separated static choices through `options`, an optional initial `value`, and `change: handler`. Click or Enter/Space opens it; click selects; Up/Down changes a focused selection; Escape closes it. Header hover applies only while the pointer is over the header. Popup rows have an independent row-local hover highlight; they do not inherit the header's `.xss` hover style. The header's resting border remains, and its `open` / `focus` styles can keep an outline visible while the pointer moves over options. Popup rows are virtual runtime targets, not `.xui` child nodes, so per-option selectors and option-specific styling are not available. The schema accepts `placeholder`, but the runtime does not display it.
+A single-select dropdown. Supply pipe-separated static choices through `options`, an optional initial `value`, and `change: handler`. Click or Enter/Space opens it; click selects; Up/Down changes a focused selection; Escape closes it. Header hover applies only while the pointer is over the header. Popup rows have an independent row-local hover highlight; they do not inherit the header's `.xss` hover style. The header's resting border remains, and its `open` / `focus` styles can keep an outline visible while the pointer moves over options. Popup rows are virtual runtime targets, not `.xui` child nodes, so per-option selectors and option-specific styling are not available. `placeholder` is accepted for forward compatibility and emits a schema warning because the runtime does not display it.
 
 ```xui
 Dropdown[id: "density", options: "Compact|Comfortable|Spacious", value: "Comfortable", change: onDensity][class: "dropdown"]
@@ -524,7 +547,7 @@ MenuItem { resting: { fg: #f5f7ff, radius: 4px } hover: { bg: #293d59 } checked:
 
 ### `ColorPicker`
 
-An in-app HSV popup with a saturation/value field, hue strip, optional alpha strip, active-format display, format switcher, and editable color string. It is backend-neutral painted UI and does not invoke a native color dialog. Click/drag changes values immediately; Escape closes the popup. Clicking the format label cycles the configured formats. Click the value row and type, edit, copy, cut, or paste a supported color string; valid complete values apply immediately, while invalid/incomplete strings stay in the editor without changing the current color.
+An in-app HSV popup with a saturation/value field, hue strip, optional alpha strip, active-format display, format switcher, and editable color string. It is backend-neutral painted UI and does not invoke a native color dialog. Click/drag changes values immediately; Escape closes the popup. Clicking the format label cycles the configured formats. Click and drag in a value input to select text; the selection has a blue highlight. Ctrl/Cmd+A/C/X/V select, copy, cut, and paste through the platform clipboard. Valid complete color strings apply immediately, while invalid/incomplete strings stay in the editor without changing the current color.
 
 ```xui
 ColorPicker[id: "accent", value: #5b8cff, format: "hex", formats: "hex|rgb|hsl|hsv",
@@ -622,7 +645,7 @@ ScrollView[id: "feed", vertical: true, horizontal: false, scrollSpeed: 42,
 }
 ```
 
-The platform reports mouse-wheel input as the backend-neutral `EventType::Wheel`; nested views consume the event from the deepest hit child outward, so an outer view can take over when an inner view reaches its limit. GLFW maps the native scroll callback to this event. Drag the visible scrollbar thumb; `scrollbar: "always"`, `"auto"`, and `"never"` control visibility. `scrollSpeed` is logical pixels per wheel notch. `scrollBehavior` accepts `"instant"` or `"smooth"`; smooth applies a short shared-runtime easing animation. Keyboard arrows scroll a focused `ScrollView`; PageUp/PageDown/Home/End also scroll a focused non-text descendant's nearest view. Tab focus calls scroll-into-view for the next focusable child.
+The platform reports mouse-wheel input as the backend-neutral `EventType::Wheel`; nested views consume the event from the deepest hit child outward, so an outer view can take over when an inner view reaches its limit. GLFW maps the native scroll callback to this event. Drag the visible scrollbar thumb, or click/drag the track to page and reposition the thumb; `scrollbar: "always"`, `"auto"`, and `"never"` control visibility. Auto scrollbars fade after idle and reappear on pointer/scroll interaction. `scrollSpeed` is logical pixels per wheel notch. `scrollBehavior` accepts `"instant"` or `"smooth"`; smooth applies a short shared-runtime easing animation. Wheel input also has a short decaying momentum tail. Keyboard arrows scroll a focused `ScrollView`; PageUp/PageDown/Home/End also scroll a focused non-text descendant's nearest view. Tab focus calls scroll-into-view for the next focusable child.
 
 The lower-level API is available from `UiRuntime`: `scrollOffset(id)`, `scrollTo(id, {x, y}, smooth)`, and `scrollIntoView(id, smooth)`. `value(id)` also returns a `Vec2` offset for ScrollView IDs; the `change` callback can read it and update a status label. Offsets are logical pixels. Scrollbars are overlays painted from `.xss` values, not platform-native controls.
 
@@ -637,11 +660,19 @@ ScrollView.feed {
 }
 ```
 
-Limitations: inertial/momentum scrolling, touch/gesture input, scrollbar corner styling, accessibility semantics, wheel-axis remapping, and per-child overscroll policy are not implemented. For two-axis scrolling, explicitly sized wide children provide horizontal overflow while vertical content can continue to grow. The shipped GLFW showcase has vertical, horizontal, nested, always-visible, and hidden-scrollbar examples.
+Limitations: touch/gesture input, scrollbar corner styling, wheel-axis remapping, and per-child overscroll policy are not implemented. For two-axis scrolling, explicitly sized wide children provide horizontal overflow while vertical content can continue to grow. The shipped GLFW showcase has vertical, horizontal, nested, always-visible, and hidden-scrollbar examples.
 
-## Schema-recognized, runtime-unsupported objects
+## Runtime support and unsupported schema entries
 
-The current core schema also recognizes names that are not materialized by `UiRuntime::build()`: `Popover`, `Modal`, `ContextMenu`, `Tooltip`, `IconButton`, `RangeSlider`, `ComboBox`, `ListView`, `Table`, `Canvas`, `HUD`, `Crosshair`, `RadialMenu`, `HealthBar`, and `DamageNumber`. (`DockSpace` aliases the runtime `DockHost`; `Toolbar`, `StatusBar`, and `MenuBar` are horizontal containers; `Menu`/`MenuItem` are the runtime [popup menu](#menu-and-menuitem).) `MenuBar` remains a plain client-area row of ordinary controls; the custom draggable top menu is the [`TitleBar`](#titlebar) widget together with `Window[platformTopMenu: false]`. A dedicated command-menu model and menu keyboard navigation are not implemented.
+`ListView`, `Table`, `RangeSlider`, `ComboBox`, and `IconButton` have runtime implementations. `ListView` uses pipe-separated `items`, optional `selected`, wheel scrolling, keyboard arrows, and virtual row painting. `Table` uses pipe-separated column names and rows whose tab-separated cells follow the column order; it paints a header, virtualizes visible rows, supports row selection by pointer/arrow keys, and allows column-divider dragging. Its `selected` property/value is a zero-based row index (`u32`); `UINT32_MAX` clears selection. `RangeSlider` exposes `{low, high}` as a `Vec2` value; `ComboBox` combines editable text input with the existing option popup; and `IconButton` accepts one of the built-in icon names. `Popover`, `Modal`, `ContextMenu`, standalone `Tooltip`, `Canvas`, `HUD`, `Crosshair`, `RadialMenu`, `HealthBar`, and `DamageNumber` remain unsupported and produce validation warnings. (`DockSpace` aliases runtime `DockHost`; `Toolbar`, `StatusBar`, and `MenuBar` are horizontal containers; `Menu`/`MenuItem` are the runtime [popup menu](#menu-and-menuitem).) `MenuBar` remains a plain client-area row of ordinary controls; the custom draggable top menu is the [`TitleBar`](#titlebar) widget together with `Window[platformTopMenu: false]`.
+
+```xui
+ListView[id: "people", items: "Ada|Grace|Katherine", selected: "Grace"]
+Table[id: "team", columns: "Name|Role", rows: "Ada\tEngineer|Grace\tDesigner", selected: 0]
+RangeSlider[id: "price", min: 0, max: 100, low: 20, high: 80]
+ComboBox[id: "filter", options: "All|Open|Closed", value: "Open"]
+IconButton[id: "add", icon: "add"]
+```
 
 ```xui
 MenuBar[class: "client-menu"] {
@@ -650,4 +681,4 @@ MenuBar[class: "client-menu"] {
 }
 ```
 
-Use only the supported object list above in a document passed to `Xui::attach()`. Parser/schema entries are retained for future implementation and language validation; they are not native controls or hidden fallbacks.
+Unsupported widgets are still parsed for authoring and now emit source-located validation warnings; warning promotion remains opt-in. Do not rely on them as runtime controls until their implementations are complete.

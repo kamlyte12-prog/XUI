@@ -2,6 +2,100 @@
 
 This file records project changes, design decisions, trade-offs, current status, and next steps. It is updated as implementation work lands.
 
+## 2026-11-22 — Begin closing M0 verification gaps
+
+- Audit: CI has Linux, macOS, and Windows build/test jobs, but no GUI interaction jobs; existing GLFW `--profile-*` switches are bounded rendering profiles, not scripted input/capture checks. The parser/layout/paint fuzzers currently run brief deterministic smoke workloads. Existing facade teardown tests close a plain window, but do not cover every requested transient/drag state.
+- Change: added `tools/fuzz_soak.py` to rotate parser, layout, and paint fuzz workloads for a configured duration; the sanitizer CI job now runs it for three minutes instead of one short pass per target.
+- Remaining: no visual smoke harness, cross-platform desktop interaction workflow, or complete close-during-resize/drag/popup/native-float teardown test has landed yet. The M0 checklist remains open pending the Win32 SendInput/capture harness and Linux/macOS environment-specific input adapters.
+- Verification: CI workflow and script changes were inspected; local Python and GUI runners are unavailable in this session, so the timed soak and visual path have not been executed here.
+
+## 2026-11-22 — Fix coincident rounded clips and caption glyph
+
+- Cause: the OpenGL shader multiplied analytic shape coverage by the inherited clip even when they represented the same rounded edge, squaring the AA ramp. The initial correction capped coverage using `C0.a`; outlined round-rects deliberately have transparent fill (`C0`) and opaque border (`C1`), which made the custom maximize glyph disappear.
+- Change: round-rect coverage now uses the minimum of shape coverage and clip coverage, capped by the maximum visible fill/border alpha. The software renderer follows the same rule and rescales premultiplied RGB; glyph/image coverage continues to multiply by clip coverage.
+- Verification: source change and whitespace check only. Shader compilation, the render suite, and visible docked/floating panel comparison remain to be run.
+
+## 2026-11-22 — P4 developer tooling audit
+
+### Audit
+
+- Live reload is partially available through facade asset reload paths, but the examples have no `--watch` flag, filesystem watcher, or demonstrated ID-based state restoration.
+- The showcase has profile flags, FPS and draw-batch counters, but no `--inspect` layout/clip/hit-ID overlay.
+- `.xss` unknown properties already produce parser/compiler errors with suggestions. A separate warning that an otherwise valid property is not applied by any runtime widget is absent.
+- Six render golden images exist; requested nested clip/DPI/cap-fallback/odd-size text coverage is incomplete.
+- Microbenchmarks exist, but no scripted pointer-move and live-resize interaction benchmark or CI regression threshold exists.
+- Historical test totals are hardcoded in roadmap/tracking notes and have drifted.
+
+### Changes
+
+- Added `tools/count_tests.py` to count registered `TEST(...)` macros under `tests/*.cpp`, with `--update` to refresh the single current-count line in `plan/plan.md`. The line currently reports 242 tests.
+
+### Verification and remaining work
+
+- The count was independently calculated with PowerShell as 242 registered tests. The script itself could not run here because the Windows Python app alias is unavailable; `git diff --check` reported no whitespace errors.
+- Watch mode, the inspector, runtime-applicability stylesheet warnings, expanded render goldens, and CI interaction benchmarks remain open. These require larger changes than superficial CLI flags.
+
+## 2026-11-22 — P3 runtime widget foundation
+
+### Audit
+
+- `ListView`, `Table`, `RangeSlider`, `ComboBox`, and `IconButton` had schema entries but no dedicated runtime behavior. `Popover`, `Modal`, `ContextMenu`, standalone `Tooltip`, `Canvas`, `HUD`, `Crosshair`, `RadialMenu`, `HealthBar`, and `DamageNumber` were also schema-only.
+- The existing `Dropdown` popup, text editing path, slider drag path, icon painter, and optional `NodePayload` storage were suitable reuse points. Modal/popup focus trapping still needs broader interaction architecture.
+
+### Changes and decisions
+
+- `ListView` reuses the option payload model, supports validated selected values, row hover/click/keyboard selection, wheel scrolling, and viewport-based row painting. Items use a pipe-separated string; one selected item is exposed as a string through `value(id)`.
+- `RangeSlider` reuses the slider input path with nearest-thumb capture, ordered low/high values, two-thumb painting, and a `Vec2` value API. `min`, `max`, `low`, and `high` are accepted.
+- `ComboBox` reuses editable TextBox input and the existing Dropdown option popup. `IconButton` reuses Button interaction/style states and paints its icon through the built-in vector icon renderer.
+- `Table` parses pipe-separated columns and tab-separated cells, paints a header and virtualized rows, supports pointer/keyboard row selection, and resizes columns by dragging header dividers.
+- Unsupported declarations are flagged in the schema and produce source-located validation warnings. Overlay and game widgets remain warnings.
+
+### Verification and remaining work
+
+- `git diff --check` and build were not yet available; the shell has no `cmake`, `ninja`, or MSVC commands, despite an existing `build/dev` directory. No runtime or visual claims are made as verified.
+- Next: compile `xui_tests` and the showcase in the Windows developer environment, add focused widget tests, then implement the unified popup layer.
+
+## 2026-11-22 — P2 keyboard, scrolling, tooltip, and accessibility foundations
+
+### Audit
+
+- Keyboard support already included Tab-forward focus, button Enter/Space activation, menu arrows, tab-group arrows, popup Escape, and runtime theme switching. Shift+Tab, TreeView keyboard navigation, and a structured accessibility export were absent.
+- Tooltips already had configurable show/hide delays, trigger modes, and pointer-transparent overlays; cursor-following placement was absent.
+- ScrollViews already supported thumb dragging and optional smooth wheel easing. Track paging/dragging, idle fade, and momentum were absent.
+- Dock trees were scoped to direct-child panels of one DockHost. Cross-host movement would require an ownership/layout reparenting design. Before this change, keyboard docking shortcuts were also absent; same-host float/redock shortcuts have since been added.
+- Dropdown/color-picker/date/menu overlays already occupy explicit paint/input passes with outside dismissal, but Popover/Modal/ContextMenu remain unsupported and there is no modal focus trap. Runtime `setTheme()` already switches palettes. There was no OS reduced-motion preference hook or accessibility-tree export.
+
+### Changes
+
+- Shift+Tab now traverses focus in reverse and still calls scroll-into-view. TreeView arrows select visible entries and expand/collapse or move to the parent. Existing Enter/Escape, Menu arrows, and Tabs arrows are retained.
+- Added `UiRuntime::dumpAccessibilityTree()` with versioned JSON, parent/child references, inferred roles and labels, bounds, visibility, focus/disabled/selected/checked states, and non-password values. Password contents are omitted.
+- Added the generic `.xui tooltipFollowCursor` property. Cursor-following bubbles track the pointer while visible and remain window-clamped.
+- Scrollbar track presses now page to the clicked location and continue as a drag. Auto scrollbars reappear on interaction and fade after idle. Instant wheel scrolling includes a short decaying momentum tail; existing smooth scrolling remains.
+- Added `Platform::prefersReducedMotion()` and `UiRuntime::setReducedMotion(bool)`. The GLFW Windows backend queries `SPI_GETCLIENTAREAANIMATION`; active style/keyframe/smooth-scroll and momentum effects are suppressed when enabled. Other backends use the conservative default of false.
+
+### Verification and remaining work
+
+- Ctrl/Cmd+Shift+F floats the active panel in the recently interacted host; Ctrl/Cmd+Shift+D redocks the last operated panel as a tab in that host. A headless regression covers both actions.
+- Windows MSVC Release built `xui_tests` and `xui_glfw_demo`; the direct suite reports **242 tests, 0 failed**. New coverage exercises reverse focus traversal/Enter activation, accessibility export/password redaction, wheel momentum, track click-drag, and keyboard float/redock.
+- Visible hover/fade/momentum cadence was not manually checked. `Popover`, `Modal`, and `ContextMenu` rendering plus modal focus trapping remain unimplemented. Cross-host dock-panel drag remains unimplemented because the current DockHost ownership model requires coordinated layout-tree reparenting. Reduced-motion detection remains Windows-only, and JSON export is not an OS screen-reader bridge.
+
+## 2026-11-22 — Fix DatePicker payload index crash
+
+### Audit and root cause
+
+- The user reported an MSVC `vector subscript out of range` assertion while running the showcase. The optional widget payload is stored in a sidecar vector and addressed by each node's `payloadIndex`.
+- `buildNode()` allocated a payload before assigning `node.datePicker`; DatePicker therefore skipped allocation and retained the invalid default index. Later popup routing accesses its payload even though the DatePicker has no options, producing the out-of-range vector access.
+
+### Changes and verification
+
+- Moved sidecar allocation until after all payload-backed widget-kind flags are initialized, and now allocate based on those initialized flags.
+- Extended `showcase_example_assets_parse_validate_and_build` to select the Popups tab and click the DatePicker, exercising its popup routing through the payload sidecar.
+- Windows MSVC Release build completed for `xui_tests` and `xui_glfw_demo`; the direct suite reports **240 tests, 0 failed**. `git diff --check` passes (Git only reports existing LF-to-CRLF normalization notices).
+
+### Limits and next steps
+
+- This Release verification confirms the regression path and source builds; the reported Debug assertion was not run under a Debug build in this pass, and the demo was not manually interacted with in a visible window.
+
 ## 2026-11-20 - Rounded-corner AA, child clipping, and native tear-off lifecycle
 
 ### Audit and root causes
@@ -1979,3 +2073,103 @@ Premise corrections worth recording: this checkout has a GLFW + OpenGL 2.1 backe
 - Verification: Windows MSVC Release rebuilt `xui_tests` and `xui_glfw_demo`. The first test invocation exposed a compatibility regression: an untagged `CloseRequest` from `NullPlatform` no longer closed the primary window, so its facade test waited indefinitely. The event loop now treats invalid-window close requests as global/legacy requests while still routing tagged secondary closes locally. The added redock test initially failed because its DockHost fixture had no authored height (`inspector` bounds were 632×0); giving the host 100% width/height created a valid drop target. Final direct test run: **218 passed, 0 failed**. A visible five-second `--profile-docking` GLFW run exited normally and measured **357.573 FPS** (VSync disabled). `git diff --check` reports no whitespace errors; Git reports only line-ending normalization notices.
 - Limits/status: the screenshot's 4 FPS is still not reproduced or explained; the continuous profile does not exercise pointer dragging or resize. The Windows demo launched, but there was no manual tear-off/move/resize/redock/close interaction or visual inspection. Linux/macOS are not verified. The automated test covers `floatMode`, independent scoped painting, shared runtime identity, and redocking by a valid panel drop point; it does not prove native OS-window interactions.
 - Next: manually tear Preview off, interact and resize it, redock over center and edges, close the native window, and measure FPS during the move. Then verify Linux/macOS or document any GLFW/context limitations before claiming those platforms.
+# 2026-11-21 — Align transformed tab hover and hit testing
+
+- Audit/root cause: tab headers are emitted in a dedicated overlay pass outside the ordinary node transform scope. Also, adjacent headers both resolve to their shared `Tabs` container as the pointer target. Since header hover was sampled only when painting and pointer movement between tabs did not change that container's hovered flag, the runtime could skip repainting and leave Tab A's hover style visible over Tab B.
+- Changes: tab header painting now applies the owning `Tabs` paint transform. Hover styling, hit testing and tab selection use the corresponding inverse transform before checking header bounds and choosing the tab ordinal. Runtime state records the hovered tab ordinal and damages the header whenever it changes, even when the hit-test target remains the same; pointer leave clears it. Hit testing respects scroll-view clipping. In-app floating DockPanel tab headers also enforce the floating panel's own bounds and internal scroll clips while ignoring clips from ancestors outside the panel.
+- Regression coverage: a transformed two-tab runtime case checks hover paint at Tab A, direct movement to adjacent Tab B triggers an update and repaints at its transformed position, moving over page content clears header hover, and clicking selects B and invokes the change callback.
+- Verification: Windows MSVC Release build succeeded under `/W4 /WX`. The full `xui_tests` executable reports **236 tests, 0 failures**. A first Debug build attempt failed before compilation with MSVC `C1902` Program database manager mismatch; verification completed using Release. No visible GLFW interaction session was performed, so docked/floating visual behavior and pointer latency have not been manually inspected.
+- Status/next steps: transformed tab hover and click geometry are headless-verified. The test exercises the shared runtime path used by docked and in-app floating windows; native-window visuals and other platforms remain unverified.
+# 2026-11-21 — Warn on audited unsupported XUI values
+
+- Audit: the pasted P0 #1 list correctly identified ignored `Row/Column.wrap`, `Window.resizable`, `Text.wrap/maxLines`, `Split.collapsible`, and `Panel.collapsed/collapsible`. The widget guide also documented ignored `Panel.title`, `Dropdown.placeholder`, Button `variant/icon/loading`, ToggleButton `icon`, Slider `step`, and ProgressBar `indeterminate`, so those now warn too. `Grid.rows` is not unsupported: `UiRuntime::buildNode()` parses the quoted row track list and the retained Grid solver sizes explicit and implicit rows.
+- Changes: core schema metadata distinguishes accepted-but-unimplemented values. Validation returns source-located warnings grouped by source file; warnings do not fail by default. `XuiValidationOptions::warningsAsErrors` promotes them to errors. `loadUiAssets()` exposes warnings on `UiAssetBundle`, and `Xui::validationWarnings()` exposes facade load warnings; `XuiOptions::warningsAsErrors` enables strict facade loading. User docs now describe each affected property and the supported Grid row tracks.
+- Verification: Windows MSVC Release built `xui_tests` and `xui_glfw_demo` under `/W4 /WX`. The full test binary reports **239 tests, 0 failures**. Coverage checks all documented ignored values, confirms `Grid.rows` does not warn, checks warnings remain successful by default, and checks strict validation fails with error diagnostics through validation, `loadUiAssets()`, and `Xui::loadXui()`.
+- Scope/status: this closes the audited property cases only; the full schema still needs a systematic comparison against runtime construction/behavior, including other properties documented as unavailable. Linux/macOS were not tested.
+# 2026-11-21 — Index runtime public ID lookups
+
+- Cause: `value(id)` and several dock-panel query methods scanned the retained node vector and compared every authored ID on each call.
+- Changes: build a `StrId -> node index` map once after tree construction and use it for `value`, dock panel bounds, radius, and title. The index uses `try_emplace`, preserving the prior first-node match behavior if duplicate IDs occur. It is cleared before rebuilding.
+- Decisions/trade-offs: the index is scoped to one runtime build and uses existing string interning, avoiding owned string keys. This slice does not yet address the roadmap's repeated visibility checks in hit testing.
+- Verification: Windows MSVC Release `xui_tests` target built; full suite reports 239 passed, 0 failed. `cmake` was not on the shell PATH, so the build used the installed Visual Studio developer environment and bundled CMake. No before/after performance benchmark or visible GUI smoke test was run.
+- Status/next: complete for the four lookup methods; next, profile/optimize the repeated visibility and ancestor checks in hit testing with a focused regression/performance measure.
+# 2026-11-21 — Memoize hit-test ancestor checks per query
+
+- Cause: `hitTestNode()` performs several reverse-order passes over the retained tree. Nodes visited by multiple passes repeated `isNodeVisible()` ancestor walks and point-specific scroll-clip walks.
+- Changes: added generation-stamped reusable scratch arrays to cache each node's visibility and scroll-ancestor containment result for one hit-test query. Existing dock overlay, tab, scrollbar, floating panel, and reverse paint-order paths still call the same hit predicates through the cache.
+- Decisions/trade-offs: cache values are scoped to one synchronous `hitTestNode()` call so current layout and pointer position are reflected on the next query. Scratch arrays resize only when the built tree size changes; generation rollover clears stamps. This does not yet build the broader per-frame visible/hittable list proposed in the roadmap.
+- Verification: Windows MSVC Release `xui_tests` rebuilt successfully; full suite reports 239 passed, 0 failed. Built and ran the existing `bench_docking_scale` target. Across wide/deep fixtures with 8–32 panels, drag-preview pointer moves measured 2.112–15.690 µs and splitter pointer moves 3.805–18.177 µs; no pre-change baseline was captured. `git diff --check` passed. This headless benchmark does not establish visible input latency.
+- Status/next: per-query duplicate ancestor checks are cached and current pointer-path timings are recorded. Consider a paint-order candidate list only if a comparable baseline or larger-tree benchmark shows this path needs further optimization; visible interaction remains unverified.
+# 2026-11-21 — Cache per-node font selection
+
+- Cause: paint called `selectFont()` for every node every frame, including unchanged static labels. Selection scans registered faces and checks variable font axes.
+- Changes: each node caches the family/weight key for its resolved `FontHandle`; normal paint reuses the handle when that key is unchanged. `setFont()` and `registerFont()` invalidate node caches before resolving so updated base faces and registrations are observed.
+- Decision: font size is not part of the selection key because it does not affect face choice; text layout continues to use the resolved font and current style size independently.
+- Verification: Windows MSVC Release `xui_tests` rebuilt and all 239 tests passed, including `ui_runtime_wraps_and_clips_text_to_its_styled_widget_bounds`. An initial run caught a stale base-font cache after `setFont()`; explicit invalidation fixed it. No before/after paint benchmark or visible font-switch smoke test was captured.
+- Status/next: cache and base-font invalidation are covered by the current suite. Benchmark paint at increasing node counts before claiming performance improvement.
+# 2026-11-22 — Add mouse text selection and picker clipboard editing
+
+- Cause: text fields already tracked a caret/selection anchor and had keyboard clipboard handling, but pointer presses placed the caret at the end and pointer moves did not extend selection. The Color Picker's retained editor path also needed to participate in shared selection and input behavior.
+- Changes: added shaped-prefix hit positioning for mouse caret placement and drag selection across TextBox, TextArea, and picker editor nodes. Added Ctrl/Cmd shortcut detection for select/copy/cut/paste and ensured picker editors receive text input. Selection drawing already existed and continues to use the field's clipped content surface.
+- Verification: Windows MSVC Release `xui_tests` rebuilt; 239 passed, 0 failed. Extended the Color Picker runtime test to copy/cut/paste its active HEX editor value. `git diff --check` passed before docs/plan update; rerun after final edits. No visible GUI drag-selection smoke test was available.
+- Limits: the runtime supports the platform clipboard API; `keyDown(key)` without a `Platform*` can still perform selection and deletion but cannot access the OS clipboard. Right-click text context menus and IME/undo are not included.
+# 2026-11-22 — Highlight Color Picker editor selections
+
+- Changes: Color Picker value editors now draw selected text with a distinct translucent blue background, and pointer-to-caret mapping uses the editor's actual painted text inset. The existing shared editor selection and clipboard path is exercised with a loaded test font and clipboard copy/cut/paste assertions.
+- Verification: Windows Release `xui_tests` reports 239 passed, 0 failed after rebuilding. The test verifies active HEX editor keyboard selection and clipboard round trip; no screenshot or manual drag-selection observation was performed.
+# 2026-11-22 — Add word and document keyboard editing
+
+- Changes: shared TextBox/TextArea/Color Picker editor key handling recognizes Ctrl/Cmd+Left/Right word movement, Ctrl/Cmd+Shift selection extension, Ctrl/Cmd+Backspace/Delete word erasure, and Ctrl/Cmd+Home/End document edges. Home/End continue to address the current line, including TextArea lines. Word deletion handles surrounding spaces and UTF-8 codepoint boundaries.
+- Verification: Windows MSVC Release `xui_tests` rebuilt; 239 passed, 0 failed. Added regression coverage for word selection/copy, double spaces, deleting at document start, word backspace/delete, and Super-modifier navigation.
+- Status: complete for current TextBox/TextArea/Color Picker shared editing path. No visible caret/selection smoke test was run.
+# 2026-11-22 — Add Windows Calculator example
+
+- Changes: added a GLFW/OpenGL `xui_calculator_demo` target, four-column calculator layout and dark styling, calculator state/arithmetic/memory logic, keyboard input handling, a calculator asset parse/layout test, and run instructions. Added optional `Xui::setKeyHandler()` so applications can consume app-specific key events before normal widget routing.
+- Decisions: `.xui` owns keypad structure and `.xss` owns appearance. The example uses the existing backend-neutral facade and copied Roboto asset. Keyboard handling is additive and consumed keys do not reach widget navigation.
+- Verification: Windows Release calculator target builds; `calculator_example_assets_parse_validate_and_layout` passes; full `xui_tests` reports 240 passed, 0 failed. Visible Windows smoke test showed 7 + 3 = 10. `git diff --check` passes.
+- Limits: native Windows title bar and toolbar iconography differ from the reference; visible layout is close but not pixel-identical. Keyboard arithmetic paths compile but were not interactively smoke-tested. Linux/macOS not tested.
+
+# 2026-11-22 — Close P0 schema, docking, paint-scope, and editor gaps
+
+- Audit: schema/runtime mismatches were already partially addressed with source-located warnings and opt-in warnings-as-errors; Grid row tracks are implemented. DockPanel close handler existed for in-app button close, but native tear-off close re-homed the panel without closed state. Paint scope was still mutable runtime state. Text selection/clipboard and word navigation were already present; undo and IME composition were missing, and caret/selection paint still constructs and hashes text prefixes. Layout persistence was absent.
+- Changes: added `DockPanelValue.closed`, a `closed` event alias, and native tear-off close dispatch through the same panel close path. Replaced `m_paintDockPanelScope`/`m_paintDockPanel` with per-call `PaintScope` passed into paint and visibility checks. Added bounded editor undo/redo history, IME compose event routing and inline preedit display. Added `UiRuntime::dumpLayout()`/`loadLayout()` JSON snapshots for panel region/order/floating bounds/closed state. Updated the widget and docking guides.
+- Verification: Windows MSVC Release `xui_tests` initially caught two assertions encoding the former close behavior; updated those expectations. The final full suite passed **240 tests, 0 failed**, including undo/redo, IME compose dispatch, close value state, and both docked/floating layout snapshot restore. `git diff --check` passed (Git emitted only line-ending normalization notices). No visible IME, native close, or layout restore smoke test was performed.
+- Limits: caret-prefix string creation/hashing remains linear in the text length per paint and needs cluster-aware cached caret positions. Layout snapshots assume the same authored panel IDs/host organization and serialize a compact placement model; cross-version schema migration is not provided. Visible/cross-platform verification remains open.
+
+# 2026-11-22 — Audit and improve P1 runtime performance
+
+- Audit: the build-time `StrId -> node index` map already backs public ID lookups, and font handles already cache the family/weight selection key. Hit testing already memoizes visibility and scroll clipping once per query, but has multiple reverse scans and DockPanel-to-host lookup was linear. Glyph runs were re-quadified every paint. TreeView entries, picker formats, and option lists were embedded in every Node. Rounded clip cap fallback was silent.
+- Changes: added a per-panel host index for O(1) `dockHostForPanel`. Added per-node text quad caches keyed by display text, font, raster size, wrap width, DPI, letter spacing, and atlas generation; atlas generation increments on repack/eviction/invalidation. Moved TreeView entries, picker formats, and option lists into optional `NodePayload` sidecars. Added `Painter::Stats::clipShapeCapFallbacks`.
+- Decision: cached quads are relative to the text origin, so scrolling/alignment can move labels without rebuilding geometry. Atlas generation invalidates cached UVs when the atlas is repacked. The hit-test visible/hittable list and complete Node split remain larger follow-up refactors; the current hit visibility memoization and new host map are incremental root-cause reductions.
+- Verification: Windows MSVC Release `xui_tests` rebuilt and the full suite passed **240 tests, 0 failed**, including the rounded-clip test asserting two over-cap pushes are counted. Final `git diff --check` passed; Git emitted only line-ending normalization notices. No before/after paint benchmark or 5k-node memory profile was recorded.
+- Limits/status: requirements 1, 3, and 6 are implemented; 2 and 5 are partial; 4 has quad reuse but no measured speedup or dedicated cache telemetry. The cache avoids per-frame per-glyph atlas lookup and quad reconstruction for unchanged text, but its text-key comparison still scales with string length. Visible presentation impact remains unmeasured.
+
+# 2026-11-22 — Land the runtime slice and gate the documented test count
+
+- Cause: the P0/P1/P2 slices (P3 widgets, keyboard traversal, editor selection/undo/IME, dock layout persistence, accessibility export, `PaintScope`, `StrId` lookups, glyph-quad and font caches, `NodePayload`, schema warnings) existed only in the working tree, so CI had never built them. `plan/plan.md` still described the P3 widgets as uncompiled and recorded four different test totals, and `Painter::Stats::clipShapeCapFallbacks` had no user-visible surface.
+- Changes: committed the slice; added `--check` to `tools/count_tests.py` and a `docs` CI job that fails when `plan/plan.md` drifts from the registered suite; added `UiRuntime::setClipShapeCapFallbacks()` plus a shared FPS-overlay formatter that appends `ClipCaps: N` only when the previous frame exceeded the rounded-clip cap; extended `controlText()` to report the overlay label; corrected the stale roadmap claims and dated the older verification bullets instead of deleting history.
+- Decisions: the FPS overlay keeps its usual width unless clipping actually overflowed, so the diagnostic costs nothing in normal use. `plan/plan.md` keeps a single canonical total; historical verification entries keep their recorded numbers, with wording that identifies them as earlier runs.
+- Verification: `cmake --build --preset dev` rebuilt all 54 targets; the direct suite reports **243 tests, 0 failed**; `python tools/count_tests.py --check` passes after `--update`. `git diff --check` and the changed-line clang-format gate were run before pushing; hosted CI is the confirming run.
+- Limits/status: the new widgets, IME preedit, undo/redo, layout restore, and the ClipCaps indicator are covered headlessly only. No visible interaction, cross-platform, or performance measurement was recorded for this slice.
+# 2026-11-22 — Cache editor caret geometry and close parity gaps
+
+- Audit: item 11 was missing: paint reshaped prefixes for caret/selection and pointer hit-testing reshaped one prefix per UTF-8 boundary. Item 12 was missing (shaping still forces LTR and disables ligatures); item 13 was missing (no per-glyph fallback chain); item 14 was partial (IME preedit/commit existed, but no native caret/candidate placement or focus-loss cleanup); item 15 was partial (Ctrl/Cmd+A, clipboard, undo, and typed/pasted maxLength handling existed, but double/triple-click selection and drag-autoscroll were absent); item 16 was missing (no general filter/validate callback or shared validation state).
+- Changes: `TextLayout` now stores UTF-8 cluster start/end and line metadata plus caret stops, built as part of shaping. TextBox/TextArea paint uses these stops for caret and selection, and pointer hit-testing chooses from the cached stops instead of constructing/shaping every text prefix. Double-click selects a word and triple-click selects the current line. Added runtime focus-loss handling that drops preedit text and a GLFW focus callback to deliver the event. Added a focused text-layout regression case and updated the widget guide and roadmap status.
+- Decisions: ligatures remain disabled and bidi/fallback were not attempted as superficial shaper toggles; correct paragraph ordering, caret affinity, per-face glyph metrics, and atlas ownership need coordinated text-pipeline work. IME cursor/candidate placement remains a Platform/runtime API task and is not claimed complete. TextArea drag-autoscroll and validation hooks remain open.
+- Verification: MSVC `/Zs /W4 /permissive- /WX` syntax checks passed for `text_layout.cpp`, `runtime.cpp`, `xui.cpp`, GLFW platform source, and `test_text.cpp`. The configured Ninja test build could not compile because this host's MSVC `c1xx.dll`/PDB manager reports C1902 (“Program database manager mismatch”) across unrelated translation units; the new regression test was therefore not executed. No visible editor or IME smoke test, Linux/macOS build, or multilingual acceptance run was performed.
+- Status: item 11 implemented for the existing LTR shaping model; items 14–15 improved but remain partial; items 12, 13, and 16 remain open. Unicode/caret stops cover shaped cluster boundaries but do not establish bidi or complex-script editing correctness.
+
+# 2026-11-22 — Add basic RTL shaping, font fallback, and editor validation
+
+- Audit: the earlier entry above records the state before this implementation slice. HarfBuzz was still forced LTR with ligatures disabled, font fallback was absent, and editor validation had no runtime callback. IME already supported preedit/commit and focus-loss cleanup but lacked native caret placement; TextArea selection lacked timer-driven autoscroll.
+- Changes: HarfBuzz now guesses run direction and keeps standard ligature features enabled; glyph clusters retain optional GDEF caret positions. Text layout recognizes common Arabic/Hebrew ranges, shapes RTL script runs, and applies basic RTL paragraph run ordering. `TextSystem::addFallbackFont()` registers ordered explicit fallback faces; shaping and atlas lookup retain the selected face per glyph. Added `.xui filter`/`validate` handlers, `Xui::setInputValidationHandler()`, and `UiRuntime::controlError()` with shared `.error` state; candidate edits, deletions, and undo/redo can be rejected. TextArea selection now continues scrolling on a timer while the pointer remains outside its content bounds. Added an optional platform IME caret-rectangle hook and Windows GLFW composition/candidate placement.
+- Decisions/limits: bidi handling uses script-range heuristics and does not implement full Unicode UAX #9, neutral resolution, isolates/embeddings, or robust mixed-direction caret affinity. Fallback fonts are supplied explicitly; OS font discovery and color emoji remain unsupported. The IME positioning hook is implemented for GLFW/Windows only; other backends may no-op. `filter`/`validate` are synchronous and execute on the UI thread.
+- Verification: MSVC `/Zs /W4 /permissive- /WX` syntax checks passed for the changed parser/schema, text/font/layout, runtime/facade, GLFW platform, and `test_text.cpp`/`test_runtime.cpp` translation units. No tests were executed. The earlier full build was blocked by MSVC C1902 (“Program database manager mismatch”) across unrelated translation units. No visible editor interaction, actual RTL/CJK font render, native IME composition, or Linux/macOS verification is claimed.
+- Status: items 12, 13, and 16 now have initial runtime implementations; item 12 remains partial pending full bidi and multilingual validation. Items 14 and 15 are improved but still partial pending cross-platform IME and visible editor checks. No visual or cross-platform acceptance run was performed.
+
+# 2026-11-22 — Fix RTL caret hit-test iterator ordering
+
+- Cause: `TextLayout::caretStops` is ordered by logical UTF-8 byte offset. RTL paragraph reordering can assign line numbers in descending order as byte offsets increase. `textIndexAtPoint()` incorrectly binary-searched this logical array as if it were ordered by visual line, which could produce an invalid iterator range and trigger the MSVC vector-iterator assertion.
+- Changes: added `TextLayout::visualCaretStops`, sorted by `(line, x, byteOffset)` after shaping. Pointer hit-testing now performs line and x searches only on that visual-order array; logical caret lookup continues using byte-order stops. Added a wrapped RTL layout regression that checks line/x ordering.
+- Verification: MSVC `/Zs /W4 /permissive- /WX` syntax checks passed for `text_layout.cpp`, `runtime.cpp`, and `test_text.cpp`. No executable test or visible demo run has been performed yet.
+- Status: the invalid binary-search precondition is removed; runtime reproduction and regression test execution remain pending.

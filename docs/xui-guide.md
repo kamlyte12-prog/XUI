@@ -214,7 +214,42 @@ component PageTitle(text) {
 }
 ```
 
-`xui::Xui::loadXui(path)` resolves imports and schema-validates the loaded program. The facade's runtime build expands declared components, substitutes literal parameters and handler names, and routes caller children into default or named slots. See the [component guide](components.md) for the complete behavior and limits. The runtime still does not evaluate arbitrary bindings/interpolation or execute `if` / `for`.
+`xui::Xui::loadXui(path)` resolves imports and schema-validates the loaded program. The facade's runtime build expands declared components, substitutes literal parameters and handler names, and routes caller children into default or named slots. See the [component guide](components.md) for the complete behavior and limits.
+
+### Model bindings and UI-thread updates
+
+The retained runtime accepts scalar model values through `Xui::setModelValue(path, value)`. Paths use object members separated by dots; bindings are evaluated initially and again when an overlapping model path changes. Interpolated text supports expressions such as `Text(value: "Hello, {user.name}")`; a single expression in braces preserves its boolean/number value, so it can drive `visible` and other supported dynamic properties. `bind:value` on text editors is two-way: edits publish the new string back to the model.
+
+```xui
+Window {
+  Column {
+    Text(value: "Welcome, {user.name}")
+    Text(value: "No results")[if: !hasItems]
+    TextBox[id: "name", bind: user.name]
+  }
+}
+```
+
+```cpp
+ui.setModelValue("user.name", xui::ModelValue("Ada"));
+ui.setModelValue("hasItems", xui::ModelValue(false));
+ui.beginUpdate();
+ui.setModelValue("user.name", xui::ModelValue("Grace"));
+ui.setModelValue("hasItems", xui::ModelValue(true));
+ui.endUpdate();
+```
+
+`if:` evaluates at build and when its dependencies change; a false condition removes the node's layout footprint until it becomes true again. `for:` expands an array or inclusive numeric range at build time (`for: item in items`, optionally `item, index in items`). Seed a collection before `loadXui()` when the initial repeated nodes must be present. It currently does not reconcile an already-built repeated subtree when the source collection changes; use a provider-backed ListView/Table for live data collections. Expression calls are not evaluated. `beginUpdate()/endUpdate()` coalesce damage and wake the facade once at the outer batch boundary. `Xui::invoke(fn)` posts application work to the UI thread; worker threads should use it for all runtime/model mutations and should be joined before shutdown.
+
+`Xui::localization()` provides locale-keyed strings with fallback plus simple one/other and male/female/neutral forms. `Xui::setLocale()` also changes NumberField and DatePicker display formats. String-table results can be placed into the observable model and used by ordinary bindings. Right-to-left text shaping is supported by the text engine, but automatic RTL mirroring of layout and compound widget geometry remains incomplete.
+
+```cpp
+ui.localization().set("en", "empty", "No items");
+ui.localization().setForms("en", "files", {.one = "{count} file", .other = "{count} files"});
+ui.setLocale("en");
+ui.setModelValue("emptyText", ui.localization().text("empty"));
+ui.setModelValue("fileCountText", ui.localization().text("files", 3));
+```
 
 Component calls may mix positional arguments before named arguments, but not after them. Use `Component::part` in `.xss` to style a marked internal part. The part selector follows the ordinary class cascade; see the [stylesheet selector guide](xss-guide.md#selectors-and-precedence).
 

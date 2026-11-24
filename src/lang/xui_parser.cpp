@@ -560,8 +560,10 @@ namespace xui {
 	}
 
 	bool isEventName(std::string_view n) {
-		static constexpr std::string_view ev[] = { "press", "release", "click", "doubleClick", "change", "submit", "focus", "blur", "filter", "validate",
-										  "hover", "scroll", "drag", "drop", "key", "resize", "close", "closed", "dock", "undock", "tabChange" };
+		static constexpr std::string_view ev[] = {"press", "release", "click",	  "doubleClick", "change", "submit",
+												  "focus", "blur",	  "filter",	  "validate",	 "hover",  "scroll",
+												  "drag",  "drop",	  "key",	  "resize",		 "close",  "closed",
+												  "dock",  "undock",  "tabChange"};
 		for (auto e : ev) if (e == n) return true;
 		return false;
 	}

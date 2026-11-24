@@ -8,6 +8,7 @@
 #include <xui/render/painter.hpp>
 #include <xui/style/xss.hpp>
 #include <xui/text/text_layout.hpp>
+#include <xui/ui/model.hpp>
 #include <string>
 #include <vector>
 #include <chrono>
@@ -15,6 +16,8 @@
 #include <memory>
 #include <variant>
 #include <unordered_map>
+#include <functional>
+#include <utility>
 
 namespace xui {
 
@@ -28,15 +31,14 @@ namespace xui {
 	/// Parse, compile and schema-check a basic single-file UI without repeating host boilerplate.
 	/// Import loading and dynamic expression evaluation remain explicit higher-level steps.
 	bool loadUiAssets(std::string_view xuiSource, std::string_view xssSource, StringInterner& strings,
-		UiAssetBundle& out, std::string& error,
-		std::string_view xuiName = "<memory>.xui", std::string_view xssName = "<memory>.xss",
-		XuiValidationOptions validation = {});
+					  UiAssetBundle& out, std::string& error, std::string_view xuiName = "<memory>.xui",
+					  std::string_view xssName = "<memory>.xss", XuiValidationOptions validation = {});
 
 	/// Function called when an authored widget event is activated.
 	using UiEventFn = void (*)(void* context, std::string_view handlerName);
 	/// Return true to accept the proposed text; return false to reject it and optionally provide an error.
 	using UiInputValidationFn = bool (*)(void* context, std::string_view handlerName, std::string_view widgetId,
-		std::string_view proposedText, std::string& errorMessage);
+										 std::string_view proposedText, std::string& errorMessage);
 
 	enum class AnimationMode : u8 { Once, Loop };
 
@@ -78,18 +80,32 @@ namespace xui {
 	/// shapes/text into Painter. The parser and stylesheet compiler remain usable independently.
 	class UiRuntime {
 	public:
+		/// Non-owning, virtualized row source for ListView and Table. Callbacks run on the UI thread;
+		/// `text` must assign one row label and `cell` one Table cell without retaining `out`.
+		struct ListItemProvider {
+			void* context = nullptr;
+			u32 (*rowCount)(void* context) = nullptr;
+			bool (*text)(void* context, u32 row, std::string& out) = nullptr;
+			bool (*cell)(void* context, u32 row, u32 column, std::string& out) = nullptr;
+		};
 		UiRuntime() = default;
 		UiRuntime(const UiRuntime&) = delete;
 		UiRuntime& operator=(const UiRuntime&) = delete;
 
 		/// Build a runtime tree from a document with one Window root.
-		/// Supports literal Text/Button content and `press: handlerName`; dynamic expressions, loops,
-		/// component expansion, and property-filter selectors are not evaluated by this first runtime.
+		/// Supports literal and model-bound Text/Button content, `if`/`for` control flow, and `press: handlerName`.
+		/// For loops expand the current model collection during build; use ListItemProvider for live large collections.
 		bool build(const Document& document, StyleSheet& styles, StringInterner& strings,
 			TextSystem& text, FontHandle font, std::string& error);
 		/// Build from an import-loaded program after expanding its declared components.
 		bool build(const Program& program, StyleSheet& styles, StringInterner& strings,
 			TextSystem& text, FontHandle font, std::string& error);
+		/// Set a dotted model path (for example `user.name`) and reevaluate dependent bindings.
+		bool setModelValue(std::string_view path, ModelValue value);
+		ModelValue modelValue(std::string_view path) const;
+		/// Provide rows without serializing a large data set into a pipe-separated property.
+		/// Register after build; visible rows/cells are requested lazily during paint and interaction.
+		bool setListItemProvider(std::string_view id, ListItemProvider provider);
 		/// Attach a font after a renderer-backed glyph atlas is ready.
 		bool setFont(FontHandle font, std::string& error);
 		/// Register a loaded font face for the `.xss` font-family and font-weight properties.
@@ -97,6 +113,8 @@ namespace xui {
 		/// Activate a named .xss palette theme. Existing controls keep their matched selectors and
 		/// resolve palette slots against this theme on the next draw.
 		bool setTheme(std::string_view name);
+		/// Set locale-sensitive formatting for NumberField and DatePicker display text.
+		void setLocale(std::string_view locale);
 		/// Disable motion effects when requested by the application or operating system.
 		void setReducedMotion(bool reduced);
 		/// Export the authored widget tree and inferred accessibility semantics as JSON.
@@ -173,7 +191,10 @@ namespace xui {
 		/// Set the callback invoked with authored handler names when runtime events fire.
 		void setEventHandler(UiEventFn fn, void* context) { m_eventFn = fn; m_eventContext = context; }
 		/// Set the synchronous filter/validator callback used by editable text/value controls.
-		void setInputValidationHandler(UiInputValidationFn fn, void* context) { m_inputValidationFn = fn; m_inputValidationContext = context; }
+		void setInputValidationHandler(UiInputValidationFn fn, void* context) {
+			m_inputValidationFn = fn;
+			m_inputValidationContext = context;
+		}
 		/// Wire the platform so TitleBar caption buttons and window dragging act on the window.
 		/// Without it a TitleBar still renders, but window controls degrade gracefully.
 		void setPlatformWindow(Platform* platform, WindowHandle window) { m_platform = platform; m_windowHandle = window; }
@@ -200,6 +221,12 @@ namespace xui {
 		std::string_view controlText(std::string_view id) const;
 		/// Current validation message for a control, or empty when it has no validation error.
 		std::string_view controlError(std::string_view id) const;
+		/// Coalesce invalidation while a group of application changes is being applied.
+		void beginUpdate() {
+			++m_updateDepth;
+		}
+		/// End a matching batch; true at the outermost level when accumulated damage exists.
+		bool endUpdate();
 		/// Read a stateful value (bool, number, string, color, selection, scroll offset, checklist, or dock state).
 		std::optional<UiValue> value(std::string_view id) const;
 		std::vector<std::string> dockPanelIds() const;
@@ -250,6 +277,11 @@ namespace xui {
 			Easing easing;
 		};
 		struct Node {
+			struct ModelBinding {
+				StrId property;
+				u32 expression = kNoExpr;
+				XPropRole role = XPropRole::Value;
+			};
 			struct TreeEntry {
 				std::string path, label;
 				i32 parent = -1;
@@ -258,6 +290,13 @@ namespace xui {
 			};
 			NodeId layout;
 			StrId type, id, pressHandler, filterHandler, validateHandler;
+			std::vector<ModelBinding> modelBindings;
+			std::shared_ptr<const ModelValue::Object> modelScope;
+			std::string modelBindPath;
+			u32 ifExpression = kNoExpr;
+			bool modelVisible = true, modelIfVisible = true, modelPropertyVisible = true;
+			bool ifLayoutInitialized = false;
+			LayoutStyle authoredIfLayout;
 			u32 parentIndex = 0xFFFFFFFFu;
 			std::vector<StrId> classes;
 			std::string text, placeholder, tooltipText, tabTitle, dockZoneName, dockTargetId, dockIcon;
@@ -352,6 +391,7 @@ namespace xui {
 			Edges xuiPadding;
 			f32 splitRatio = 0.5f, value = 0.5f, minValue = 0.f, maxValue = 1.f, rangeLow = 0.f, rangeHigh = 1.f;
 			f32 listScrollY = 0.f;
+			i32 listSelectedRow = -1;
 			i32 tableSelectedRow = -1, tableResizeColumn = -1;
 			f32 tableScrollY = 0.f, tableResizeStartX = 0.f, tableResizeStartWidth = 0.f;
 			u32 maxLength = 0, selectedTab = 0, tooltipShowDelayMs = 500, tooltipHideDelayMs = 120, tabSize = 4;
@@ -418,7 +458,16 @@ namespace xui {
 		static Size measureLeaf(void* context, NodeId node, Constraint constraint);
 		Size measure(NodeId node, Constraint constraint) const;
 		void visibleTreeEntries(const Node& tree, std::vector<u32>& rows) const;
-		bool buildNode(const Document& document, u32 index, u32 parentIndex, std::string& error);
+		bool buildNode(const Document& document, u32 index, u32 parentIndex, std::string& error,
+					   std::shared_ptr<const ModelValue::Object> modelScope = {}, bool expandFor = true);
+		ModelValue evaluateModelExpression(const Document& document, u32 expression,
+										   const ModelValue::Object* scope = nullptr) const;
+		void reevaluateModelNode(u32 index);
+		void registerModelDependencies(u32 nodeIndex, const Document& document);
+		void publishModelValue(const Node& node, std::string_view text);
+		u32 listItemCount(const Node& node) const;
+		bool listItemText(const Node& node, u32 row, std::string& out) const;
+		bool tableCellText(const Node& node, u32 row, u32 column, std::string& out) const;
 		void applyLayoutStyle(Node& node);
 		void updateSlider(Node& node, Vec2 point);
 		bool validateInput(Node& field, std::string_view proposedText);
@@ -506,6 +555,10 @@ namespace xui {
 		std::vector<Node> m_nodes;
 		std::vector<NodePayload> m_nodePayloads;
 		std::unordered_map<StrId, u32> m_nodeById;
+		Document m_modelDocument;
+		ModelValue::Object m_model;
+		std::unordered_map<std::string, std::vector<u32>> m_bindingNodes;
+		std::unordered_map<StrId, ListItemProvider> m_listItemProviders;
 		std::vector<u32> m_treeRowsScratch;
 		std::vector<u32> m_interactiveNodes;
 		std::vector<u32> m_splitNodes;
@@ -523,6 +576,10 @@ namespace xui {
 		std::chrono::steady_clock::time_point m_titleLastDown{};
 		std::vector<u32> m_dockOrderScratch;
 		std::vector<u32> m_paintOrderScratch;
+		std::vector<u32> m_basePaintOrderScratch, m_paintParentScratch, m_paintFirstChildScratch,
+			m_paintLastChildScratch, m_paintNextSiblingScratch;
+		std::vector<i32> m_paintStackZScratch;
+		std::vector<std::pair<i32, u32>> m_paintReadyScratch;
 		mutable std::vector<u32> m_hitVisibilityStamp;
 		mutable std::vector<u32> m_hitScrollStamp;
 		mutable std::vector<u8> m_hitVisibilityValue;
@@ -542,6 +599,7 @@ namespace xui {
 		struct FontFace { StrId family; u16 weight = 400; FontHandle font; };
 		std::vector<FontFace> m_fontFaces;
 		std::string m_windowTitle = "Xui";
+		std::string m_locale;
 		u32 m_windowWidth = 720, m_windowHeight = 440;
 		u32 m_authoredNodeCount = 0;
 		UiEventFn m_eventFn = nullptr;
@@ -585,6 +643,8 @@ namespace xui {
 		Vec2 m_pointerPosition{};
 		Rect m_damage{};
 		bool m_hasDamage = false;
+		u32 m_updateDepth = 0;
+		bool m_updateChanged = false;
 		bool m_imageLayoutInvalidated = false;
 		f32 m_lastLayoutWidth = -1.f, m_lastLayoutHeight = -1.f;
 		u32 m_tooltipOwner = 0xFFFFFFFFu;

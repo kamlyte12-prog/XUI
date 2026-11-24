@@ -512,7 +512,7 @@ A single-select dropdown. Supply pipe-separated static choices through `options`
 Dropdown[id: "density", options: "Compact|Comfortable|Spacious", value: "Comfortable", change: onDensity][class: "dropdown"]
 ```
 
-Read the selected string with `ui.runtime().value("density")` (or the older `controlText("density")`) in a facade event callback. The list is static and pipe characters cannot be part of an option value. There is no data binding or scrolling for long option lists yet.
+Read the selected string with `ui.runtime().value("density")` (or the older `controlText("density")`) in a facade event callback. The list is static and pipe characters cannot be part of an option value. There is no provider-backed virtualization for Dropdown options.
 
 ```xss
 Dropdown.dropdown { resting: { size: 240px 38px, pad: 8px, bg: #172033, fg: #f5f7ff, border: 1px solid #40506b, radius: 6px } hover: { bg: #202d43 } focus: { border: 2px solid #70a7ff } open: { border: 2px solid #70a7ff } disabled: { opacity: 0.45 } }
@@ -664,7 +664,21 @@ Limitations: touch/gesture input, scrollbar corner styling, wheel-axis remapping
 
 ## Runtime support and unsupported schema entries
 
-`ListView`, `Table`, `RangeSlider`, `ComboBox`, and `IconButton` have runtime implementations. `ListView` uses pipe-separated `items`, optional `selected`, wheel scrolling, keyboard arrows, and virtual row painting. `Table` uses pipe-separated column names and rows whose tab-separated cells follow the column order; it paints a header, virtualizes visible rows, supports row selection by pointer/arrow keys, and allows column-divider dragging. Its `selected` property/value is a zero-based row index (`u32`); `UINT32_MAX` clears selection. `RangeSlider` exposes `{low, high}` as a `Vec2` value; `ComboBox` combines editable text input with the existing option popup; and `IconButton` accepts one of the built-in icon names. `Popover`, `Modal`, `ContextMenu`, standalone `Tooltip`, `Canvas`, `HUD`, `Crosshair`, `RadialMenu`, `HealthBar`, and `DamageNumber` remain unsupported and produce validation warnings. (`DockSpace` aliases runtime `DockHost`; `Toolbar`, `StatusBar`, and `MenuBar` are horizontal containers; `Menu`/`MenuItem` are the runtime [popup menu](#menu-and-menuitem).) `MenuBar` remains a plain client-area row of ordinary controls; the custom draggable top menu is the [`TitleBar`](#titlebar) widget together with `Window[platformTopMenu: false]`.
+`ListView`, `Table`, `RangeSlider`, `ComboBox`, and `IconButton` have runtime implementations. `ListView` accepts pipe-separated `items` or a callback-backed `ListItemProvider`, supports optional initial `selected`, wheel scrolling, keyboard arrows, and virtual row painting. `Table` accepts pipe-separated rows or a provider, paints a header, virtualizes visible rows, supports row selection by pointer/arrow keys, and allows column-divider dragging. A provider supplies a row count and returns a row label (ListView) or cell text (Table) on demand; it is registered after build with `ui.runtime().setListItemProvider(id, provider)`. The callbacks execute on the UI thread, and the app owns their context and backing data. Its `selected` property/value is a zero-based row index (`u32`); `UINT32_MAX` clears selection. `RangeSlider` exposes `{low, high}` as a `Vec2` value; `ComboBox` combines editable text input with the existing option popup; and `IconButton` accepts one of the built-in icon names. `Popover`, `Modal`, `ContextMenu`, standalone `Tooltip`, `Canvas`, `HUD`, `Crosshair`, `RadialMenu`, `HealthBar`, and `DamageNumber` remain unsupported and produce validation warnings. (`DockSpace` aliases runtime `DockHost`; `Toolbar`, `StatusBar`, and `MenuBar` are horizontal containers; `Menu`/`MenuItem` are the runtime [popup menu](#menu-and-menuitem).) `MenuBar` remains a plain client-area row of ordinary controls; the custom draggable top menu is the [`TitleBar`](#titlebar) widget together with `Window[platformTopMenu: false]`.
+
+```cpp
+struct People { std::vector<std::string> names; } people;
+auto countPeople = [](void* context) -> xui::u32 {
+  return static_cast<People*>(context)->names.size();
+};
+auto personText = [](void* context, xui::u32 row, std::string& out) -> bool {
+  auto& names = static_cast<People*>(context)->names;
+  if (row >= names.size()) return false;
+  out = names[row];
+  return true;
+};
+ui.runtime().setListItemProvider("people", {&people, countPeople, personText, nullptr});
+```
 
 ```xui
 ListView[id: "people", items: "Ada|Grace|Katherine", selected: "Grace"]

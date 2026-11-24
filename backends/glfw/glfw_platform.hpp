@@ -25,6 +25,7 @@ public:
 	bool screenToClient(xui::WindowHandle, xui::Vec2, xui::Vec2&) const override;
 	bool pumpEvents(xui::Event&) override;
 	void waitEvents(xui::f64 timeoutSec) override;
+	void wakeEventLoop() override;
 	xui::f64 time() const override;
 	void* nativeWindowHandle(xui::WindowHandle) override;
 	void* nativeGlContext(xui::WindowHandle) override;

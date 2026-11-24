@@ -1,6 +1,6 @@
 # Windows Calculator demo
 
-A runnable Xui calculator with a dark Windows 11 inspired surface. The grid and visual states are authored in [calculator.xui](calculator.xui) and [calculator.xss](calculator.xss); [calculator.cpp](calculator.cpp) implements arithmetic, memory, and keyboard input through the Xui event APIs.
+A runnable Xui calculator with a dark Windows 11 inspired surface. The grid, custom title bar, mode drawer, history/memory panel, and visual states are authored in [calculator.xui](calculator.xui) and [calculator.xss](calculator.xss); the demo SVG icons live in [assets](assets/). [calculator.cpp](calculator.cpp) implements arithmetic, memory, history, and keyboard input through the Xui event APIs. On Windows the custom title bar replaces the native title bar; platforms that cannot host undecorated windows retain native chrome and render the authored bar as documented by the framework.
 
 ## Build and run
 
@@ -11,7 +11,7 @@ cmake -S . -B build -DXUI_BUILD_EXAMPLES=ON -DXUI_BUILD_GLFW_EXAMPLE=ON
 cmake --build build --target xui_calculator_demo --config Release
 ```
 
-Run `build/examples/calculator/Release/xui_calculator_demo.exe` for a Visual Studio multi-config build, or `build/examples/calculator/xui_calculator_demo.exe` for a single-config generator. Keep the executable's working directory at its output folder; CMake copies the UI and Roboto font next to it.
+Run `build/examples/calculator/Release/xui_calculator_demo.exe` for a Visual Studio multi-config build, or `build/examples/calculator/xui_calculator_demo.exe` for a single-config generator. The demo resolves its UI, font, and SVG files beside the executable, regardless of the launch working directory.
 
 ## Use
 

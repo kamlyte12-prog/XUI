@@ -102,7 +102,7 @@ cmake --build build/glfw --target xui_glfw_demo
 
 To build only the adapters for another application, set `-DXUI_BUILD_GLFW_BACKEND=ON -DXUI_BUILD_EXAMPLES=OFF`. The existing `XUI_BUILD_GLFW_EXAMPLE` option still builds the adapters when examples are enabled, preserving the prior default build behavior.
 
-The executable loads the copied showcase pair beside itself, independent of the working directory. Set `XUI_DEMO_FONT` to a TrueType font path if the demo's font search paths do not find one. A screenshot and the full example assets are linked from the [documentation index](README.md#examples-and-implementation-scope).
+The executable loads the copied showcase pair beside itself, independent of the working directory. Its Motion & Style page demonstrates animated outline/shadow/type transitions, z-index ordering, overflow clipping, and image tint alongside gradients, glow, and keyframes. Set `XUI_DEMO_FONT` to a TrueType font path if the demo's font search paths do not find one. A screenshot and the full example assets are linked from the [documentation index](README.md#examples-and-implementation-scope).
 
 ## Minimal application
 

@@ -218,6 +218,9 @@ bool GlfwPlatform::pumpEvents(Event& e) {
 	e = m_events.front(); m_events.pop_front(); return true;
 }
 void GlfwPlatform::waitEvents(f64 timeout) { if (timeout > 0) glfwWaitEventsTimeout(timeout); else glfwWaitEvents(); }
+void GlfwPlatform::wakeEventLoop() {
+	glfwPostEmptyEvent();
+}
 f64 GlfwPlatform::time() const { return glfwGetTime(); }
 void* GlfwPlatform::nativeWindowHandle(WindowHandle h) { if (auto* w = find(h)) return w->native; return nullptr; }
 void* GlfwPlatform::nativeGlContext(WindowHandle) { return glfwGetCurrentContext(); }
@@ -360,12 +363,14 @@ void GlfwPlatform::setResizeInset(WindowHandle h, f32 pixels) {
 void GlfwPlatform::setImeCursorRect(WindowHandle h, Rect rect) {
 #ifdef _WIN32
 	Window* window = find(h);
-	if (!window || !window->native || rect.empty()) return;
+	if (!window || !window->native || rect.empty())
+		return;
 	const f32 scale = dpiScale(h);
 	HIMC context = ImmGetContext(glfwGetWin32Window(window->native));
-	if (!context) return;
+	if (!context)
+		return;
 	const POINT point{static_cast<LONG>(std::lround(rect.x * scale)),
-		static_cast<LONG>(std::lround(rect.bottom() * scale))};
+					  static_cast<LONG>(std::lround(rect.bottom() * scale))};
 	COMPOSITIONFORM composition{};
 	composition.dwStyle = CFS_POINT;
 	composition.ptCurrentPos = point;
@@ -377,7 +382,8 @@ void GlfwPlatform::setImeCursorRect(WindowHandle h, Rect rect) {
 	ImmSetCandidateWindow(context, &candidate);
 	ImmReleaseContext(glfwGetWin32Window(window->native), context);
 #else
-	(void)h; (void)rect;
+	(void)h;
+	(void)rect;
 #endif
 }
 

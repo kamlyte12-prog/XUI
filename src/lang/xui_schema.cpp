@@ -16,10 +16,45 @@ namespace xui {
 		std::sort(v.begin(), v.end()); return v;
 	}
 	const std::vector<std::string_view>& XuiSchema::genericProps() {
-		static const std::vector<std::string_view> g = { "id", "class", "key", "slot", "part", "grow", "shrink", "gridColumn", "gridRow", "columnSpan", "rowSpan", "visible", "disabled", "tooltip",
-			"tooltipShowDelay", "tooltipHideDelay", "tooltipTrigger", "tooltipHideOnClick", "tooltipDisabled", "tooltipFollowCursor",
-			"align", "justify", "position", "left", "top", "right", "bottom", "pad", "margin", "size", "minSize", "maxSize", "width", "height",
-			"minWidth", "maxWidth", "minHeight", "maxHeight", "opacity" };
+		static const std::vector<std::string_view> g = {"id",
+														"class",
+														"key",
+														"slot",
+														"part",
+														"grow",
+														"shrink",
+														"gridColumn",
+														"gridRow",
+														"columnSpan",
+														"rowSpan",
+														"visible",
+														"disabled",
+														"tooltip",
+														"tooltipShowDelay",
+														"tooltipHideDelay",
+														"tooltipTrigger",
+														"tooltipHideOnClick",
+														"tooltipDisabled",
+														"tooltipFollowCursor",
+														"align",
+														"justify",
+														"position",
+														"left",
+														"top",
+														"right",
+														"bottom",
+														"pad",
+														"margin",
+														"size",
+														"minSize",
+														"maxSize",
+														"width",
+														"height",
+														"minWidth",
+														"maxWidth",
+														"minHeight",
+														"maxHeight",
+														"opacity"};
 		return g;
 	}
 
@@ -54,14 +89,18 @@ namespace xui {
 		W("CheckBox", { "label" }, { "checked" }); W("CheckList", {}, { "gap" }); W("CheckItem", { "label" }, { "checked" });
 		W("RadioGroup", {}, { "value", "options" });
 		W("Switch", {}, { "checked", "label" });
-		W("TextBox", {}, { "placeholder", "value", "maxLength", "password", "readOnly", "filter", "validate" });
-		W("TextArea", {}, { "placeholder", "value", "maxLength", "readOnly", "rows", "tabSize", "filter", "validate" });
-		W("NumberField", {}, { "value", "min", "max", "step", "precision", "unit", "label", "readOnly", "filter", "validate" });
+		W("TextBox", {}, {"placeholder", "value", "maxLength", "password", "readOnly", "filter", "validate"});
+		W("TextArea", {}, {"placeholder", "value", "maxLength", "readOnly", "rows", "tabSize", "filter", "validate"});
+		W("NumberField", {},
+		  {"value", "min", "max", "step", "precision", "unit", "label", "readOnly", "filter", "validate"});
 		W("Slider", {}, {"value", "min", "max", "step"}, {"step"});
 		W("RangeSlider", {}, {"low", "high", "min", "max", "step"});
 		W("Dropdown", {}, {"value", "options", "placeholder"}, {"placeholder"});
 		W("ComboBox", {}, {"value", "options", "placeholder"}, {"placeholder"});
-		W("SearchField", {}, { "placeholder", "value", "maxLength", "readOnly", "filter", "validate" });   W("ColorPicker", {}, { "value", "alpha", "format", "formats", "precision", "popupSize", "showAlpha", "showInputs", "showFormatSwitcher", "showHue", "showSaturationValue", "filter", "validate" });
+		W("SearchField", {}, {"placeholder", "value", "maxLength", "readOnly", "filter", "validate"});
+		W("ColorPicker", {},
+		  {"value", "alpha", "format", "formats", "precision", "popupSize", "showAlpha", "showInputs",
+		   "showFormatSwitcher", "showHue", "showSaturationValue", "filter", "validate"});
 		W("DatePicker", {}, { "value" });       W("KeybindField", {}, { "value", "placeholder" });
 		W("Stepper", {}, { "value", "min", "max", "step", "precision", "unit" });  W("SegmentedControl", {}, { "options", "value" });
 		W("Rating", {}, { "value", "max" });    W("Breadcrumb", {}, { "options", "value" });
@@ -153,8 +192,7 @@ namespace xui {
 						if (pos >= ctor.size()) {
 							if (!tooMany) dl.error(a.off, a.len, std::string(type) + " takes " + std::to_string(ctor.size()) + " positional argument(s)", "pass extra values by name, e.g. Name(prop: value)");
 							tooMany = true;
-						}
-						else {
+						} else {
 							const std::string_view name = ctor[pos++];
 							mark(name, a.off, a.len);
 							warnIfUnimplemented(name, a.off, a.len);

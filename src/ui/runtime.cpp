@@ -1,4 +1,5 @@
 #include <xui/ui/runtime.hpp>
+#include <xui/ui/localization.hpp>
 #include <algorithm>
 #include <filesystem>
 #include <array>
@@ -6,6 +7,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <initializer_list>
 #include <regex>
 #include <sstream>
 #include <unordered_set>
@@ -25,6 +27,21 @@ namespace xui {
 		constexpr auto kFpsRefreshInterval = std::chrono::milliseconds(250);
 		constexpr auto kCaretBlinkInterval = std::chrono::milliseconds(530);
 		constexpr auto kAnimationFrameInterval = std::chrono::milliseconds(16);
+
+		bool clipsOverflow(const PropTable& style, const StringInterner& strings) {
+			if (!style.has(PropId::Overflow))
+				return false;
+			const StyleValue& overflow = style.get(PropId::Overflow);
+			for (u8 i = 0; i < overflow.count; ++i) {
+				const Atom& atom = overflow.atoms[i];
+				if (atom.kind != AtomKind::Ident)
+					continue;
+				const std::string_view value = strings.view(atom.str());
+				if (value == "hidden" || value == "clip" || value == "scroll" || value == "auto")
+					return true;
+			}
+			return false;
+		}
 
 		/// Builds the FpsCounter overlay label. Clip-cap fallbacks are appended only when the last
 		/// frame exceeded the rounded-clip cap, so the common label keeps its usual width.
@@ -153,6 +170,36 @@ namespace xui {
 			if (expression >= document.exprs.size()) return {};
 			const XExpr& e = document.exprs[expression];
 			if (e.kind == XExprKind::String || e.kind == XExprKind::Name) return strings.view(e.name);
+			return {};
+		}
+		std::string modelPathFromExpression(const Document& document, const StringInterner& strings, u32 expression) {
+			if (expression >= document.exprs.size())
+				return {};
+			const XExpr& value = document.exprs[expression];
+			if (value.kind == XExprKind::Name)
+				return std::string(strings.view(value.name));
+			if (value.kind == XExprKind::Member) {
+				std::string path = modelPathFromExpression(document, strings, value.a);
+				if (!path.empty()) {
+					path.push_back('.');
+					path.append(strings.view(value.name));
+				}
+				return path;
+			}
+			if (value.kind == XExprKind::Index && value.a < document.exprs.size()) {
+				std::string path = modelPathFromExpression(document, strings, value.a);
+				if (value.b >= document.exprs.size())
+					return {};
+				const XExpr& subscript = document.exprs[value.b];
+				if (subscript.kind == XExprKind::String)
+					path += "." + std::string(strings.view(subscript.name));
+				else if (subscript.kind == XExprKind::Number && subscript.num >= 0.f &&
+						 std::floor(subscript.num) == subscript.num)
+					path += "." + std::to_string(static_cast<u32>(subscript.num));
+				else
+					return {};
+				return path;
+			}
 			return {};
 		}
 
@@ -412,7 +459,12 @@ namespace xui {
 		}
 	} // namespace
 
-	std::string formatNumberText(f32 value, u32 precision) {
+	std::string formatNumberText(f32 value, u32 precision, std::string_view locale = {}) {
+		if (!locale.empty()) {
+			Localization formatting;
+			formatting.setLocale(std::string(locale));
+			return formatting.number(value, precision);
+		}
 		char text[64];
 		if (precision) std::snprintf(text, sizeof(text), "%.*f", static_cast<int>(std::min<u32>(precision, 6)), double(value));
 		else std::snprintf(text, sizeof(text), "%.6g", double(value));
@@ -445,7 +497,8 @@ namespace xui {
 		std::size_t visual = 0, raw = 0;
 		while (raw < text.size() && visual < visualOffset) {
 			const std::size_t count = text[raw] == ' ' ? 2u : text[raw] == '\t' ? 3u : 1u;
-			if (visual + count > visualOffset) break;
+			if (visual + count > visualOffset)
+				break;
 			visual += count;
 			++raw;
 		}
@@ -488,7 +541,12 @@ namespace xui {
 		}
 	}
 
-	std::string formatDateText(i32 year, u32 month, u32 day) {
+	std::string formatDateText(i32 year, u32 month, u32 day, std::string_view locale = {}) {
+		if (!locale.empty()) {
+			Localization formatting;
+			formatting.setLocale(std::string(locale));
+			return formatting.date(year, month, day);
+		}
 		char text[32];
 		std::snprintf(text, sizeof(text), "%04d-%02u-%02u", year, month, day);
 		return text;
@@ -593,6 +651,8 @@ namespace xui {
 		m_strings = &strings;
 		m_text = &text;
 		m_font = font;
+		m_modelDocument = document;
+		m_bindingNodes.clear();
 		MatchInput tooltipMatch; tooltipMatch.type = strings.intern("Tooltip");
 		m_tooltipStyleSet = styles.match(tooltipMatch);
 
@@ -620,7 +680,7 @@ namespace xui {
 		m_nodeById.clear();
 		m_nodePayloads.clear();
 		m_textQuadCache.clear();
-		if (!buildNode(document, document.roots.front(), 0xFFFFFFFFu, error)) {
+		if (!buildNode(m_modelDocument, m_modelDocument.roots.front(), 0xFFFFFFFFu, error)) {
 			m_nodes.clear();
 			m_root = NodeId{};
 			return false;
@@ -844,6 +904,24 @@ namespace xui {
 		return true;
 	}
 
+	void UiRuntime::setLocale(std::string_view locale) {
+		if (m_locale == locale)
+			return;
+		m_locale.assign(locale);
+		for (Node& node : m_nodes) {
+			if (node.numberField)
+				node.text = formatNumberText(node.value, node.numberPrecision, m_locale) +
+							(node.unit.empty() ? std::string{} : node.unit);
+			else if (node.datePicker)
+				node.text = formatDateText(node.dateYear, node.dateMonth, node.dateDay, m_locale);
+			else
+				continue;
+			node.caret = node.selectionAnchor = node.text.size();
+			m_layout.markContentChanged(node.layout);
+			addDamage(m_layout.absRect(node.layout));
+		}
+	}
+
 	void UiRuntime::setReducedMotion(bool reduced) {
 		if (m_reducedMotion == reduced)
 			return;
@@ -863,13 +941,442 @@ namespace xui {
 		addDamage({0, 0, m_lastLayoutWidth, m_lastLayoutHeight});
 	}
 
-	bool UiRuntime::buildNode(const Document& document, u32 index, u32 parentIndex, std::string& error) {
+	ModelValue UiRuntime::evaluateModelExpression(const Document& document, u32 expression,
+												  const ModelValue::Object* scope) const {
+		if (expression >= document.exprs.size())
+			return {};
+		const XExpr& e = document.exprs[expression];
+		auto number = [](const ModelValue& value) -> f64 {
+			if (const auto* v = std::get_if<f64>(&value.data))
+				return *v;
+			if (const auto* v = std::get_if<bool>(&value.data))
+				return *v ? 1.0 : 0.0;
+			if (const auto* v = std::get_if<std::string>(&value.data)) {
+				char* end = nullptr;
+				const double parsed = std::strtod(v->c_str(), &end);
+				return end && end != v->c_str() && *end == '\0' ? parsed : 0.0;
+			}
+			return 0.0;
+		};
+		auto lookupPath = [&](std::string path) -> ModelValue {
+			if (path.empty())
+				return {};
+			ModelValue current;
+			std::size_t offset = 0;
+			const std::size_t dot = path.find('.');
+			const std::string first = path.substr(0, dot);
+			if (scope) {
+				if (auto scopeIt = scope->find(first); scopeIt != scope->end())
+					current = scopeIt->second;
+				else if (auto modelIt = m_model.find(first); modelIt != m_model.end())
+					current = modelIt->second;
+			} else if (auto rootIt = m_model.find(first); rootIt != m_model.end())
+				current = rootIt->second;
+			offset = dot == std::string::npos ? path.size() : dot + 1;
+			while (offset < path.size()) {
+				const std::size_t next = path.find('.', offset);
+				const std::string part =
+					path.substr(offset, next == std::string::npos ? path.size() - offset : next - offset);
+				if (const auto* objectValues = std::get_if<ModelValue::Object>(&current.data)) {
+					auto memberIt = objectValues->find(part);
+					current = memberIt == objectValues->end() ? ModelValue{} : memberIt->second;
+				} else if (const auto* arrayValues = std::get_if<ModelValue::Array>(&current.data)) {
+					char* end = nullptr;
+					const unsigned long index = std::strtoul(part.c_str(), &end, 10);
+					current = end && *end == '\0' && index < arrayValues->size() ? (*arrayValues)[index] : ModelValue{};
+				} else
+					return {};
+				if (next == std::string::npos)
+					break;
+				offset = next + 1;
+			}
+			return current;
+		};
+		switch (e.kind) {
+		case XExprKind::Bool:
+			return ModelValue(e.bval);
+		case XExprKind::Number:
+			return ModelValue(e.num);
+		case XExprKind::String:
+			return ModelValue(std::string(m_strings->view(e.name)));
+		case XExprKind::Color:
+			return ModelValue(Color::fromRGBA8(e.color));
+		case XExprKind::Size:
+			return ModelValue(std::to_string(e.num) + "x" + std::to_string(e.num2));
+		case XExprKind::Name:
+			return lookupPath(std::string(m_strings->view(e.name)));
+		case XExprKind::Member:
+			return lookupPath(modelPathFromExpression(document, *m_strings, expression));
+		case XExprKind::Index: {
+			const ModelValue container = evaluateModelExpression(document, e.a, scope);
+			const ModelValue subscript = evaluateModelExpression(document, e.b, scope);
+			if (const auto* objectValues = std::get_if<ModelValue::Object>(&container.data)) {
+				auto memberIt = objectValues->find(subscript.toString());
+				return memberIt == objectValues->end() ? ModelValue{} : memberIt->second;
+			}
+			if (const auto* array = std::get_if<ModelValue::Array>(&container.data)) {
+				const f64 raw = number(subscript);
+				return raw >= 0 && std::floor(raw) == raw && raw < array->size()
+						   ? (*array)[static_cast<std::size_t>(raw)]
+						   : ModelValue{};
+			}
+			return {};
+		}
+		case XExprKind::Interp: {
+			if (e.argCount == 1 && e.argFirst < document.parts.size() && document.parts[e.argFirst].expr != kNoExpr)
+				return evaluateModelExpression(document, document.parts[e.argFirst].expr, scope);
+			std::string output;
+			for (u32 i = 0; i < e.argCount && e.argFirst + i < document.parts.size(); ++i) {
+				const XInterpPart& part = document.parts[e.argFirst + i];
+				if (part.expr == kNoExpr)
+					output.append(m_strings->view(part.lit));
+				else
+					output += evaluateModelExpression(document, part.expr, scope).toString();
+			}
+			return ModelValue(std::move(output));
+		}
+		case XExprKind::Unary: {
+			const ModelValue value = evaluateModelExpression(document, e.a, scope);
+			return e.op == XOp::Not ? ModelValue(!value.truthy()) : ModelValue(-number(value));
+		}
+		case XExprKind::Binary: {
+			const ModelValue lhs = evaluateModelExpression(document, e.a, scope);
+			if (e.op == XOp::And && !lhs.truthy())
+				return ModelValue(false);
+			if (e.op == XOp::Or && lhs.truthy())
+				return ModelValue(true);
+			const ModelValue rhs = evaluateModelExpression(document, e.b, scope);
+			const f64 a = number(lhs), b = number(rhs);
+			if (e.op == XOp::Eq || e.op == XOp::Ne) {
+				bool equal = false;
+				if (const auto* leftText = std::get_if<std::string>(&lhs.data)) {
+					if (const auto* rightText = std::get_if<std::string>(&rhs.data))
+						equal = *leftText == *rightText;
+				} else if (const auto* leftBool = std::get_if<bool>(&lhs.data)) {
+					if (const auto* rightBool = std::get_if<bool>(&rhs.data))
+						equal = *leftBool == *rightBool;
+				} else if (std::holds_alternative<f64>(lhs.data) && std::holds_alternative<f64>(rhs.data))
+					equal = a == b;
+				return ModelValue(e.op == XOp::Eq ? equal : !equal);
+			}
+			switch (e.op) {
+			case XOp::Add:
+				if (std::holds_alternative<std::string>(lhs.data) || std::holds_alternative<std::string>(rhs.data))
+					return ModelValue(lhs.toString() + rhs.toString());
+				return ModelValue(a + b);
+			case XOp::Sub:
+				return ModelValue(a - b);
+			case XOp::Mul:
+				return ModelValue(a * b);
+			case XOp::Div:
+				return ModelValue(b == 0 ? 0.0 : a / b);
+			case XOp::Mod:
+				return ModelValue(b == 0 ? 0.0 : std::fmod(a, b));
+			case XOp::Lt:
+				return ModelValue(a < b);
+			case XOp::Le:
+				return ModelValue(a <= b);
+			case XOp::Gt:
+				return ModelValue(a > b);
+			case XOp::Ge:
+				return ModelValue(a >= b);
+			case XOp::And:
+				return ModelValue(lhs.truthy() && rhs.truthy());
+			case XOp::Or:
+				return ModelValue(lhs.truthy() || rhs.truthy());
+			default:
+				return {};
+			}
+		}
+		case XExprKind::Ternary:
+			return evaluateModelExpression(document, e.a, scope).truthy()
+					   ? evaluateModelExpression(document, e.b, scope)
+					   : evaluateModelExpression(document, e.c, scope);
+		case XExprKind::Range: {
+			const i32 first = static_cast<i32>(number(evaluateModelExpression(document, e.a, scope)));
+			const i32 last = static_cast<i32>(number(evaluateModelExpression(document, e.b, scope)));
+			ModelValue::Array values;
+			const i64 step = first <= last ? 1 : -1;
+			for (i64 n = first; n != static_cast<i64>(last) + step && values.size() < 100000; n += step)
+				values.emplace_back(static_cast<i32>(n));
+			return ModelValue(std::move(values));
+		}
+		case XExprKind::Call:
+			return {};
+		}
+		return {};
+	}
+
+	ModelValue UiRuntime::modelValue(std::string_view path) const {
+		if (path.empty() || path.front() == '.' || path.back() == '.' || path.find("..") != std::string_view::npos)
+			return {};
+		std::size_t dot = path.find('.');
+		auto root = m_model.find(std::string(path.substr(0, dot)));
+		if (root == m_model.end())
+			return {};
+		ModelValue current = root->second;
+		std::size_t offset = dot == std::string_view::npos ? path.size() : dot + 1;
+		while (offset < path.size()) {
+			const std::size_t next = path.find('.', offset);
+			const std::string key(
+				path.substr(offset, next == std::string_view::npos ? path.size() - offset : next - offset));
+			if (const auto* objectValues = std::get_if<ModelValue::Object>(&current.data)) {
+				auto memberIt = objectValues->find(key);
+				if (memberIt == objectValues->end())
+					return {};
+				current = memberIt->second;
+			} else if (const auto* array = std::get_if<ModelValue::Array>(&current.data)) {
+				char* end = nullptr;
+				const unsigned long index = std::strtoul(key.c_str(), &end, 10);
+				if (!end || *end || index >= array->size())
+					return {};
+				current = (*array)[index];
+			} else
+				return {};
+			if (next == std::string_view::npos)
+				break;
+			offset = next + 1;
+		}
+		return current;
+	}
+
+	bool UiRuntime::setListItemProvider(std::string_view id, ListItemProvider provider) {
+		if (!m_strings || !provider.rowCount || (!provider.text && !provider.cell))
+			return false;
+		bool found = false;
+		const StrId key = m_strings->find(id, &found);
+		if (!found)
+			return false;
+		auto node =
+			std::find_if(m_nodes.begin(), m_nodes.end(), [key](const Node& candidate) { return candidate.id == key; });
+		if (node == m_nodes.end() || (!node->listView && !node->table))
+			return false;
+		if ((node->listView && !provider.text) || (node->table && !provider.cell))
+			return false;
+		m_listItemProviders[key] = provider;
+		if (node->table && node->tableSelectedRow >= static_cast<i32>(listItemCount(*node)))
+			node->tableSelectedRow = -1;
+		m_layout.markContentChanged(node->layout);
+		addDamage(m_layout.absRect(node->layout));
+		return true;
+	}
+
+	u32 UiRuntime::listItemCount(const Node& node) const {
+		if (node.id.v) {
+			const auto found = m_listItemProviders.find(node.id);
+			if (found != m_listItemProviders.end())
+				return found->second.rowCount(found->second.context);
+		}
+		return static_cast<u32>(node.listView ? payload(node).options.size() : payload(node).tableRows.size());
+	}
+
+	bool UiRuntime::listItemText(const Node& node, u32 row, std::string& out) const {
+		if (node.id.v) {
+			const auto found = m_listItemProviders.find(node.id);
+			if (found != m_listItemProviders.end())
+				return found->second.text && found->second.text(found->second.context, row, out);
+		}
+		if (row >= payload(node).options.size())
+			return false;
+		out = payload(node).options[row];
+		return true;
+	}
+
+	bool UiRuntime::tableCellText(const Node& node, u32 row, u32 column, std::string& out) const {
+		if (node.id.v) {
+			const auto found = m_listItemProviders.find(node.id);
+			if (found != m_listItemProviders.end() && found->second.cell)
+				return found->second.cell(found->second.context, row, column, out);
+		}
+		if (row >= payload(node).tableRows.size() || column >= payload(node).tableRows[row].size())
+			return false;
+		out = payload(node).tableRows[row][column];
+		return true;
+	}
+
+	bool UiRuntime::setModelValue(std::string_view path, ModelValue value) {
+		if (path.empty() || path.front() == '.' || path.back() == '.' || path.find("..") != std::string_view::npos)
+			return false;
+		const std::size_t dot = path.find('.');
+		const std::string root(path.substr(0, dot));
+		if (root.empty())
+			return false;
+		ModelValue* target = &m_model[root];
+		std::size_t offset = dot == std::string_view::npos ? path.size() : dot + 1;
+		while (offset < path.size()) {
+			const std::size_t next = path.find('.', offset);
+			const std::string key(
+				path.substr(offset, next == std::string_view::npos ? path.size() - offset : next - offset));
+			if (key.empty())
+				return false;
+			if (next == std::string_view::npos) {
+				if (auto* objectValues = std::get_if<ModelValue::Object>(&target->data))
+					(*objectValues)[key] = std::move(value);
+				else if (std::holds_alternative<std::monostate>(target->data)) {
+					ModelValue::Object createdObject;
+					createdObject[key] = std::move(value);
+					target->data = std::move(createdObject);
+				} else
+					return false;
+				break;
+			}
+			if (auto* objectValues = std::get_if<ModelValue::Object>(&target->data))
+				target = &(*objectValues)[key];
+			else if (std::holds_alternative<std::monostate>(target->data)) {
+				target->data = ModelValue::Object{};
+				target = &std::get<ModelValue::Object>(target->data)[key];
+			} else
+				return false;
+			offset = next + 1;
+		}
+		if (dot == std::string_view::npos)
+			*target = std::move(value);
+		bool updated = false;
+		for (const auto& [dependency, nodes] : m_bindingNodes) {
+			const bool overlaps =
+				dependency == path ||
+				(dependency.size() > path.size() && dependency.compare(0, path.size(), path) == 0 &&
+				 dependency[path.size()] == '.') ||
+				(path.size() > dependency.size() && path.compare(0, dependency.size(), dependency) == 0 &&
+				 path[dependency.size()] == '.');
+			if (!overlaps)
+				continue;
+			for (u32 index : nodes) {
+				reevaluateModelNode(index);
+				updated = true;
+			}
+		}
+		if (!updated)
+			addDamage({0, 0, m_lastLayoutWidth, m_lastLayoutHeight});
+		return true;
+	}
+
+	void UiRuntime::registerModelDependencies(u32 nodeIndex, const Document& document) {
+		if (nodeIndex >= m_nodes.size())
+			return;
+		Node& node = m_nodes[nodeIndex];
+		std::function<void(u32)> collect = [&](u32 expression) {
+			if (expression >= document.exprs.size())
+				return;
+			const XExpr& e = document.exprs[expression];
+			if (e.kind == XExprKind::Index && e.b < document.exprs.size() &&
+				document.exprs[e.b].kind != XExprKind::String && document.exprs[e.b].kind != XExprKind::Number) {
+				collect(e.a);
+				collect(e.b);
+				return;
+			}
+			if (e.kind == XExprKind::Name || e.kind == XExprKind::Member || e.kind == XExprKind::Index) {
+				const std::string path = modelPathFromExpression(document, *m_strings, expression);
+				if (!path.empty()) {
+					auto& nodes = m_bindingNodes[path];
+					if (std::find(nodes.begin(), nodes.end(), nodeIndex) == nodes.end())
+						nodes.push_back(nodeIndex);
+				}
+				return;
+			}
+			if (e.kind == XExprKind::Interp) {
+				for (u32 i = 0; i < e.argCount && e.argFirst + i < document.parts.size(); ++i)
+					if (document.parts[e.argFirst + i].expr != kNoExpr)
+						collect(document.parts[e.argFirst + i].expr);
+				return;
+			}
+			collect(e.a);
+			collect(e.b);
+			if (e.kind == XExprKind::Ternary)
+				collect(e.c);
+		};
+		for (const Node::ModelBinding& binding : node.modelBindings)
+			collect(binding.expression);
+		if (node.ifExpression != kNoExpr)
+			collect(node.ifExpression);
+	}
+
+	void UiRuntime::reevaluateModelNode(u32 index) {
+		if (index >= m_nodes.size())
+			return;
+		Node& node = m_nodes[index];
+		const auto* scope = node.modelScope.get();
+		if (node.ifExpression != kNoExpr) {
+			const bool conditionalVisible = evaluateModelExpression(m_modelDocument, node.ifExpression, scope).truthy();
+			if (node.ifLayoutInitialized && conditionalVisible != node.modelIfVisible) {
+				LayoutStyle layout = node.authoredIfLayout;
+				if (!conditionalVisible) {
+					layout.width = Length::px(0.f);
+					layout.height = Length::px(0.f);
+					layout.minWidth = Length::px(0.f);
+					layout.maxWidth = Length::px(0.f);
+					layout.minHeight = Length::px(0.f);
+					layout.maxHeight = Length::px(0.f);
+					layout.padding = {};
+					layout.border = {};
+					layout.margin = {};
+				}
+				m_layout.setStyle(node.layout, layout);
+				m_layout.markContentChanged(node.layout);
+			}
+			node.modelIfVisible = conditionalVisible;
+		}
+		for (const Node::ModelBinding& binding : node.modelBindings) {
+			const ModelValue value = evaluateModelExpression(m_modelDocument, binding.expression, scope);
+			const std::string_view property = m_strings->view(binding.property);
+			if (property == "visible")
+				node.modelPropertyVisible = value.truthy();
+			else if (property == "disabled")
+				node.disabled = value.truthy();
+			else if (property == "placeholder")
+				node.placeholder = value.toString();
+			else if (property == "text" || property == "label" || property == "value") {
+				const std::string next = value.toString();
+				if (node.text != next) {
+					node.text = next;
+					node.caret = std::min(node.caret, node.text.size());
+					node.selectionAnchor = std::min(node.selectionAnchor, node.text.size());
+					m_layout.markContentChanged(node.layout);
+				}
+			}
+		}
+		node.modelVisible = node.modelIfVisible && node.modelPropertyVisible;
+		addDamage(node.layout.valid() ? m_layout.absRect(node.layout)
+									  : Rect{0, 0, m_lastLayoutWidth, m_lastLayoutHeight});
+	}
+
+	void UiRuntime::publishModelValue(const Node& node, std::string_view text) {
+		if (node.modelBindPath.empty())
+			return;
+		setModelValue(node.modelBindPath, ModelValue(std::string(text)));
+	}
+
+	bool UiRuntime::buildNode(const Document& document, u32 index, u32 parentIndex, std::string& error,
+							  std::shared_ptr<const ModelValue::Object> modelScope, bool expandFor) {
 		if (index >= document.nodes.size()) { error = "invalid node index in .xui document"; return false; }
 		const XNode& source = document.nodes[index];
+		if (expandFor) {
+			for (const XProp& prop : document.propsOf(source)) {
+				if (prop.role != XPropRole::For || prop.expr >= document.exprs.size())
+					continue;
+				const ModelValue collection = evaluateModelExpression(document, prop.expr, modelScope.get());
+				const auto* items = std::get_if<ModelValue::Array>(&collection.data);
+				if (!items) {
+					error = "for: expects an array or numeric range in the current model";
+					return false;
+				}
+				for (u32 ordinal = 0; ordinal < items->size(); ++ordinal) {
+					auto scope = std::make_shared<ModelValue::Object>(modelScope ? *modelScope : ModelValue::Object{});
+					if (prop.forVar.v)
+						(*scope)[std::string(m_strings->view(prop.forVar))] = (*items)[ordinal];
+					if (prop.forIndex.v)
+						(*scope)[std::string(m_strings->view(prop.forIndex))] = ModelValue(ordinal);
+					if (!buildNode(document, index, parentIndex, error, std::move(scope), false))
+						return false;
+				}
+				return true;
+			}
+		}
 		const u32 runtimeIndex = static_cast<u32>(m_nodes.size());
 		Node node;
 		node.type = source.type;
 		node.parentIndex = parentIndex;
+		node.modelScope = modelScope;
 		node.button = typeIs(source.type, *m_strings, "Button") || typeIs(source.type, *m_strings, "IconButton");
 		node.iconButton = typeIs(source.type, *m_strings, "IconButton");
 		node.checkList = typeIs(source.type, *m_strings, "CheckList");
@@ -944,23 +1451,22 @@ namespace xui {
 		}
 		else if (node.scrollView) {
 			node.layout = m_layout.create(LayoutKind::Scroll);
-		}
-		else if (node.listView || node.table) {
+		} else if (node.listView || node.table) {
 			node.layout = m_layout.create(LayoutKind::Scroll);
-		}
-		else if (node.tabs) {
+		} else if (node.tabs) {
 			node.layout = m_layout.create(LayoutKind::Stack);
-		}
-		else if (node.button && !document.childrenOf(source).empty()) {
+		} else if (node.button && !document.childrenOf(source).empty()) {
 			node.layout = m_layout.create(LayoutKind::Column);
-		}
-		else if (node.tab) {
+		} else if (node.tab) {
 			node.layout = m_layout.create(LayoutKind::Column);
-		}
-		else if (typeIs(source.type, *m_strings, "Text") || node.button || node.checkItem || node.checkBox || node.slider || node.progressBar || node.fpsCounter || node.dropdown || node.colorPicker || node.textBox || node.textArea || node.radioGroup || node.switchToggle || node.toggleButton || node.label || node.badge || node.separator || node.spinner || node.image || node.iconWidget || node.treeView || node.listView || node.table || node.datePicker || node.segmented || node.stepper || node.rating || node.breadcrumb || node.keybindField || node.menu || node.menuItem) {
+		} else if (typeIs(source.type, *m_strings, "Text") || node.button || node.checkItem || node.checkBox ||
+				   node.slider || node.progressBar || node.fpsCounter || node.dropdown || node.colorPicker ||
+				   node.textBox || node.textArea || node.radioGroup || node.switchToggle || node.toggleButton ||
+				   node.label || node.badge || node.separator || node.spinner || node.image || node.iconWidget ||
+				   node.treeView || node.listView || node.table || node.datePicker || node.segmented || node.stepper ||
+				   node.rating || node.breadcrumb || node.keybindField || node.menu || node.menuItem) {
 			node.layout = m_layout.create(LayoutKind::Leaf);
-		}
-		else {
+		} else {
 			error = "unsupported runtime widget '" + std::string(m_strings->view(source.type)) + "'";
 			return false;
 		}
@@ -987,7 +1493,15 @@ namespace xui {
 		}
 
 		if ((typeIs(source.type, *m_strings, "Text") || node.button || node.checkItem || node.checkBox || node.fpsCounter || node.label || node.badge || node.toggleButton || node.menuItem) && source.argCount) {
-			node.text.assign(literal(document, *m_strings, document.args[source.argFirst].expr));
+			const XArg* content = &document.args[source.argFirst];
+			for (const XArg& arg : document.argsOf(source))
+				if (arg.name.v && (m_strings->view(arg.name) == "value" || m_strings->view(arg.name) == "label")) {
+					content = &arg;
+					break;
+				}
+			node.text.assign(literal(document, *m_strings, content->expr));
+			if (content->expr < document.exprs.size() && document.exprs[content->expr].kind == XExprKind::Interp)
+				node.modelBindings.push_back({m_strings->intern("text"), content->expr, XPropRole::Value});
 		}
 		if (node.tab && source.argCount) node.tabTitle.assign(literal(document, *m_strings, document.args[source.argFirst].expr));
 		if (node.dockPanel) {
@@ -1008,6 +1522,24 @@ namespace xui {
 		for (const XProp& prop : document.propsOf(source)) {
 			const std::string_view name = m_strings->view(prop.name);
 			const std::string_view value = literal(document, *m_strings, prop.expr);
+			if (prop.role == XPropRole::If)
+				node.ifExpression = prop.expr;
+			else if (prop.role == XPropRole::Bind) {
+				node.modelBindPath = modelPathFromExpression(document, *m_strings, prop.expr);
+				node.modelBindings.push_back({m_strings->intern("value"), prop.expr, XPropRole::Bind});
+			} else if (prop.role == XPropRole::Value && name == "visible" && prop.expr < document.exprs.size() &&
+					   document.exprs[prop.expr].kind == XExprKind::Bool)
+				node.modelPropertyVisible = document.exprs[prop.expr].bval;
+			else if (prop.role == XPropRole::Value && prop.expr < document.exprs.size() &&
+					 (name == "value" || name == "label" || name == "placeholder" || name == "visible" ||
+					  name == "disabled") &&
+					 (document.exprs[prop.expr].kind == XExprKind::Interp ||
+					  document.exprs[prop.expr].kind == XExprKind::Name ||
+					  document.exprs[prop.expr].kind == XExprKind::Member ||
+					  document.exprs[prop.expr].kind == XExprKind::Index ||
+					  document.exprs[prop.expr].kind == XExprKind::Binary ||
+					  document.exprs[prop.expr].kind == XExprKind::Ternary))
+				node.modelBindings.push_back({prop.name, prop.expr, XPropRole::Value});
 			if (node.dockHost && prop.role == XPropRole::Value && prop.expr < document.exprs.size() && document.exprs[prop.expr].kind == XExprKind::Number) {
 				if (name == "gutter") node.dockGutter = std::max(0.f, document.exprs[prop.expr].num);
 				else if (name == "headerHeight") node.dockHeaderHeight = std::clamp(document.exprs[prop.expr].num, 20.f, 64.f);
@@ -1146,9 +1678,10 @@ namespace xui {
 				const bool flag = document.exprs[prop.expr].kind == XExprKind::Bool && document.exprs[prop.expr].bval;
 				if (name == "tooltipHideOnClick") node.tooltipHideOnClick = flag;
 				else node.tooltipDisabled = flag;
-			}
-			else if (name == "tooltipFollowCursor" && prop.role == XPropRole::Value && prop.expr < document.exprs.size())
-				node.tooltipFollowCursor = document.exprs[prop.expr].kind == XExprKind::Bool && document.exprs[prop.expr].bval;
+			} else if (name == "tooltipFollowCursor" && prop.role == XPropRole::Value &&
+					   prop.expr < document.exprs.size())
+				node.tooltipFollowCursor =
+					document.exprs[prop.expr].kind == XExprKind::Bool && document.exprs[prop.expr].bval;
 			else if (name == "showFrameTime" && prop.role == XPropRole::Value && prop.expr < document.exprs.size())
 				node.showFrameTime = !(document.exprs[prop.expr].kind == XExprKind::Bool && !document.exprs[prop.expr].bval);
 			else if (node.image && name == "fit" && prop.role == XPropRole::Value) {
@@ -1233,16 +1766,18 @@ namespace xui {
 			else if (name == "change" && prop.role == XPropRole::Event && prop.expr < document.exprs.size()) {
 				const XExpr& handler = document.exprs[prop.expr];
 				if (handler.kind == XExprKind::Name) node.pressHandler = handler.name;
-			}
-			else if ((name == "filter" || name == "validate") && prop.role == XPropRole::Event && prop.expr < document.exprs.size()) {
+			} else if ((name == "filter" || name == "validate") && prop.role == XPropRole::Event &&
+					   prop.expr < document.exprs.size()) {
 				const XExpr& handler = document.exprs[prop.expr];
 				if (handler.kind == XExprKind::Name) {
-					if (name == "filter") node.filterHandler = handler.name;
-					else node.validateHandler = handler.name;
+					if (name == "filter")
+						node.filterHandler = handler.name;
+					else
+						node.validateHandler = handler.name;
 				}
-			}
-			else if ((name == "dock" || name == "undock" || name == "resize" || name == "tabChange" || name == "close" || name == "closed") &&
-				prop.role == XPropRole::Event && prop.expr < document.exprs.size()) {
+			} else if ((name == "dock" || name == "undock" || name == "resize" || name == "tabChange" ||
+						name == "close" || name == "closed") &&
+					   prop.role == XPropRole::Event && prop.expr < document.exprs.size()) {
 				const XExpr& handler = document.exprs[prop.expr];
 				if (handler.kind == XExprKind::Name) {
 					if (name == "dock") node.dockHandler.assign(m_strings->view(handler.name));
@@ -1251,11 +1786,9 @@ namespace xui {
 					else if (name == "tabChange") node.tabChangeHandler.assign(m_strings->view(handler.name));
 					else node.closeHandler.assign(m_strings->view(handler.name));
 				}
-			}
-			else if (name == "disabled" && prop.role == XPropRole::Value && prop.expr < document.exprs.size()) {
+			} else if (name == "disabled" && prop.role == XPropRole::Value && prop.expr < document.exprs.size()) {
 				node.disabled = document.exprs[prop.expr].kind == XExprKind::Bool && document.exprs[prop.expr].bval;
-			}
-			else if ((name == "options" || (node.listView && name == "items")) && prop.role == XPropRole::Value) {
+			} else if ((name == "options" || (node.listView && name == "items")) && prop.role == XPropRole::Value) {
 				std::size_t begin = 0;
 				while (begin <= value.size()) {
 					const std::size_t end = value.find('|', begin);
@@ -1265,19 +1798,51 @@ namespace xui {
 					if (end == std::string_view::npos) break;
 					begin = end + 1;
 				}
-			}
-			else if (node.listView && name == "selected" && prop.role == XPropRole::Value) node.treeSelection.assign(value);
-			else if (node.rangeSlider && (name == "low" || name == "high") && prop.role == XPropRole::Value && prop.expr < document.exprs.size() && document.exprs[prop.expr].kind == XExprKind::Number) {
-				if (name == "low") node.rangeLow = document.exprs[prop.expr].num; else node.rangeHigh = document.exprs[prop.expr].num;
-			}
-			else if (node.table && name == "columns" && prop.role == XPropRole::Value) {
-				std::size_t start = 0; while (start <= value.size()) { const auto end = value.find('|', start); auto cell = value.substr(start, end == std::string_view::npos ? value.size()-start : end-start); if (!cell.empty()) payload(node).tableColumns.emplace_back(cell); if (end == std::string_view::npos) break; start = end + 1; }
-			}
-			else if (node.table && name == "selected" && prop.role == XPropRole::Value && prop.expr < document.exprs.size() && document.exprs[prop.expr].kind == XExprKind::Number) node.tableSelectedRow = static_cast<i32>(document.exprs[prop.expr].num);
+			} else if (node.listView && name == "selected" && prop.role == XPropRole::Value)
+				node.treeSelection.assign(value);
+			else if (node.rangeSlider && (name == "low" || name == "high") && prop.role == XPropRole::Value &&
+					 prop.expr < document.exprs.size() && document.exprs[prop.expr].kind == XExprKind::Number) {
+				if (name == "low")
+					node.rangeLow = document.exprs[prop.expr].num;
+				else
+					node.rangeHigh = document.exprs[prop.expr].num;
+			} else if (node.table && name == "columns" && prop.role == XPropRole::Value) {
+				std::size_t start = 0;
+				while (start <= value.size()) {
+					const auto end = value.find('|', start);
+					auto cell = value.substr(start, end == std::string_view::npos ? value.size() - start : end - start);
+					if (!cell.empty())
+						payload(node).tableColumns.emplace_back(cell);
+					if (end == std::string_view::npos)
+						break;
+					start = end + 1;
+				}
+			} else if (node.table && name == "selected" && prop.role == XPropRole::Value &&
+					   prop.expr < document.exprs.size() && document.exprs[prop.expr].kind == XExprKind::Number)
+				node.tableSelectedRow = static_cast<i32>(document.exprs[prop.expr].num);
 			else if (node.table && name == "rows" && prop.role == XPropRole::Value) {
-				std::size_t start = 0; while (start <= value.size()) { const auto end = value.find('|', start); std::string_view row = value.substr(start, end == std::string_view::npos ? value.size()-start : end-start); std::vector<std::string> cells; std::size_t c = 0; while (c <= row.size()) { const auto ce = row.find('\t', c); cells.emplace_back(row.substr(c, ce == std::string_view::npos ? row.size()-c : ce-c)); if (ce == std::string_view::npos) break; c = ce + 1; } if (!row.empty()) payload(node).tableRows.push_back(std::move(cells)); if (end == std::string_view::npos) break; start = end + 1; }
-			}
-			else if ((name == "value" || name == "min" || name == "max") && prop.role == XPropRole::Value && prop.expr < document.exprs.size()) {
+				std::size_t start = 0;
+				while (start <= value.size()) {
+					const auto end = value.find('|', start);
+					std::string_view row =
+						value.substr(start, end == std::string_view::npos ? value.size() - start : end - start);
+					std::vector<std::string> cells;
+					std::size_t c = 0;
+					while (c <= row.size()) {
+						const auto ce = row.find('\t', c);
+						cells.emplace_back(row.substr(c, ce == std::string_view::npos ? row.size() - c : ce - c));
+						if (ce == std::string_view::npos)
+							break;
+						c = ce + 1;
+					}
+					if (!row.empty())
+						payload(node).tableRows.push_back(std::move(cells));
+					if (end == std::string_view::npos)
+						break;
+					start = end + 1;
+				}
+			} else if ((name == "value" || name == "min" || name == "max") && prop.role == XPropRole::Value &&
+					   prop.expr < document.exprs.size()) {
 				const XExpr& expression = document.exprs[prop.expr];
 				if (expression.kind == XExprKind::Number) {
 					if (name == "value") node.value = expression.num;
@@ -1287,14 +1852,12 @@ namespace xui {
 				else if (name == "value" && node.colorPicker && expression.kind == XExprKind::Color)
 					node.pickerColor = Color::fromRGBA8(expression.color);
 				else if (name == "value" && node.dropdown)
-					for (u32 i = 0; i < payload(node).options.size(); ++i) if (payload(node).options[i] == value) node.selectedOption = i;
-			}
-			else if (name == "checked" && prop.role == XPropRole::Value && prop.expr < document.exprs.size()) {
+					for (u32 i = 0; i < payload(node).options.size(); ++i)
+						if (payload(node).options[i] == value)
+							node.selectedOption = i;
+			} else if (name == "checked" && prop.role == XPropRole::Value && prop.expr < document.exprs.size()) {
 				node.checked = document.exprs[prop.expr].kind == XExprKind::Bool && document.exprs[prop.expr].bval;
-			}
-			else if (prop.role == XPropRole::If || prop.role == XPropRole::For) {
-				error = "runtime .xui subset does not yet evaluate if/for control-flow properties";
-				return false;
+			} else if (prop.role == XPropRole::For) { /* expanded before node materialization */
 			}
 		}
 
@@ -1556,18 +2119,18 @@ namespace xui {
 		}
 		if (node.treeView) {
 			if (!document.childrenOf(source).empty()) { error = "TreeView uses slash-separated paths in its items property and does not accept child widgets"; return false; }
-			if (payload(node).treeEntries.empty()) { error = "TreeView requires at least one path in its items property"; return false; }
-			if (!node.treeSelection.empty() && std::none_of(payload(node).treeEntries.begin(), payload(node).treeEntries.end(),
-				[&](const Node::TreeEntry& entry) { return entry.path == node.treeSelection; })) {
+			if (payload(node).treeEntries.empty()) {
+				error = "TreeView requires at least one path in its items property";
+				return false;
+			}
+			if (!node.treeSelection.empty() &&
+				std::none_of(payload(node).treeEntries.begin(), payload(node).treeEntries.end(),
+							 [&](const Node::TreeEntry& entry) { return entry.path == node.treeSelection; })) {
 				error = "TreeView selected value must match an item path"; return false;
 			}
 		}
 		if (node.listView && !document.childrenOf(source).empty()) {
 			error = "ListView items are supplied with its items property; child widgets are not accepted";
-			return false;
-		}
-		if (node.listView && payload(node).options.empty()) {
-			error = "ListView requires at least one item in its items property";
 			return false;
 		}
 		if (node.listView && !node.treeSelection.empty() &&
@@ -1580,12 +2143,11 @@ namespace xui {
 			error = "Table uses columns and rows properties and does not accept child widgets";
 			return false;
 		}
-		if (node.table && (payload(node).tableColumns.empty() || payload(node).tableRows.empty())) {
-			error = "Table requires columns and rows";
+		if (node.table && payload(node).tableColumns.empty()) {
+			error = "Table requires columns";
 			return false;
 		}
-		if (node.table &&
-			(node.tableSelectedRow < -1 || node.tableSelectedRow >= static_cast<i32>(payload(node).tableRows.size()))) {
+		if (node.table && node.tableSelectedRow < -1) {
 			error = "Table selected row is out of range";
 			return false;
 		}
@@ -1613,6 +2175,10 @@ namespace xui {
 			authoredLayout.top = Length::px(0.f);
 		}
 		m_layout.setStyle(node.layout, authoredLayout);
+		if (node.ifExpression != kNoExpr) {
+			node.ifLayoutInitialized = true;
+			node.authoredIfLayout = authoredLayout;
+		}
 		m_nodes.push_back(std::move(node));
 		if (m_nodes[runtimeIndex].dropdown || m_nodes[runtimeIndex].colorPicker) {
 			Node& control = m_nodes[runtimeIndex];
@@ -1630,7 +2196,7 @@ namespace xui {
 			group.selectedOption = std::min(group.selectedOption, static_cast<u32>(payload(group).options.size() - 1));
 		}
 		if (Node& picker = m_nodes[runtimeIndex]; picker.datePicker)
-			picker.text = formatDateText(picker.dateYear, picker.dateMonth, picker.dateDay);
+			picker.text = formatDateText(picker.dateYear, picker.dateMonth, picker.dateDay, m_locale);
 		if (m_nodes[runtimeIndex].textBox || m_nodes[runtimeIndex].textArea) {
 			Node& field = m_nodes[runtimeIndex];
 			field.text = truncateUtf8(field.text, field.maxLength);
@@ -1638,17 +2204,26 @@ namespace xui {
 		}
 		if (Node& field = m_nodes[runtimeIndex]; field.numberField || field.stepper) {
 			if (field.numberBounded || field.stepper) field.value = std::clamp(field.value, std::min(field.minValue, field.maxValue), std::max(field.minValue, field.maxValue));
-			field.text = formatNumberText(field.value, field.numberPrecision);
+			field.text = formatNumberText(field.value, field.numberPrecision, m_locale);
 			if (!field.unit.empty()) { field.text += " "; field.text += field.unit; }
 			field.caret = field.text.size();
 		}
-		if (m_nodes[runtimeIndex].button || m_nodes[runtimeIndex].checkItem || m_nodes[runtimeIndex].checkBox || m_nodes[runtimeIndex].scrollView || m_nodes[runtimeIndex].slider || m_nodes[runtimeIndex].dropdown || m_nodes[runtimeIndex].colorPicker || m_nodes[runtimeIndex].textBox || m_nodes[runtimeIndex].textArea || m_nodes[runtimeIndex].tabs || m_nodes[runtimeIndex].treeView || m_nodes[runtimeIndex].listView || m_nodes[runtimeIndex].table ||
-			m_nodes[runtimeIndex].switchToggle || m_nodes[runtimeIndex].toggleButton || m_nodes[runtimeIndex].radioGroup ||
-			m_nodes[runtimeIndex].segmented || m_nodes[runtimeIndex].stepper || m_nodes[runtimeIndex].rating || m_nodes[runtimeIndex].breadcrumb || m_nodes[runtimeIndex].keybindField || m_nodes[runtimeIndex].datePicker) m_interactiveNodes.push_back(runtimeIndex);
+		reevaluateModelNode(runtimeIndex);
+		registerModelDependencies(runtimeIndex, document);
+		if (m_nodes[runtimeIndex].button || m_nodes[runtimeIndex].checkItem || m_nodes[runtimeIndex].checkBox ||
+			m_nodes[runtimeIndex].scrollView || m_nodes[runtimeIndex].slider || m_nodes[runtimeIndex].dropdown ||
+			m_nodes[runtimeIndex].colorPicker || m_nodes[runtimeIndex].textBox || m_nodes[runtimeIndex].textArea ||
+			m_nodes[runtimeIndex].tabs || m_nodes[runtimeIndex].treeView || m_nodes[runtimeIndex].listView ||
+			m_nodes[runtimeIndex].table || m_nodes[runtimeIndex].switchToggle || m_nodes[runtimeIndex].toggleButton ||
+			m_nodes[runtimeIndex].radioGroup || m_nodes[runtimeIndex].segmented || m_nodes[runtimeIndex].stepper ||
+			m_nodes[runtimeIndex].rating || m_nodes[runtimeIndex].breadcrumb || m_nodes[runtimeIndex].keybindField ||
+			m_nodes[runtimeIndex].datePicker)
+			m_interactiveNodes.push_back(runtimeIndex);
 		if (m_nodes[runtimeIndex].split) m_splitNodes.push_back(runtimeIndex);
 
 		for (u32 child : document.childrenOf(source))
-			if (!buildNode(document, child, runtimeIndex, error)) return false;
+			if (!buildNode(document, child, runtimeIndex, error, m_nodes[runtimeIndex].modelScope))
+				return false;
 		if (m_nodes[runtimeIndex].button && m_layout.childCount(m_nodes[runtimeIndex].layout) != 0)
 			m_nodes[runtimeIndex].text.clear(); // composed buttons paint their authored child content instead of a second label.
 		if (m_nodes[runtimeIndex].tabs) {
@@ -2527,7 +3102,10 @@ namespace xui {
 	bool UiRuntime::pointInsideScrollAncestors(u32 index, Vec2 point) const {
 		if (index >= m_nodes.size()) return false;
 		for (u32 parent = m_nodes[index].parentIndex; parent != 0xFFFFFFFFu && parent < m_nodes.size(); parent = m_nodes[parent].parentIndex)
-			if (m_nodes[parent].scrollView && !m_layout.absRect(m_nodes[parent].layout).contains(inverseTransformPoint(m_nodes[parent].paintTransform, point))) return false;
+			if ((m_nodes[parent].scrollView || clipsOverflow(m_nodes[parent].style, *m_strings)) &&
+				!m_layout.absRect(m_nodes[parent].layout)
+					 .contains(inverseTransformPoint(m_nodes[parent].paintTransform, point)))
+				return false;
 			else if (m_nodes[parent].dockPanel) {
 				const DockHostState* host = dockHostForPanel(parent);
 				if (!host || host->node >= m_nodes.size()) return false;
@@ -2601,10 +3179,23 @@ namespace xui {
 
 	void UiRuntime::addDamage(Rect rect) {
 		if (rect.empty()) return;
+		if (m_updateDepth)
+			m_updateChanged = true;
 		if (!m_hasDamage) { m_damage = rect; m_hasDamage = true; return; }
 		const f32 left = std::min(m_damage.x, rect.x), top = std::min(m_damage.y, rect.y);
 		const f32 right = std::max(m_damage.right(), rect.right()), bottom = std::max(m_damage.bottom(), rect.bottom());
 		m_damage = { left, top, right - left, bottom - top };
+	}
+
+	bool UiRuntime::endUpdate() {
+		if (!m_updateDepth)
+			return false;
+		--m_updateDepth;
+		if (m_updateDepth)
+			return false;
+		const bool changed = m_updateChanged || m_hasDamage;
+		m_updateChanged = false;
+		return changed;
 	}
 
 	void UiRuntime::applyLayoutStyle(Node& node) {
@@ -2689,12 +3280,13 @@ namespace xui {
 				m_fpsValue = static_cast<f32>(m_fpsFrames / m_fpsElapsed);
 				m_frameTimeMs = m_fpsFrames ? static_cast<f32>(m_fpsElapsed * 1000.0 / m_fpsFrames) : 0.f;
 				for (Node& fps : m_nodes) if (fps.fpsCounter) {
-					char value[96];
-					formatFpsOverlay(value, sizeof(value), m_fpsEnabled, m_drawBatchCounterEnabled, m_fpsValue,
-									 m_frameTimeMs, m_drawBatchCount, m_clipShapeCapFallbacks, fps.showFrameTime);
-					if (fps.text == value) continue;
-					fps.text = value;
-					m_layout.markContentChanged(fps.layout);
+						char value[96];
+						formatFpsOverlay(value, sizeof(value), m_fpsEnabled, m_drawBatchCounterEnabled, m_fpsValue,
+										 m_frameTimeMs, m_drawBatchCount, m_clipShapeCapFallbacks, fps.showFrameTime);
+						if (fps.text == value)
+							continue;
+						fps.text = value;
+						m_layout.markContentChanged(fps.layout);
 				}
 				m_fpsElapsed = 0;
 				m_fpsFrames = 0;
@@ -2703,10 +3295,13 @@ namespace xui {
 		m_fpsLastFrame = now;
 		if (m_drawBatchCounterEnabled) {
 			for (Node& fps : m_nodes) if (fps.fpsCounter) {
-				char value[96];
-				formatFpsOverlay(value, sizeof(value), m_fpsEnabled, m_drawBatchCounterEnabled, m_fpsValue,
-								 m_frameTimeMs, m_drawBatchCount, m_clipShapeCapFallbacks, fps.showFrameTime);
-				if (fps.text != value) { fps.text = value; m_layout.markContentChanged(fps.layout); }
+					char value[96];
+					formatFpsOverlay(value, sizeof(value), m_fpsEnabled, m_drawBatchCounterEnabled, m_fpsValue,
+									 m_frameTimeMs, m_drawBatchCount, m_clipShapeCapFallbacks, fps.showFrameTime);
+					if (fps.text != value) {
+						fps.text = value;
+						m_layout.markContentChanged(fps.layout);
+					}
 			}
 		}
 		auto drawLabel = [&](std::string_view text, Rect rect, FontHandle fontHandle, const PropTable& style,
@@ -2718,8 +3313,10 @@ namespace xui {
 				m_glyphScratch.clear();
 				for (const ShapedGlyph& shaped : run.glyphs) {
 					const Font* glyphFont = m_text->font(shaped.font.valid() ? shaped.font : fontHandle);
-					if (!glyphFont) continue;
-					const AtlasGlyph glyph = m_text->atlas()->glyph(*glyphFont, shaped.glyph, static_cast<u16>(std::clamp(std::lround(size), 1l, 65535l)));
+					if (!glyphFont)
+						continue;
+					const AtlasGlyph glyph = m_text->atlas()->glyph(
+						*glyphFont, shaped.glyph, static_cast<u16>(std::clamp(std::lround(size), 1l, 65535l)));
 					const f32 scale = 1.f / m_dpiScale;
 					m_glyphScratch.push_back({ {shaped.x * scale + glyph.offset.x * scale, shaped.y * scale + glyph.offset.y * scale, glyph.width * scale, glyph.height * scale}, glyph.uv });
 				}
@@ -2941,12 +3538,14 @@ namespace xui {
 				const Color background =
 					color(tabStyle, PropId::Bg,
 						  ordinal == tabs.selectedTab ? Color::fromRGBA8(0x24334FFFu) : Color::fromRGBA8(0x151E32FFu));
-				painter.fillRect(header, background);
+				const f32 radius = tabStyle.has(PropId::Radius) ? number(tabStyle.get(PropId::Radius), 0, 0.f) : 0.f;
+				painter.fillRect(header, background, CornerRadii::all(radius));
 				if (tabStyle.has(PropId::Border) && tabStyle.get(PropId::Border).count >= 3) {
 					const auto& border = tabStyle.get(PropId::Border);
 					const Color edge =
 						border.atoms[2].kind == AtomKind::Color ? Color::fromRGBA8(border.atoms[2].bits) : Color{};
-					painter.roundRect(header, RectStyle{Color{0, 0, 0, 0}, edge, number(border, 0), CornerRadii{}});
+					painter.roundRect(header,
+									  RectStyle{Color{0, 0, 0, 0}, edge, number(border, 0), CornerRadii::all(radius)});
 				}
 				drawLabel(tab.tabTitle, header, tab.font, tabStyle, Color::fromRGBA8(0xDDE7F8FFu), 8.f, false);
 			}
@@ -3018,14 +3617,90 @@ namespace xui {
 				if (m_nodes[current].dockPanel && dockPanelIsFloating(current)) return current;
 			return 0xFFFFFFFFu;
 		};
+		// Build a stable, parent-before-child paint sequence. z-index is accumulated through
+		// ancestors so a child remains in its parent's elevated stack; hit testing reuses this
+		// same sequence in reverse after the frame has painted.
+		constexpr u32 noPaintNode = 0xFFFFFFFFu;
+		const u32 nodeCount = static_cast<u32>(m_nodes.size());
+		bool paintOrderDirty = m_paintStackZScratch.size() != nodeCount || m_basePaintOrderScratch.size() != nodeCount;
+		bool treeOrderDirty = m_paintParentScratch.size() != nodeCount;
+		if (!treeOrderDirty) {
+			for (u32 index = 0; index < nodeCount; ++index)
+				if (m_paintParentScratch[index] != m_nodes[index].parentIndex) {
+					treeOrderDirty = true;
+					break;
+				}
+		}
+		paintOrderDirty |= treeOrderDirty;
+		if (treeOrderDirty) {
+			m_paintParentScratch.resize(nodeCount);
+			m_paintFirstChildScratch.assign(nodeCount, noPaintNode);
+			m_paintLastChildScratch.assign(nodeCount, noPaintNode);
+			m_paintNextSiblingScratch.assign(nodeCount, noPaintNode);
+			for (u32 index = 0; index < nodeCount; ++index) {
+				const u32 parent = m_nodes[index].parentIndex;
+				m_paintParentScratch[index] = parent;
+				if (parent >= nodeCount)
+					continue;
+				if (m_paintFirstChildScratch[parent] == noPaintNode)
+					m_paintFirstChildScratch[parent] = index;
+				else
+					m_paintNextSiblingScratch[m_paintLastChildScratch[parent]] = index;
+				m_paintLastChildScratch[parent] = index;
+			}
+		}
+		if (m_paintStackZScratch.size() != nodeCount)
+			m_paintStackZScratch.resize(nodeCount);
+		for (u32 index = 0; index < nodeCount; ++index) {
+			const Node& node = m_nodes[index];
+			const StateMask states = activeStates(node);
+			PropTable prospectiveStyle;
+			const PropTable* style = &node.style;
+			if (!node.styleResolved || node.resolvedStates != states) {
+				m_styles->resolve(node.styleSet, states, m_theme, prospectiveStyle);
+				style = &prospectiveStyle;
+			}
+			i32 localZ = style->has(PropId::ZIndex)
+							 ? static_cast<i32>(
+								   std::clamp(std::lround(number(style->get(PropId::ZIndex), 0)), -100000l, 100000l))
+							 : 0;
+			const i32 parentZ = node.parentIndex < nodeCount ? m_paintStackZScratch[node.parentIndex] : 0;
+			const i32 stackZ = std::clamp(parentZ + localZ, -1000000, 1000000);
+			if (m_paintStackZScratch[index] != stackZ)
+				paintOrderDirty = true;
+			m_paintStackZScratch[index] = stackZ;
+		}
+		if (paintOrderDirty) {
+			auto readyOrder = [](const std::pair<i32, u32>& a, const std::pair<i32, u32>& b) { return a > b; };
+			m_paintReadyScratch.clear();
+			m_basePaintOrderScratch.clear();
+			for (u32 index = 0; index < nodeCount; ++index)
+				if (m_nodes[index].parentIndex >= nodeCount) {
+					m_paintReadyScratch.emplace_back(m_paintStackZScratch[index], index);
+					std::push_heap(m_paintReadyScratch.begin(), m_paintReadyScratch.end(), readyOrder);
+				}
+			while (!m_paintReadyScratch.empty()) {
+				std::pop_heap(m_paintReadyScratch.begin(), m_paintReadyScratch.end(), readyOrder);
+				const u32 index = m_paintReadyScratch.back().second;
+				m_paintReadyScratch.pop_back();
+				m_basePaintOrderScratch.push_back(index);
+				for (u32 child = m_paintFirstChildScratch[index]; child != noPaintNode;
+					 child = m_paintNextSiblingScratch[child]) {
+					m_paintReadyScratch.emplace_back(m_paintStackZScratch[child], child);
+					std::push_heap(m_paintReadyScratch.begin(), m_paintReadyScratch.end(), readyOrder);
+				}
+			}
+		}
 		bool hasFloatingDockPanel = false;
-		if (!scope.active()) for (const DockHostState& host : m_dockHosts)
-			for (const DockPanelLayout& panel : host.tree.panels()) hasFloatingDockPanel |= panel.floating;
+		if (!scope.active())
+			for (const DockHostState& host : m_dockHosts)
+				for (const DockPanelLayout& panel : host.tree.panels())
+					hasFloatingDockPanel |= panel.floating;
 		const bool useDockOverlay = hasFloatingDockPanel;
 		m_dockPaintGroups.clear();
 		if (useDockOverlay) {
 			m_paintOrderScratch.clear();
-			for (u32 index = 0; index < m_nodes.size(); ++index)
+			for (u32 index : m_basePaintOrderScratch)
 				if (floatingDockPanelAncestor(index) == 0xFFFFFFFFu) m_paintOrderScratch.push_back(index);
 			for (std::size_t hostIndex = 0; hostIndex < m_dockHosts.size(); ++hostIndex) {
 				const DockHostState& host = m_dockHosts[hostIndex];
@@ -3051,14 +3726,17 @@ namespace xui {
 					const u32 panelNode = panels[panelOrder].panel;
 					if (panelNode >= m_nodes.size() || !panels[panelOrder].floating) continue;
 					const u32 begin = static_cast<u32>(m_paintOrderScratch.size());
-					for (u32 index = panelNode; index < m_nodes.size() && floatingDockPanelAncestor(index) == panelNode; ++index)
-						m_paintOrderScratch.push_back(index);
+					for (u32 index : m_basePaintOrderScratch)
+						if (floatingDockPanelAncestor(index) == panelNode)
+							m_paintOrderScratch.push_back(index);
 					m_dockPaintGroups.push_back(
 						{static_cast<u32>(hostIndex), panelOrder, begin, static_cast<u32>(m_paintOrderScratch.size())});
 				}
 			}
 		}
-		const u32 paintCount = useDockOverlay ? static_cast<u32>(m_paintOrderScratch.size()) : static_cast<u32>(m_nodes.size());
+		if (!useDockOverlay)
+			m_paintOrderScratch = m_basePaintOrderScratch;
+		const u32 paintCount = static_cast<u32>(m_paintOrderScratch.size());
 		auto inDockPanelPaintScope = [&](u32 index) {
 			if (!scope.active())
 				return true;
@@ -3077,7 +3755,7 @@ namespace xui {
 					paintFloatingDockOverlay(nextPaintGroup - 1);
 				++nextPaintGroup;
 			}
-			const u32 nodeIndex = useDockOverlay ? m_paintOrderScratch[paintPosition] : paintPosition;
+			const u32 nodeIndex = m_paintOrderScratch[paintPosition];
 			Node& node = m_nodes[nodeIndex];
 			if (!inDockPanelPaintScope(nodeIndex) || (node.fpsCounter && !m_fpsEnabled && !m_drawBatchCounterEnabled) ||
 				!isNodeVisible(nodeIndex, scope))
@@ -3086,8 +3764,9 @@ namespace xui {
 			if (node.menu || node.menuItem || (node.separator && node.parentIndex != 0xFFFFFFFFu
 				&& (m_nodes[node.parentIndex].menu || m_nodes[node.parentIndex].menuItem))) continue;
 			struct ScrollClipScope { Painter& painter; u32 count = 0; ~ScrollClipScope() { while (count--) painter.popClip(); } } scrollClips{ painter };
-			const u32 overlayPanel = scope.active() ? scope.dockPanel
-				: useDockOverlay ? floatingDockPanelAncestor(nodeIndex) : 0xFFFFFFFFu;
+			const u32 overlayPanel = scope.active()	  ? scope.dockPanel
+									 : useDockOverlay ? floatingDockPanelAncestor(nodeIndex)
+													  : 0xFFFFFFFFu;
 			// Floating panel bodies live above docked content and its chrome.
 			painter.setLayer(useDockOverlay && overlayPanel != 0xFFFFFFFFu ? 2u : 0u);
 			if (overlayPanel != 0xFFFFFFFFu) {
@@ -3119,7 +3798,7 @@ namespace xui {
 						}
 						const Node& ancestor = m_nodes[parent];
 						const CornerRadii radii = nodeRadii(ancestor);
-						if (ancestor.scrollView || radii.any()) {
+						if (ancestor.scrollView || clipsOverflow(ancestor.style, *m_strings) || radii.any()) {
 							painter.pushClip(m_layout.absRect(ancestor.layout), radii);
 							++scrollClips.count;
 						}
@@ -3132,7 +3811,8 @@ namespace xui {
 					// Scroll containers and dock panels clip their content in both axes; any other
 					// rounded ancestor additionally masks the rounded corners so a child background
 					// can never paint past them.
-					if (ancestor.scrollView || ancestor.dockPanel || radii.any()) {
+					if (ancestor.scrollView || ancestor.dockPanel || clipsOverflow(ancestor.style, *m_strings) ||
+						radii.any()) {
 						painter.pushClip(m_layout.absRect(ancestor.layout), radii);
 						++scrollClips.count;
 					}
@@ -3186,7 +3866,13 @@ namespace xui {
 			}
 			if (stateChanged) {
 				node.styleTweens.clear();
-				constexpr PropId animatable[] = { PropId::Bg, PropId::Fg, PropId::Border, PropId::Radius, PropId::Opacity, PropId::Glow, PropId::Gradient, PropId::Transform, PropId::Value };
+				// Keep this list aligned with properties whose paint path samples the resolved
+				// style every frame. Layout metrics remain excluded until tween samples can
+				// participate in retained-layout recalculation without causing stale geometry.
+				constexpr PropId animatable[] = {
+					PropId::Bg,		  PropId::Fg,		  PropId::Border,		 PropId::Outline,	PropId::Radius,
+					PropId::Opacity,  PropId::Shadow,	  PropId::Glow,			 PropId::Gradient,	PropId::Transform,
+					PropId::FontSize, PropId::FontWeight, PropId::LetterSpacing, PropId::ImageTint, PropId::Value};
 				for (const Transition& transition : m_styles->transitions(node.styleSet)) {
 					if (!(previousStates & stateBit(transition.from)) || !(states & stateBit(transition.to)) || transition.durationMs <= 0.f) continue;
 					auto addTween = [&](PropId property) {
@@ -3213,8 +3899,8 @@ namespace xui {
 				// values instead of snapping when the state exits before the tween finished. The
 				// first declared transition supplies timing for properties without a matching pair.
 				const StyleValue& keep = node.style.get(PropId::AnimationKeep);
-				if (node.style.has(PropId::AnimationKeep) && keep.count && keep.atoms[0].kind == AtomKind::Ident
-					&& m_strings->view(keep.atoms[0].str()) == "until-done" && !m_reducedMotion) {
+				if (node.style.has(PropId::AnimationKeep) && keep.count && keep.atoms[0].kind == AtomKind::Ident &&
+					m_strings->view(keep.atoms[0].str()) == "until-done" && !m_reducedMotion) {
 					const auto& declared = m_styles->transitions(node.styleSet);
 					if (!declared.empty() && declared.front().durationMs > 0.f) {
 						const Transition& timing = declared.front();
@@ -3483,8 +4169,7 @@ namespace xui {
 					else {
 						painter.fillRect({ trackRect.x, trackRect.y, trackRect.w * fraction, trackRect.h }, fill, CornerRadii::all(thickness * 0.5f));
 					}
-				}
-				else if (node.rangeSlider) {
+				} else if (node.rangeSlider) {
 					const f32 thickness = std::max(3.f, rect.h * 0.16f), cy = rect.y + rect.h * .5f;
 					const f32 span = std::max(.0001f, node.maxValue - node.minValue);
 					const f32 low = std::clamp((node.rangeLow - node.minValue) / span, 0.f, 1.f),
@@ -3494,10 +4179,11 @@ namespace xui {
 					painter.fillRect({rect.x + rect.w * low, cy - thickness * .5f, rect.w * (high - low), thickness},
 									 fill, CornerRadii::all(thickness * .5f));
 					const f32 diameter = std::min(rect.h, 22.f);
-					painter.fillRect({ rect.x + rect.w * low - diameter * .5f, cy - diameter * .5f, diameter, diameter }, fill, CornerRadii::all(diameter * .5f));
-					painter.fillRect({ rect.x + rect.w * high - diameter * .5f, cy - diameter * .5f, diameter, diameter }, fill, CornerRadii::all(diameter * .5f));
-				}
-				else {
+					painter.fillRect({rect.x + rect.w * low - diameter * .5f, cy - diameter * .5f, diameter, diameter},
+									 fill, CornerRadii::all(diameter * .5f));
+					painter.fillRect({rect.x + rect.w * high - diameter * .5f, cy - diameter * .5f, diameter, diameter},
+									 fill, CornerRadii::all(diameter * .5f));
+				} else {
 					const f32 thickness = std::max(3.f, rect.h * 0.16f);
 					const f32 centerY = rect.y + rect.h * 0.5f;
 					painter.fillRect({ rect.x, centerY - thickness * 0.5f, rect.w, thickness }, track, CornerRadii::all(thickness * 0.5f));
@@ -3618,7 +4304,7 @@ namespace xui {
 					std::max(0.f, rect.w - layout.border.l - layout.border.r - layout.padding.l - layout.padding.r);
 				const f32 headerH = 30.f, rowH = 26.f;
 				const auto& columns = payload(node).tableColumns;
-				const auto& rows = payload(node).tableRows;
+				const u32 rowCount = listItemCount(node);
 				const f32 scale = 1.f;
 				const Color ink = color(node.style, PropId::Fg, Color::fromRGBA8(0x242424FFu));
 				const Color accent = color(node.style, PropId::Border, Color::fromRGBA8(0x60A5FAFFu));
@@ -3634,7 +4320,7 @@ namespace xui {
 				}
 				const i32 first = std::max(0, static_cast<i32>(std::floor(node.tableScrollY / rowH)));
 				const i32 last =
-					std::min<i32>(static_cast<i32>(rows.size()),
+					std::min<i32>(static_cast<i32>(rowCount),
 								  first + static_cast<i32>(std::ceil(std::max(0.f, rect.h - headerH) / rowH)) + 1);
 				for (i32 row = first; row < last; ++row) {
 					const f32 y = top + headerH + rowH * f32(row) - node.tableScrollY;
@@ -3644,10 +4330,9 @@ namespace xui {
 					x = left;
 					for (u32 col = 0; col < columns.size(); ++col) {
 						const f32 colW = payload(node).tableColumnWidths[col] * scale;
-						const std::string_view value = col < rows[static_cast<u32>(row)].size()
-														   ? std::string_view(rows[static_cast<u32>(row)][col])
-														   : std::string_view{};
-						drawLabel(value, {x + 8.f, y, colW - 12.f, rowH}, node.font, node.style, ink, 0.f, false);
+						std::string value;
+						if (tableCellText(node, static_cast<u32>(row), col, value))
+							drawLabel(value, {x + 8.f, y, colW - 12.f, rowH}, node.font, node.style, ink, 0.f, false);
 						x += colW;
 					}
 				}
@@ -3666,17 +4351,20 @@ namespace xui {
 				const f32 right = rect.right() - layout.border.r - layout.padding.r;
 				const Color ink = color(node.style, PropId::Fg, Color::fromRGBA8(0x242424FFu));
 				const i32 first = std::max(0, static_cast<i32>(std::floor(node.listScrollY / rowHeight)));
-				const i32 last = std::min<i32>(static_cast<i32>(payload(node).options.size()),
+				const i32 last = std::min<i32>(static_cast<i32>(listItemCount(node)),
 											   first + static_cast<i32>(std::ceil(rect.h / rowHeight)) + 1);
 				painter.pushClip(rect);
 				for (i32 row = first; row < last; ++row) {
 					const Rect rowRect{left, top + rowHeight * f32(row) - node.listScrollY, std::max(0.f, right - left),
 									   rowHeight};
-					const bool selected = payload(node).options[static_cast<u32>(row)] == node.treeSelection;
+					std::string itemText;
+					if (!listItemText(node, static_cast<u32>(row), itemText))
+						continue;
+					const bool providerBacked = node.id.v && m_listItemProviders.contains(node.id);
+					const bool selected = providerBacked ? row == node.listSelectedRow : itemText == node.treeSelection;
 					if (selected || node.treeHover == row)
 						painter.fillRect(rowRect, ink.withAlpha(selected ? 0.14f : 0.07f), CornerRadii::all(3.f));
-					drawLabel(payload(node).options[static_cast<u32>(row)], rowRect, node.font, node.style, ink, 8.f,
-							  false);
+					drawLabel(itemText, rowRect, node.font, node.style, ink, 8.f, false);
 				}
 				painter.popClip();
 				painter.popOpacity();
@@ -3773,7 +4461,8 @@ namespace xui {
 					}
 					const f32 radius = node.style.has(PropId::Radius) ? number(node.style.get(PropId::Radius), 0) : 0.f;
 					painter.pushClip(rect);
-					painter.image(node.imageTexture, dst, uv, Color{ 1, 1, 1, 1 }, CornerRadii::all(radius));
+					const Color tint = color(node.style, PropId::ImageTint, Color{1, 1, 1, 1});
+					painter.image(node.imageTexture, dst, uv, tint, CornerRadii::all(radius));
 					painter.popClip();
 				}
 				else {
@@ -3881,8 +4570,9 @@ namespace xui {
 							: 0.f;
 					if (static_cast<i32>(i) == node.hoveredOption && !node.disabled)
 						painter.fillRect({ x, rect.y, width + 8.f, rect.h }, accent.withAlpha(0.1f), CornerRadii::all(3.f));
-					drawLabel(payload(node).options[i], { x, rect.y, width + 12.f, rect.h }, node.font, node.style,
-						i == node.selectedOption ? color(node.style, PropId::Border, accent) : accent, 0.f, false);
+					drawLabel(payload(node).options[i], {x, rect.y, width + 12.f, rect.h}, node.font, node.style,
+							  i == node.selectedOption ? color(node.style, PropId::Border, accent) : accent, 0.f,
+							  false);
 					x += width + 8.f;
 					if (i + 1 < payload(node).options.size()) {
 						drawLabel("›", { x, rect.y, 12.f, rect.h }, node.font, node.style, accent.withAlpha(0.55f), 0.f, false);
@@ -3984,10 +4674,13 @@ namespace xui {
 			const f32 contentWidth = std::max(0.f, rect.w - textLeft - textRight - checkOffset);
 			const f32 wrapWidth = node.textBox ? 0.f : contentWidth * m_dpiScale;
 			const TextLayout& run = m_text->layout(node.font, displayText, rasterSize, wrapWidth);
-			const bool visualEditorText = m_showWhitespace && (node.textBox || node.textArea) && !placeholderText && node.imePreedit.empty();
+			const bool visualEditorText =
+				m_showWhitespace && (node.textBox || node.textArea) && !placeholderText && node.imePreedit.empty();
 			const std::string_view editorText = visualEditorText ? displayText : std::string_view(node.text);
-			const TextLayout& editorLayout = (node.textBox || node.textArea)
-				? m_text->layout(node.font, editorText, rasterSize, node.textArea ? wrapWidth : 0.f) : run;
+			const TextLayout& editorLayout =
+				(node.textBox || node.textArea)
+					? m_text->layout(node.font, editorText, rasterSize, node.textArea ? wrapWidth : 0.f)
+					: run;
 			auto editorOffset = [&](std::size_t byteOffset) {
 				return visualEditorText ? visualTextOffset(node.text, byteOffset) : byteOffset;
 			};
@@ -4001,8 +4694,8 @@ namespace xui {
 			const bool cacheHit = quadCache.text == displayText && quadCache.font == node.font &&
 								  quadCache.rasterSize == rasterSizeKey && quadCache.wrapWidth == wrapWidthKey &&
 								  quadCache.dpiScale == m_dpiScale && quadCache.letterSpacing == letterSpacing &&
-							  quadCache.atlasGeneration == atlas->generation() &&
-							  quadCache.fallbackGeneration == m_text->fallbackGeneration();
+								  quadCache.atlasGeneration == atlas->generation() &&
+								  quadCache.fallbackGeneration == m_text->fallbackGeneration();
 			if (!cacheHit) {
 				quadCache.text.assign(displayText);
 				quadCache.font = node.font;
@@ -4018,7 +4711,8 @@ namespace xui {
 				for (std::size_t glyphIndex = 0; glyphIndex < run.glyphs.size(); ++glyphIndex) {
 					const ShapedGlyph& shaped = run.glyphs[glyphIndex];
 					const Font* glyphFont = m_text->font(shaped.font.valid() ? shaped.font : node.font);
-					if (!glyphFont) continue;
+					if (!glyphFont)
+						continue;
 					const AtlasGlyph glyph = atlas->glyph(*glyphFont, shaped.glyph, rasterSizeKey);
 					const f32 scale = 1.f / m_dpiScale;
 					quadCache.quads.push_back(
@@ -4036,7 +4730,8 @@ namespace xui {
 			const f32 advanceWidth = run.advanceWidth / m_dpiScale + spacingWidth;
 			const f32 runHeight = run.height / m_dpiScale;
 			const f32 textScrollOffsetY = node.textArea ? node.textScrollY : 0.f;
-			const f32 baseline = rect.y + padTop + std::max(0.f, (rect.h - padTop - padBottom - runHeight) * 0.5f) + font->baselineAt(rasterSize) / m_dpiScale - textScrollOffsetY;
+			const f32 baseline = rect.y + padTop + std::max(0.f, (rect.h - padTop - padBottom - runHeight) * 0.5f) +
+								 font->baselineAt(rasterSize) / m_dpiScale - textScrollOffsetY;
 			const Align textAlign = node.style.has(PropId::Align) ? align(node.style.get(PropId::Align).atoms[0]) : Align::Start;
 			const bool textCenter = node.button || node.toggleButton || (!node.checkItem && textAlign == Align::Center);
 			if (node.checkItem || node.checkBox || node.switchToggle) x += textLeft + checkOffset;
@@ -4046,7 +4741,8 @@ namespace xui {
 			else if (!node.checkItem && textAlign == Align::End) x += rect.w - runWidth - padRight;
 			else x += padLeft;
 			if (node.textBox && !placeholderText && node.focused) {
-				const f32 caretPosition = editorLayout.caretAt(static_cast<u32>(editorOffset(node.caret))).x / m_dpiScale;
+				const f32 caretPosition =
+					editorLayout.caretAt(static_cast<u32>(editorOffset(node.caret))).x / m_dpiScale;
 				x = rect.x + textLeft - std::clamp(caretPosition - contentWidth, 0.f, std::max(0.f, advanceWidth - contentWidth));
 			}
 			else if (node.textArea || node.textBox) x = rect.x + textLeft;
@@ -4061,10 +4757,13 @@ namespace xui {
 				const u32 firstLine = first.line, lastLine = last.line;
 				const f32 firstX = first.x / m_dpiScale, lastX = last.x / m_dpiScale;
 				const f32 lineHeight = std::max(fontSize, font->lineHeight(rasterSize) / m_dpiScale);
-				const f32 textTop = rect.y + padTop + std::max(0.f, (rect.h - padTop - padBottom - runHeight) * 0.5f) - textScrollOffsetY;
+				const f32 textTop = rect.y + padTop + std::max(0.f, (rect.h - padTop - padBottom - runHeight) * 0.5f) -
+									textScrollOffsetY;
 				for (u32 line = firstLine; line <= lastLine; ++line) {
 					const f32 left = firstLine == lastLine ? std::min(firstX, lastX) : line == firstLine ? firstX : 0.f;
-					const f32 right = firstLine == lastLine ? std::max(firstX, lastX) : line == lastLine ? lastX : contentWidth;
+					const f32 right = firstLine == lastLine ? std::max(firstX, lastX)
+									  : line == lastLine	? lastX
+															: contentWidth;
 					painter.fillRect({ glyphOriginX + left, textTop + f32(line) * lineHeight, std::max(2.f, right - left), lineHeight }, fg.withAlpha(0.28f));
 				}
 			}
@@ -4086,7 +4785,8 @@ namespace xui {
 					const f32 offset = std::clamp(caretPosition - contentWidth, 0.f, std::max(0.f, advanceWidth - contentWidth));
 					caretX = caretPosition - offset;
 				}
-				const f32 y = rect.y + padTop + std::max(0.f, (rect.h - padTop - padBottom - runHeight) * 0.5f) + caretY - textScrollOffsetY;
+				const f32 y = rect.y + padTop + std::max(0.f, (rect.h - padTop - padBottom - runHeight) * 0.5f) +
+							  caretY - textScrollOffsetY;
 				painter.line({ glyphOriginX + caretX, y + 1.f }, { glyphOriginX + caretX, y + std::max(2.f, fontSize - 1.f) }, 1.f, fg);
 			}
 			painter.popClip();
@@ -4214,8 +4914,9 @@ namespace xui {
 		for (Node& node : m_nodes) {
 			if (!node.popupOpen || (!node.dropdown && !node.colorPicker && !node.datePicker)) continue;
 			const Rect anchor = m_layout.absRect(node.layout);
-			const Rect popup = popupBounds(anchor, node.dropdown, payload(node).options.size(), m_lastLayoutHeight,
-				node.datePicker ? 224.f : node.pickerWidth, node.datePicker ? 208.f : node.pickerHeight);
+			const Rect popup =
+				popupBounds(anchor, node.dropdown, payload(node).options.size(), m_lastLayoutHeight,
+							node.datePicker ? 224.f : node.pickerWidth, node.datePicker ? 208.f : node.pickerHeight);
 			const Color panel = color(node.style, PropId::Bg, Color::fromRGBA8(0x151E32FFu));
 			const Color foreground = color(node.style, PropId::Fg, Color::fromRGBA8(0xF2F6FFFFu));
 			painter.fillRect(popup, panel, CornerRadii::all(5.f));
@@ -4495,35 +5196,45 @@ namespace xui {
 			if (field.textArea && m_text && field.font.valid()) {
 				const Rect rect = m_layout.absRect(field.layout);
 				const Vec2 local = inverseTransformPoint(field.paintTransform, point);
-				const f32 fontSize = field.style.has(PropId::FontSize) ? number(field.style.get(PropId::FontSize), 0, 16.f) : 16.f;
+				const f32 fontSize =
+					field.style.has(PropId::FontSize) ? number(field.style.get(PropId::FontSize), 0, 16.f) : 16.f;
 				const f32 border = field.style.has(PropId::Border) ? number(field.style.get(PropId::Border), 0) : 0.f;
 				const f32 pad = field.style.has(PropId::Pad) ? number(field.style.get(PropId::Pad), 0) : 0.f;
 				const f32 top = rect.y + pad + border;
 				const f32 bottom = rect.bottom() - pad - border;
 				const f32 contentWidth = std::max(1.f, rect.w - 2.f * (pad + border));
 				const Font* textFont = m_text->font(field.font);
-				const f32 lineHeight = textFont
-					? std::max(fontSize, textFont->lineHeight(fontSize * m_dpiScale) / m_dpiScale)
-					: fontSize;
+				const f32 lineHeight =
+					textFont ? std::max(fontSize, textFont->lineHeight(fontSize * m_dpiScale) / m_dpiScale) : fontSize;
 				const f32 outside = local.y < top ? local.y - top : local.y > bottom ? local.y - bottom : 0.f;
 				if (outside != 0.f) {
 					const f32 speed = lineHeight * std::clamp(12.f + std::abs(outside) * 2.f, 12.f, 180.f);
 					m_textAutoScrollVelocity = std::copysign(speed, outside);
 					const auto now = std::chrono::steady_clock::now();
-					if (m_textAutoScrollLast.time_since_epoch().count() == 0) m_textAutoScrollLast = now;
-					if (m_textAutoScrollDeadline.time_since_epoch().count() == 0) m_textAutoScrollDeadline = now + std::chrono::milliseconds(16);
+					if (m_textAutoScrollLast.time_since_epoch().count() == 0)
+						m_textAutoScrollLast = now;
+					if (m_textAutoScrollDeadline.time_since_epoch().count() == 0)
+						m_textAutoScrollDeadline = now + std::chrono::milliseconds(16);
 				} else {
 					m_textAutoScrollDeadline = {};
 					m_textAutoScrollLast = {};
 				}
 				const f32 wrap = contentWidth * m_dpiScale;
 				const f32 contentHeight = std::max(0.f, bottom - top);
-				const f32 maxScroll = std::max(0.f, m_text->layout(field.font, field.text, fontSize * m_dpiScale, wrap).height / m_dpiScale - contentHeight);
+				const f32 maxScroll = std::max(
+					0.f, m_text->layout(field.font, field.text, fontSize * m_dpiScale, wrap).height / m_dpiScale -
+							 contentHeight);
 				f32 scroll = field.textScrollY;
-				if (local.y < top) scroll -= lineHeight * std::clamp(1.f + (top - local.y) / lineHeight, 1.f, 4.f);
-				else if (local.y > bottom) scroll += lineHeight * std::clamp(1.f + (local.y - bottom) / lineHeight, 1.f, 4.f);
+				if (local.y < top)
+					scroll -= lineHeight * std::clamp(1.f + (top - local.y) / lineHeight, 1.f, 4.f);
+				else if (local.y > bottom)
+					scroll += lineHeight * std::clamp(1.f + (local.y - bottom) / lineHeight, 1.f, 4.f);
 				scroll = std::clamp(scroll, 0.f, maxScroll);
-				if (scroll != field.textScrollY) { field.textScrollY = scroll; addDamage(rect); changed = true; }
+				if (scroll != field.textScrollY) {
+					field.textScrollY = scroll;
+					addDamage(rect);
+					changed = true;
+				}
 			}
 			const std::size_t caret = textIndexAtPoint(field, point);
 			if (caret != field.caret) {
@@ -4562,8 +5273,10 @@ namespace xui {
 			const u32 index = static_cast<u32>(i - 1);
 			const Node& node = m_nodes[index];
 			if (!node.popupOpen || (!node.dropdown && !node.colorPicker && !node.datePicker) || !isNodeVisible(index)) continue;
-			if (popupBounds(m_layout.absRect(node.layout), node.dropdown, payload(node).options.size(), m_lastLayoutHeight,
-				node.datePicker ? 224.f : node.pickerWidth, node.datePicker ? 208.f : node.pickerHeight).contains(point)) {
+			if (popupBounds(m_layout.absRect(node.layout), node.dropdown, payload(node).options.size(),
+							m_lastLayoutHeight, node.datePicker ? 224.f : node.pickerWidth,
+							node.datePicker ? 208.f : node.pickerHeight)
+					.contains(point)) {
 				popupTarget = index;
 				break;
 			}
@@ -4605,7 +5318,7 @@ namespace xui {
 					const f32 rowHeight = std::max(24.f, fontSize * 1.8f);
 					const f32 top = rect.y + layout.border.t + layout.padding.t - node.listScrollY;
 					const i32 candidate = static_cast<i32>((point.y - top) / rowHeight);
-					if (candidate >= 0 && static_cast<u32>(candidate) < payload(node).options.size())
+					if (candidate >= 0 && static_cast<u32>(candidate) < listItemCount(node))
 						row = candidate;
 				}
 				if (row != node.treeHover) {
@@ -4621,7 +5334,7 @@ namespace xui {
 					const LayoutStyle& layout = m_layout.style(node.layout);
 					const f32 top = rect.y + layout.border.t + layout.padding.t + 30.f - node.tableScrollY;
 					const i32 candidate = static_cast<i32>((point.y - top) / 26.f);
-					if (candidate >= 0 && static_cast<u32>(candidate) < payload(node).tableRows.size())
+					if (candidate >= 0 && static_cast<u32>(candidate) < listItemCount(node))
 						row = candidate;
 				}
 				if (row != node.treeHover) {
@@ -4681,8 +5394,9 @@ namespace xui {
 			const Rect popup = popupBounds(m_layout.absRect(node.layout), true, payload(node).options.size(),
 										   m_lastLayoutHeight, node.pickerWidth, node.pickerHeight);
 			const i32 over = i == popupTarget && popup.contains(point) && !payload(node).options.empty()
-				? std::clamp<i32>(static_cast<i32>((point.y - popup.y) / 28.f), 0, static_cast<i32>(payload(node).options.size()) - 1)
-				: -1;
+								 ? std::clamp<i32>(static_cast<i32>((point.y - popup.y) / 28.f), 0,
+												   static_cast<i32>(payload(node).options.size()) - 1)
+								 : -1;
 			if (over != node.hoveredOption) { node.hoveredOption = over; changed = true; addDamage(popup); }
 		}
 		if (m_splitDrag.active) {
@@ -4880,22 +5594,29 @@ namespace xui {
 			Node& node = m_nodes[index];
 			if (node.textArea && !node.disabled && m_text && node.font.valid()) {
 				const Rect rect = m_layout.absRect(node.layout);
-				const f32 fontSize = node.style.has(PropId::FontSize) ? number(node.style.get(PropId::FontSize), 0, 16.f) : 16.f;
+				const f32 fontSize =
+					node.style.has(PropId::FontSize) ? number(node.style.get(PropId::FontSize), 0, 16.f) : 16.f;
 				const f32 border = node.style.has(PropId::Border) ? number(node.style.get(PropId::Border), 0) : 0.f;
 				const f32 pad = node.style.has(PropId::Pad) ? number(node.style.get(PropId::Pad), 0) : 0.f;
 				const f32 contentWidth = std::max(1.f, rect.w - 2.f * (pad + border));
 				const f32 contentHeight = std::max(0.f, rect.h - 2.f * (pad + border));
-				const f32 maxScroll = std::max(0.f, m_text->layout(node.font, node.text, fontSize * m_dpiScale,
-					contentWidth * m_dpiScale).height / m_dpiScale - contentHeight);
+				const f32 maxScroll = std::max(
+					0.f, m_text->layout(node.font, node.text, fontSize * m_dpiScale, contentWidth * m_dpiScale).height /
+								 m_dpiScale -
+							 contentHeight);
 				const f32 next = std::clamp(node.textScrollY - delta.y * node.scrollSpeed, 0.f, maxScroll);
-				if (next != node.textScrollY) { node.textScrollY = next; addDamage(rect); return true; }
+				if (next != node.textScrollY) {
+					node.textScrollY = next;
+					addDamage(rect);
+					return true;
+				}
 			}
 			if (node.listView && !node.disabled) {
 				const Rect rect = m_layout.absRect(node.layout);
 				const f32 fontSize =
 					node.style.has(PropId::FontSize) ? number(node.style.get(PropId::FontSize), 0, 14.f) : 14.f;
 				const f32 rowHeight = std::max(24.f, fontSize * 1.8f);
-				const f32 maxOffset = std::max(0.f, rowHeight * f32(payload(node).options.size()) - rect.h);
+				const f32 maxOffset = std::max(0.f, rowHeight * f32(listItemCount(node)) - rect.h);
 				const f32 next = std::clamp(node.listScrollY - delta.y * node.scrollSpeed, 0.f, maxOffset);
 				if (next != node.listScrollY) {
 					node.listScrollY = next;
@@ -4905,8 +5626,7 @@ namespace xui {
 			}
 			if (node.table && !node.disabled) {
 				const Rect rect = m_layout.absRect(node.layout);
-				const f32 maxOffset =
-					std::max(0.f, 26.f * f32(payload(node).tableRows.size()) - std::max(0.f, rect.h - 30.f));
+				const f32 maxOffset = std::max(0.f, 26.f * f32(listItemCount(node)) - std::max(0.f, rect.h - 30.f));
 				const f32 next = std::clamp(node.tableScrollY - delta.y * node.scrollSpeed, 0.f, maxOffset);
 				if (next != node.tableScrollY) {
 					node.tableScrollY = next;
@@ -4946,8 +5666,10 @@ namespace xui {
 		for (u32 i = 0; i < m_nodes.size(); ++i) {
 			const Node& node = m_nodes[i];
 			if (node.popupOpen && (node.dropdown || node.colorPicker || node.datePicker) && isNodeVisible(i) &&
-				popupBounds(m_layout.absRect(node.layout), node.dropdown, payload(node).options.size(), m_lastLayoutHeight,
-					node.datePicker ? 224.f : node.pickerWidth, node.datePicker ? 208.f : node.pickerHeight).contains(point)) {
+				popupBounds(m_layout.absRect(node.layout), node.dropdown, payload(node).options.size(),
+							m_lastLayoutHeight, node.datePicker ? 224.f : node.pickerWidth,
+							node.datePicker ? 208.f : node.pickerHeight)
+					.contains(point)) {
 				popupCoversPoint = true; break;
 			}
 		}
@@ -5021,8 +5743,9 @@ namespace xui {
 			Node& node = m_nodes[index];
 			if (!node.popupOpen || (!node.dropdown && !node.colorPicker && !node.datePicker) || !isNodeVisible(index)) continue;
 			const Rect anchor = m_layout.absRect(node.layout);
-			const Rect popup = popupBounds(anchor, node.dropdown, payload(node).options.size(), m_lastLayoutHeight,
-				node.datePicker ? 224.f : node.pickerWidth, node.datePicker ? 208.f : node.pickerHeight);
+			const Rect popup =
+				popupBounds(anchor, node.dropdown, payload(node).options.size(), m_lastLayoutHeight,
+							node.datePicker ? 224.f : node.pickerWidth, node.datePicker ? 208.f : node.pickerHeight);
 			if (!popup.contains(point)) continue;
 			if (node.datePicker) {
 				const f32 localY = point.y - popup.y;
@@ -5041,7 +5764,7 @@ namespace xui {
 						node.dateYear = node.viewYear;
 						node.dateMonth = node.viewMonth;
 						node.dateDay = static_cast<u32>(day);
-						node.text = formatDateText(node.dateYear, node.dateMonth, node.dateDay);
+						node.text = formatDateText(node.dateYear, node.dateMonth, node.dateDay, m_locale);
 						m_layout.markContentChanged(node.layout);
 						node.popupOpen = false;
 						if (node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
@@ -5204,7 +5927,7 @@ namespace xui {
 			if (!focus && node.focused && node.numberField && !node.disabled) {
 				// Blur commits; text that never parsed reverts to the last valid value.
 				if (!commitNumberText(node) && node.inputInvalid) {
-					node.text = formatNumberText(node.value, node.numberPrecision);
+					node.text = formatNumberText(node.value, node.numberPrecision, m_locale);
 					if (!node.unit.empty()) { node.text += " "; node.text += node.unit; }
 					node.inputInvalid = false;
 					m_layout.markContentChanged(node.layout);
@@ -5224,9 +5947,11 @@ namespace xui {
 				m_textSelectDrag = index;
 			}
 		}
-		if (target && (target->textBox || target->textArea || target->pickerEditor) && !target->disabled && !target->readOnly) {
+		if (target && (target->textBox || target->textArea || target->pickerEditor) && !target->disabled &&
+			!target->readOnly) {
 			const auto now = std::chrono::steady_clock::now();
-			const bool repeated = m_textClickNode == targetIndex && now - m_textClickTime <= std::chrono::milliseconds(500) &&
+			const bool repeated =
+				m_textClickNode == targetIndex && now - m_textClickTime <= std::chrono::milliseconds(500) &&
 				std::abs(point.x - m_textClickPoint.x) <= 4.f && std::abs(point.y - m_textClickPoint.y) <= 4.f;
 			m_textClickCount = repeated ? static_cast<u8>(m_textClickCount % 3 + 1) : 1;
 			m_textClickNode = targetIndex;
@@ -5235,28 +5960,31 @@ namespace xui {
 			if (m_textClickCount == 2 && !target->text.empty()) {
 				auto wordByte = [&](std::size_t offset) {
 					const u8 c = static_cast<u8>(target->text[offset]);
-					return c >= 0x80 || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-						(c >= '0' && c <= '9') || c == '_';
+					return c >= 0x80 || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+						   c == '_';
 				};
 				std::size_t at = std::min(target->caret, target->text.size());
-				if (at == target->text.size() && at) at = previousUtf8(target->text, at);
+				if (at == target->text.size() && at)
+					at = previousUtf8(target->text, at);
 				if (at < target->text.size() && !wordByte(at) && at > 0) {
 					const std::size_t prev = previousUtf8(target->text, at);
-					if (wordByte(prev)) at = prev;
+					if (wordByte(prev))
+						at = prev;
 				}
 				if (at < target->text.size() && wordByte(at)) {
 					std::size_t begin = at, end = nextUtf8(target->text, at);
 					while (begin) {
 						const std::size_t prev = previousUtf8(target->text, begin);
-						if (!wordByte(prev)) break;
+						if (!wordByte(prev))
+							break;
 						begin = prev;
 					}
-					while (end < target->text.size() && wordByte(end)) end = nextUtf8(target->text, end);
+					while (end < target->text.size() && wordByte(end))
+						end = nextUtf8(target->text, end);
 					target->caret = begin;
 					target->selectionAnchor = end;
 				}
-			}
-			else if (m_textClickCount == 3) {
+			} else if (m_textClickCount == 3) {
 				const std::size_t at = std::min(target->caret, target->text.size());
 				const std::size_t newlineBefore = at ? target->text.rfind('\n', at - 1) : std::string::npos;
 				const std::size_t begin = newlineBefore == std::string::npos ? 0 : newlineBefore + 1;
@@ -5398,8 +6126,11 @@ namespace xui {
 														 1.8f);
 				const f32 contentY = rect.y + layout.border.t + layout.padding.t - target->listScrollY;
 				const i32 row = static_cast<i32>(std::floor((point.y - contentY) / rowHeight));
-				if (row >= 0 && static_cast<u32>(row) < payload(*target).options.size()) {
-					const std::string& selected = payload(*target).options[static_cast<u32>(row)];
+				if (row >= 0 && static_cast<u32>(row) < listItemCount(*target)) {
+					std::string selected;
+					if (!listItemText(*target, static_cast<u32>(row), selected))
+						return true;
+					target->listSelectedRow = row;
 					if (target->treeSelection != selected) {
 						target->treeSelection = selected;
 						addDamage(rect);
@@ -5426,8 +6157,7 @@ namespace xui {
 					}
 				}
 				const i32 row = static_cast<i32>(std::floor((point.y - top - 30.f + target->tableScrollY) / 26.f));
-				if (row >= 0 && static_cast<u32>(row) < payload(*target).tableRows.size() &&
-					target->tableSelectedRow != row) {
+				if (row >= 0 && static_cast<u32>(row) < listItemCount(*target) && target->tableSelectedRow != row) {
 					target->tableSelectedRow = row;
 					addDamage(rect);
 					if (target->pressHandler.v && m_eventFn)
@@ -5435,8 +6165,10 @@ namespace xui {
 				}
 				return true;
 			}
-			const bool shouldPress = target->button || target->checkItem || target->checkBox || target->slider || target->listView || target->table ||
-				target->dropdown || target->colorPicker || target->textBox || target->textArea || target->switchToggle || target->toggleButton || target->datePicker;
+			const bool shouldPress = target->button || target->checkItem || target->checkBox || target->slider ||
+									 target->listView || target->table || target->dropdown || target->colorPicker ||
+									 target->textBox || target->textArea || target->switchToggle ||
+									 target->toggleButton || target->datePicker;
 			for (Node& node : m_nodes) if (&node != target && node.pressed) {
 				node.pressed = false;
 				addDamage(m_layout.absRect(node.layout));
@@ -5452,8 +6184,10 @@ namespace xui {
 					for (Node& node : m_nodes) if (&node != target && node.popupOpen) node.popupOpen = false;
 					target->popupOpen = true;
 					if (target->datePicker) { target->viewYear = target->dateYear; target->viewMonth = target->dateMonth; }
-					addDamage(popupBounds(m_layout.absRect(target->layout), target->dropdown, payload(*target).options.size(), m_lastLayoutHeight,
-						target->datePicker ? 224.f : target->pickerWidth, target->datePicker ? 208.f : target->pickerHeight));
+					addDamage(popupBounds(m_layout.absRect(target->layout), target->dropdown,
+										  payload(*target).options.size(), m_lastLayoutHeight,
+										  target->datePicker ? 224.f : target->pickerWidth,
+										  target->datePicker ? 208.f : target->pickerHeight));
 				}
 				if (target->slider) {
 					if (target->rangeSlider) {
@@ -5624,7 +6358,8 @@ namespace xui {
 				auto& destination = (&source == &field.redoStack) ? field.undoStack : field.redoStack;
 				if (source.empty() || field.readOnly)
 					return false;
-				if (!validateInput(field, source.back().text)) return true;
+				if (!validateInput(field, source.back().text))
+					return true;
 				destination.push_back({field.text, field.caret, field.selectionAnchor});
 				const auto snapshot = std::move(source.back());
 				source.pop_back();
@@ -5658,16 +6393,19 @@ namespace xui {
 			const std::size_t oldCaret = field.caret;
 			const bool shift = (mods & static_cast<u8>(Mod::Shift)) != 0;
 			bool edited = false;
-			if (!field.readOnly && (key == Key::Backspace || key == Key::Delete || (control && key == static_cast<Key>('X')))) {
+			if (!field.readOnly &&
+				(key == Key::Backspace || key == Key::Delete || (control && key == static_cast<Key>('X')))) {
 				std::size_t eraseBegin = selectionBegin, eraseEnd = selectionEnd;
 				if (!hasSelection && key == Key::Backspace && field.caret)
-					eraseBegin = control ? previousWord(field.text, field.caret) : previousUtf8(field.text, field.caret);
+					eraseBegin =
+						control ? previousWord(field.text, field.caret) : previousUtf8(field.text, field.caret);
 				else if (!hasSelection && key == Key::Delete && field.caret < field.text.size())
 					eraseEnd = control ? nextWord(field.text, field.caret) : nextUtf8(field.text, field.caret);
 				if (eraseEnd > eraseBegin) {
 					std::string proposed = field.text;
 					proposed.erase(eraseBegin, eraseEnd - eraseBegin);
-					if (!validateInput(field, proposed)) return true;
+					if (!validateInput(field, proposed))
+						return true;
 				}
 			}
 			if (!field.readOnly && ((key == Key::Backspace || key == Key::Delete) || (control && key == static_cast<Key>('X')))) {
@@ -5725,9 +6463,11 @@ namespace xui {
 				const u32 spaces = std::min(field.tabSize, room);
 				if (spaces) {
 					std::string proposed = field.text;
-					if (hasSelection) proposed.erase(selectionBegin, selectionEnd - selectionBegin);
+					if (hasSelection)
+						proposed.erase(selectionBegin, selectionEnd - selectionBegin);
 					proposed.insert(selectionBegin, spaces, ' ');
-					if (!validateInput(field, proposed)) return true;
+					if (!validateInput(field, proposed))
+						return true;
 					rememberEdit();
 					if (hasSelection) field.text.erase(selectionBegin, selectionEnd - selectionBegin);
 					field.text.insert(selectionBegin, spaces, ' ');
@@ -5739,9 +6479,11 @@ namespace xui {
 				const std::size_t countAfterSelection = codepointCount(field.text) - (hasSelection ? codepointCount(std::string_view(field.text).substr(selectionBegin, selectionEnd - selectionBegin)) : 0u);
 				if (!field.maxLength || countAfterSelection < field.maxLength) {
 					std::string proposed = field.text;
-					if (hasSelection) proposed.erase(selectionBegin, selectionEnd - selectionBegin);
+					if (hasSelection)
+						proposed.erase(selectionBegin, selectionEnd - selectionBegin);
 					proposed.insert(selectionBegin, 1, '\n');
-					if (!validateInput(field, proposed)) return true;
+					if (!validateInput(field, proposed))
+						return true;
 					rememberEdit();
 					if (hasSelection) field.text.erase(selectionBegin, selectionEnd - selectionBegin);
 					field.text.insert(selectionBegin, 1, '\n');
@@ -5758,6 +6500,7 @@ namespace xui {
 				if (field.pickerEditor) updatePickerFromEditor(field);
 				else if (field.numberField) commitNumberText(field);
 				else if (field.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(field.pressHandler));
+				publishModelValue(field, field.text);
 			}
 			if (edited || oldCaret != field.caret) { resetCaretBlink(); addDamage(field.pickerEditor ? pickerEditorRect(field) : m_layout.absRect(field.layout)); return true; }
 			if (key == Key::Backspace || key == Key::Delete) return false;
@@ -5840,7 +6583,7 @@ namespace xui {
 				shiftDate(node.dateYear, node.dateMonth, node.dateDay, delta);
 				node.viewYear = node.dateYear;
 				node.viewMonth = node.dateMonth;
-				node.text = formatDateText(node.dateYear, node.dateMonth, node.dateDay);
+				node.text = formatDateText(node.dateYear, node.dateMonth, node.dateDay, m_locale);
 				m_layout.markContentChanged(node.layout);
 				addDamage(m_layout.absRect(node.layout));
 				addDamage(popupBounds(m_layout.absRect(node.layout), false, 0, m_lastLayoutHeight, 224.f, 208.f));
@@ -5911,20 +6654,26 @@ namespace xui {
 			return false;
 		}
 		if (key == Key::Down || key == Key::Up) {
-			for (Node& node : m_nodes) if (node.dropdown && node.focused && !payload(node).options.empty()) {
-				const i32 direction = key == Key::Down ? 1 : -1;
-				node.selectedOption = static_cast<u32>(std::clamp<i32>(static_cast<i32>(node.selectedOption) + direction, 0, static_cast<i32>(payload(node).options.size()) - 1));
-				node.text = payload(node).options[node.selectedOption]; m_layout.markContentChanged(node.layout); addDamage(m_layout.absRect(node.layout));
-				if (node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
-				return true;
-			}
+			for (Node& node : m_nodes)
+				if (node.dropdown && node.focused && !payload(node).options.empty()) {
+					const i32 direction = key == Key::Down ? 1 : -1;
+					node.selectedOption =
+						static_cast<u32>(std::clamp<i32>(static_cast<i32>(node.selectedOption) + direction, 0,
+														 static_cast<i32>(payload(node).options.size()) - 1));
+					node.text = payload(node).options[node.selectedOption];
+					m_layout.markContentChanged(node.layout);
+					addDamage(m_layout.absRect(node.layout));
+					if (node.pressHandler.v && m_eventFn)
+						m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
+					return true;
+				}
 		}
 		if (key == Key::Down || key == Key::Up) {
 			for (u32 index : m_interactiveNodes) {
 				Node& node = m_nodes[index];
-				if (node.table && node.focused && !node.disabled && !payload(node).tableRows.empty()) {
+				if (node.table && node.focused && !node.disabled && listItemCount(node) > 0) {
 					const i32 next = std::clamp(node.tableSelectedRow + (key == Key::Down ? 1 : -1), 0,
-												static_cast<i32>(payload(node).tableRows.size()) - 1);
+												static_cast<i32>(listItemCount(node)) - 1);
 					if (next == node.tableSelectedRow)
 						return false;
 					node.tableSelectedRow = next;
@@ -5939,15 +6688,23 @@ namespace xui {
 						m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
 					return true;
 				}
-				if (node.listView && node.focused && !node.disabled && !payload(node).options.empty()) {
-					auto found =
-						std::find(payload(node).options.begin(), payload(node).options.end(), node.treeSelection);
-					i32 selected = found == payload(node).options.end()
+				if (node.listView && node.focused && !node.disabled && listItemCount(node) > 0) {
+					const bool providerBacked = node.id.v && m_listItemProviders.contains(node.id);
+					i32 selected = node.listSelectedRow;
+					if (!providerBacked) {
+						auto found =
+							std::find(payload(node).options.begin(), payload(node).options.end(), node.treeSelection);
+						selected = found == payload(node).options.end()
 									   ? (key == Key::Down ? -1 : static_cast<i32>(payload(node).options.size()))
 									   : static_cast<i32>(found - payload(node).options.begin());
+					}
 					selected = std::clamp(selected + (key == Key::Down ? 1 : -1), 0,
-										  static_cast<i32>(payload(node).options.size()) - 1);
-					node.treeSelection = payload(node).options[static_cast<u32>(selected)];
+										  static_cast<i32>(listItemCount(node)) - 1);
+					std::string selectedText;
+					if (!listItemText(node, static_cast<u32>(selected), selectedText))
+						return false;
+					node.listSelectedRow = selected;
+					node.treeSelection = std::move(selectedText);
 					const Rect bounds = m_layout.absRect(node.layout);
 					const f32 fontSize =
 						node.style.has(PropId::FontSize) ? number(node.style.get(PropId::FontSize), 0, 14.f) : 14.f;
@@ -5957,8 +6714,8 @@ namespace xui {
 						node.listScrollY = rowTop;
 					else if (rowBottom > node.listScrollY + bounds.h)
 						node.listScrollY = rowBottom - bounds.h;
-					node.listScrollY = std::clamp(
-						node.listScrollY, 0.f, std::max(0.f, rowHeight * f32(payload(node).options.size()) - bounds.h));
+					node.listScrollY = std::clamp(node.listScrollY, 0.f,
+												  std::max(0.f, rowHeight * f32(listItemCount(node)) - bounds.h));
 					addDamage(m_layout.absRect(node.layout));
 					if (node.pressHandler.v && m_eventFn)
 						m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
@@ -6046,16 +6803,18 @@ namespace xui {
 
 	bool UiRuntime::validateInput(Node& field, std::string_view proposedText) {
 		Node* owner = &field;
-		if (field.pickerEditor && field.pickerOwner < m_nodes.size()) owner = &m_nodes[field.pickerOwner];
+		if (field.pickerEditor && field.pickerOwner < m_nodes.size())
+			owner = &m_nodes[field.pickerOwner];
 		std::string error;
 		auto run = [&](StrId handler) {
-			if (!handler.v) return true;
+			if (!handler.v)
+				return true;
 			if (!m_inputValidationFn) {
 				error = "No input validation callback is registered";
 				return false;
 			}
-			return m_inputValidationFn(m_inputValidationContext, m_strings->view(handler),
-				m_strings->view(owner->id), proposedText, error);
+			return m_inputValidationFn(m_inputValidationContext, m_strings->view(handler), m_strings->view(owner->id),
+									   proposedText, error);
 		};
 		const bool accepted = run(owner->filterHandler) && run(owner->validateHandler);
 		const std::string message = accepted ? std::string{} : (error.empty() ? "Input rejected" : std::move(error));
@@ -6064,7 +6823,8 @@ namespace xui {
 		field.validationError = message;
 		if (changed) {
 			addDamage(owner->pickerEditor ? pickerEditorRect(*owner) : m_layout.absRect(owner->layout));
-			if (owner != &field) addDamage(pickerEditorRect(field));
+			if (owner != &field)
+				addDamage(pickerEditorRect(field));
 		}
 		return accepted;
 	}
@@ -6090,9 +6850,11 @@ namespace xui {
 			if (field.maxLength && codepointCount(field.text) - selectedCount >= field.maxLength) return false;
 			std::string encoded; appendUtf8(encoded, codepoint);
 			std::string proposed = field.text;
-			if (end > begin) proposed.erase(begin, end - begin);
+			if (end > begin)
+				proposed.erase(begin, end - begin);
 			proposed.insert(begin, encoded);
-			if (!validateInput(field, proposed)) return true;
+			if (!validateInput(field, proposed))
+				return true;
 			field.undoStack.push_back({field.text, field.caret, field.selectionAnchor});
 			if (field.undoStack.size() > 64)
 				field.undoStack.erase(field.undoStack.begin());
@@ -6105,6 +6867,7 @@ namespace xui {
 			if (field.pickerEditor) updatePickerFromEditor(field);
 			else if (field.numberField) commitNumberText(field);
 			else if (field.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(field.pressHandler));
+			publishModelValue(field, field.text);
 			if (field.pickerEditor) addDamage(pickerEditorRect(field));
 			return true;
 		}
@@ -6140,20 +6903,25 @@ namespace xui {
 				appendUtf8(inserted, codepoint);
 			i += length;
 		}
-		if (inserted.empty()) return false;
+		if (inserted.empty())
+			return false;
 		for (u32 index : m_interactiveNodes) {
 			Node& field = m_nodes[index];
-			if (!(field.textBox || field.textArea || field.pickerEditor) || !field.focused || field.disabled || field.readOnly)
+			if (!(field.textBox || field.textArea || field.pickerEditor) || !field.focused || field.disabled ||
+				field.readOnly)
 				continue;
 			std::string fieldInsertion = inserted;
 			if (!field.textArea) {
 				fieldInsertion.erase(std::remove_if(fieldInsertion.begin(), fieldInsertion.end(),
-					[](char c) { return c == '\n' || c == '\t'; }), fieldInsertion.end());
+													[](char c) { return c == '\n' || c == '\t'; }),
+									 fieldInsertion.end());
 			}
-			if (fieldInsertion.empty()) return false;
+			if (fieldInsertion.empty())
+				return false;
 			if (field.numberField) {
 				for (u8 byte : fieldInsertion)
-					if (!((byte >= '0' && byte <= '9') || byte == '.' || byte == '-' || byte == '+' || byte == ' ' || byte == 'e' || byte == 'E'))
+					if (!((byte >= '0' && byte <= '9') || byte == '.' || byte == '-' || byte == '+' || byte == ' ' ||
+						  byte == 'e' || byte == 'E'))
 						return false;
 			}
 			const std::size_t begin = std::min(field.caret, field.selectionAnchor);
@@ -6165,13 +6933,16 @@ namespace xui {
 				const u32 room = field.maxLength > retainedCount ? field.maxLength - retainedCount : 0u;
 				fieldInsertion = truncateUtf8(fieldInsertion, room);
 			}
-			if (fieldInsertion.empty()) return false;
+			if (fieldInsertion.empty())
+				return false;
 			std::string proposed = field.text;
 			proposed.erase(begin, end - begin);
 			proposed.insert(begin, fieldInsertion);
-			if (!validateInput(field, proposed)) return true;
+			if (!validateInput(field, proposed))
+				return true;
 			field.undoStack.push_back({field.text, field.caret, field.selectionAnchor});
-			if (field.undoStack.size() > 64) field.undoStack.erase(field.undoStack.begin());
+			if (field.undoStack.size() > 64)
+				field.undoStack.erase(field.undoStack.begin());
 			field.redoStack.clear();
 			field.text = std::move(proposed);
 			field.caret = field.selectionAnchor = begin + fieldInsertion.size();
@@ -6179,9 +6950,13 @@ namespace xui {
 			resetCaretBlink();
 			m_layout.markContentChanged(field.layout);
 			addDamage(field.pickerEditor ? pickerEditorRect(field) : m_layout.absRect(field.layout));
-			if (field.pickerEditor) updatePickerFromEditor(field);
-			else if (field.numberField) commitNumberText(field);
-			else if (field.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(field.pressHandler));
+			if (field.pickerEditor)
+				updatePickerFromEditor(field);
+			else if (field.numberField)
+				commitNumberText(field);
+			else if (field.pressHandler.v && m_eventFn)
+				m_eventFn(m_eventContext, m_strings->view(field.pressHandler));
+			publishModelValue(field, field.text);
 			return true;
 		}
 		return false;
@@ -6205,7 +6980,8 @@ namespace xui {
 	bool UiRuntime::cancelImeComposition() {
 		bool changed = false;
 		for (Node& node : m_nodes) {
-			if (!node.focused && node.imePreedit.empty()) continue;
+			if (!node.focused && node.imePreedit.empty())
+				continue;
 			if (node.focused) {
 				node.focused = false;
 				addDamage(node.pickerEditor ? pickerEditorRect(node) : m_layout.absRect(node.layout));
@@ -6225,24 +7001,30 @@ namespace xui {
 	}
 
 	Rect UiRuntime::imeCursorRect() const {
-		if (!m_text) return {};
+		if (!m_text)
+			return {};
 		for (u32 index : m_interactiveNodes) {
 			const Node& field = m_nodes[index];
-			if (!(field.textBox || field.textArea || field.pickerEditor) || !field.focused || field.disabled || field.readOnly ||
-				!field.font.valid()) continue;
+			if (!(field.textBox || field.textArea || field.pickerEditor) || !field.focused || field.disabled ||
+				field.readOnly || !field.font.valid())
+				continue;
 			const Rect rect = field.pickerEditor ? pickerEditorRect(field) : m_layout.absRect(field.layout);
 			const f32 dpi = m_dpiScale > 0.f ? m_dpiScale : 1.f;
 			const f32 size = field.style.has(PropId::FontSize)
-				? number(field.style.get(PropId::FontSize), 0, field.pickerEditor ? 12.f : 16.f)
-				: (field.pickerEditor ? 12.f : 16.f);
+								 ? number(field.style.get(PropId::FontSize), 0, field.pickerEditor ? 12.f : 16.f)
+								 : (field.pickerEditor ? 12.f : 16.f);
 			const f32 raster = size * dpi;
 			const f32 border = field.style.has(PropId::Border) ? number(field.style.get(PropId::Border), 0) : 0.f;
-			const Edges padding = field.pickerEditor ? Edges{3.f, 5.f, 3.f, 5.f}
+			const Edges padding =
+				field.pickerEditor	  ? Edges{3.f, 5.f, 3.f, 5.f}
 				: field.hasXuiPadding ? field.xuiPadding
-				: field.style.has(PropId::Pad) ? Edges{number(field.style.get(PropId::Pad), 3), number(field.style.get(PropId::Pad), 0),
-					number(field.style.get(PropId::Pad), 1), number(field.style.get(PropId::Pad), 2)} : Edges{};
+				: field.style.has(PropId::Pad)
+					? Edges{number(field.style.get(PropId::Pad), 3), number(field.style.get(PropId::Pad), 0),
+							number(field.style.get(PropId::Pad), 1), number(field.style.get(PropId::Pad), 2)}
+					: Edges{};
 			const f32 contentWidth = std::max(1.f, rect.w - padding.l - padding.r - 2.f * border);
-			const TextLayout& layout = m_text->layout(field.font, field.text, raster, field.textArea ? contentWidth * dpi : 0.f);
+			const TextLayout& layout =
+				m_text->layout(field.font, field.text, raster, field.textArea ? contentWidth * dpi : 0.f);
 			const TextCaretStop caret = layout.caretAt(static_cast<u32>(field.caret));
 			f32 x = rect.x + padding.l + border + caret.x / dpi;
 			f32 y = rect.y + padding.t + border + caret.line * layout.lineHeight / dpi - field.textScrollY;
@@ -6250,15 +7032,16 @@ namespace xui {
 				y += std::max(0.f, (rect.h - padding.t - padding.b - 2.f * border - layout.height / dpi) * 0.5f);
 			if (field.textBox) {
 				const f32 viewport = std::max(0.f, rect.w - padding.l - padding.r - 2.f * border);
-				const f32 offset = std::clamp(caret.x / dpi - viewport, 0.f, std::max(0.f, layout.advanceWidth / dpi - viewport));
+				const f32 offset =
+					std::clamp(caret.x / dpi - viewport, 0.f, std::max(0.f, layout.advanceWidth / dpi - viewport));
 				x -= offset;
 				y += std::max(0.f, (rect.h - padding.t - padding.b - 2.f * border - layout.height / dpi) * 0.5f);
 			}
 			const f32 lineHeight = std::max(size, layout.lineHeight / dpi);
 			const Mat3& transform = field.paintTransform;
 			const Vec2 point{transform.a * x + transform.c * y + transform.tx,
-				transform.b * x + transform.d * y + transform.ty};
-			return { point.x, point.y, 1.f, lineHeight };
+							 transform.b * x + transform.d * y + transform.ty};
+			return {point.x, point.y, 1.f, lineHeight};
 		}
 		return {};
 	}
@@ -6349,36 +7132,68 @@ namespace xui {
 		const Font* font = m_text->font(node.font);
 		const f32 lineHeight = font ? std::max(fontSize, font->lineHeight(rasterSize) / dpi) : fontSize;
 		const u32 targetLine =
-			node.textArea ? static_cast<u32>(std::max(0.f, std::floor((point.y - top + node.textScrollY) / std::max(1.f, lineHeight))))
+			node.textArea ? static_cast<u32>(std::max(
+								0.f, std::floor((point.y - top + node.textScrollY) / std::max(1.f, lineHeight))))
 						  : 0u;
 		const f32 targetX = std::max(0.f, point.x - left) * dpi;
 		const bool visualText = m_showWhitespace && (node.textBox || node.textArea) && !node.password;
 		const std::string display = visualText ? visualizeWhitespace(node.text) : std::string{};
 		const std::string_view layoutText = visualText ? std::string_view(display) : std::string_view(node.text);
 		const TextLayout& layout = m_text->layout(node.font, layoutText, rasterSize, wrap);
-		if (layout.caretStops.empty() || layout.visualCaretStops.empty()) return 0;
-		const u32 line = std::min(targetLine, static_cast<u32>(layout.lineWidths.empty() ? 0 : layout.lineWidths.size() - 1));
-		const auto first = std::lower_bound(layout.visualCaretStops.begin(), layout.visualCaretStops.end(), line,
-			[](const TextCaretStop& stop, u32 value) { return stop.line < value; });
-		const auto after = std::upper_bound(first, layout.visualCaretStops.end(), line,
-			[](u32 value, const TextCaretStop& stop) { return value < stop.line; });
-		if (first == after) return layout.caretStops.back().byteOffset;
+		if (layout.caretStops.empty() || layout.visualCaretStops.empty())
+			return 0;
+		const u32 line =
+			std::min(targetLine, static_cast<u32>(layout.lineWidths.empty() ? 0 : layout.lineWidths.size() - 1));
+		// The stops are sorted by (line, x). Keep the hit-test range as indices so no
+		// iterator from a vector is ever decremented/dereferenced at a line boundary.
+		const auto& stops = layout.visualCaretStops;
+		std::size_t first = 0, last = stops.size();
+		while (first < last) {
+			const std::size_t middle = first + (last - first) / 2;
+			if (stops[middle].line < line)
+				first = middle + 1;
+			else
+				last = middle;
+		}
+		std::size_t after = first;
+		while (after < stops.size() && stops[after].line == line)
+			++after;
+		if (first >= after)
+			return layout.caretStops.back().byteOffset;
 		bool rtlLine = false;
-		for (const ShapedGlyph& glyph : layout.glyphs) if (glyph.line == line && glyph.rtl) { rtlLine = true; break; }
-		const TextCaretStop* best = &*first;
+		for (const ShapedGlyph& glyph : layout.glyphs)
+			if (glyph.line == line && glyph.rtl) {
+				rtlLine = true;
+				break;
+			}
+		std::size_t best = first;
 		if (rtlLine) {
-			f32 bestDistance = std::abs(best->x - targetX);
-			for (auto stop = first + 1; stop != after; ++stop) {
-				const f32 distance = std::abs(stop->x - targetX);
-				if (distance < bestDistance) { best = &*stop; bestDistance = distance; }
+			f32 bestDistance = std::abs(stops[best].x - targetX);
+			for (std::size_t stop = first + 1; stop < after; ++stop) {
+				const f32 distance = std::abs(stops[stop].x - targetX);
+				if (distance < bestDistance) {
+					best = stop;
+					bestDistance = distance;
+				}
 			}
 		} else {
-			const auto right = std::lower_bound(first, after, targetX,
-				[](const TextCaretStop& stop, f32 value) { return stop.x < value; });
-			best = right == after ? &*(after - 1) : &*right;
-			if (right != first && std::abs((right - 1)->x - targetX) <= std::abs(right->x - targetX)) best = &*(right - 1);
+			std::size_t right = first, rightEnd = after;
+			while (right < rightEnd) {
+				const std::size_t middle = right + (rightEnd - right) / 2;
+				if (stops[middle].x < targetX)
+					right = middle + 1;
+				else
+					rightEnd = middle;
+			}
+			if (right >= after)
+				best = after - 1;
+			else {
+				best = right;
+				if (right > first && std::abs(stops[right - 1].x - targetX) <= std::abs(stops[right].x - targetX))
+					best = right - 1;
+			}
 		}
-		return visualText ? rawTextOffset(node.text, best->byteOffset) : best->byteOffset;
+		return visualText ? rawTextOffset(node.text, stops[best].byteOffset) : stops[best].byteOffset;
 	}
 
 	UiRuntime::PickerGeometry UiRuntime::pickerGeometry(const Node& node) const {
@@ -6507,14 +7322,29 @@ namespace xui {
 		const f32 clamped = node.numberBounded ? std::clamp(stepped, std::min(node.minValue, node.maxValue), std::max(node.minValue, node.maxValue)) : stepped;
 		if (clamped == node.value) return;
 		node.value = clamped;
-		node.text = formatNumberText(clamped, node.numberPrecision) + (node.unit.empty() ? std::string{} : node.unit);
+		node.text =
+			formatNumberText(clamped, node.numberPrecision, m_locale) + (node.unit.empty() ? std::string{} : node.unit);
 		node.caret = node.selectionAnchor = node.text.size();
 		m_layout.markContentChanged(node.layout);
 		if (node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
 	}
 
 	bool UiRuntime::commitNumberText(Node& node) {
-		const char* text = node.text.c_str();
+		std::string normalized = node.text;
+		const bool commaDecimal = m_locale.rfind("fr", 0) == 0 || m_locale.rfind("de", 0) == 0 ||
+								  m_locale.rfind("es", 0) == 0 || m_locale.rfind("it", 0) == 0 ||
+								  m_locale.rfind("pt", 0) == 0 || m_locale.rfind("ru", 0) == 0;
+		if (commaDecimal) {
+			normalized.erase(std::remove(normalized.begin(), normalized.end(), '.'), normalized.end());
+			for (std::string_view separator : {std::string_view("\xC2\xA0"), std::string_view("\xE2\x80\xAF")}) {
+				for (std::size_t at = 0; (at = normalized.find(separator, at)) != std::string::npos;)
+					normalized.erase(at, separator.size());
+			}
+			std::replace(normalized.begin(), normalized.end(), ',', '.');
+		} else {
+			normalized.erase(std::remove(normalized.begin(), normalized.end(), ','), normalized.end());
+		}
+		const char* text = normalized.c_str();
 		char* end = nullptr;
 		const f32 parsed = std::strtof(text, &end);
 		if (end == text || !std::isfinite(parsed)) { node.inputInvalid = !node.text.empty(); return false; }
@@ -6560,6 +7390,17 @@ namespace xui {
 				m_hitScrollValue[index] = pointInsideScrollAncestors(index, point) ? 1 : 0;
 			}
 			return m_hitScrollValue[index] != 0;
+		};
+		const std::size_t paintOrderCount = m_paintOrderScratch.empty() ? m_nodes.size() : m_paintOrderScratch.size();
+		const auto reversePaintNode = [&](std::size_t position) {
+			return m_paintOrderScratch.empty() ? static_cast<u32>(position - 1) : m_paintOrderScratch[position - 1];
+		};
+		const auto buttonOwner = [&](u32 index) {
+			for (u32 parent = index < m_nodes.size() ? m_nodes[index].parentIndex : 0xFFFFFFFFu;
+				 parent != 0xFFFFFFFFu && parent < m_nodes.size(); parent = m_nodes[parent].parentIndex)
+				if (m_nodes[parent].button)
+					return parent;
+			return index;
 		};
 		// Dock tabs and panel headers are chrome above the retained panel contents. A floating
 		// panel first claims the point so a docked header behind it cannot win the hit test.
@@ -6633,7 +7474,10 @@ namespace xui {
 		auto insidePanelScrollClips = [&](u32 index, u32 panel, Vec2 position) {
 			for (u32 parent = m_nodes[index].parentIndex; parent != 0xFFFFFFFFu && parent < m_nodes.size() && parent != panel;
 				parent = m_nodes[parent].parentIndex) {
-				if (m_nodes[parent].scrollView && !m_layout.absRect(m_nodes[parent].layout).contains(position)) return false;
+				if ((m_nodes[parent].scrollView || clipsOverflow(m_nodes[parent].style, *m_strings)) &&
+					!m_layout.absRect(m_nodes[parent].layout)
+						 .contains(inverseTransformPoint(m_nodes[parent].paintTransform, position)))
+					return false;
 			}
 			return true;
 		};
@@ -6650,8 +7494,8 @@ namespace xui {
 			if (frontPanel >= m_nodes.size() || !host.tree.floating(frontPanel)) continue;
 			const Rect panelBounds = host.tree.panelBounds(frontPanel);
 			if (!panelBounds.contains(local)) continue;
-			for (std::size_t i = m_nodes.size(); i > 0; --i) {
-				const u32 index = static_cast<u32>(i - 1);
+			for (std::size_t i = paintOrderCount; i > 0; --i) {
+				const u32 index = reversePaintNode(i);
 				u32 ancestor = index;
 				while (ancestor != frontPanel && ancestor < m_nodes.size() && m_nodes[ancestor].parentIndex != 0xFFFFFFFFu)
 					ancestor = m_nodes[ancestor].parentIndex;
@@ -6663,23 +7507,26 @@ namespace xui {
 				if (rect.empty() || !rect.contains(inverseTransformPoint(node.paintTransform, point))) continue;
 				if (node.scrollView && (scrollBarRect(index, false).contains(point) || scrollBarRect(index, true).contains(point))) return index;
 				const Vec2 localPoint = inverseTransformPoint(node.paintTransform, point);
-				if (node.tabs && rect.contains(localPoint) && localPoint.y < rect.y + 34.f) return index;
-				const bool interactive = node.button || node.checkItem || node.checkBox || node.slider || node.listView || node.table || node.dropdown ||
-					node.colorPicker || node.textBox || node.textArea || node.tabs || node.treeView || node.switchToggle ||
-					node.toggleButton || node.radioGroup || node.segmented || node.stepper || node.rating || node.breadcrumb ||
-					node.keybindField || node.datePicker;
+				if (node.tabs && rect.contains(localPoint) && localPoint.y < rect.y + 34.f)
+					return index;
+				const bool interactive =
+					node.button || node.checkItem || node.checkBox || node.slider || node.listView || node.table ||
+					node.dropdown || node.colorPicker || node.textBox || node.textArea || node.tabs || node.treeView ||
+					node.switchToggle || node.toggleButton || node.radioGroup || node.segmented || node.stepper ||
+					node.rating || node.breadcrumb || node.keybindField || node.datePicker;
 				const bool structuralBlocker = typeIs(node.type, *m_strings, "Window") || typeIs(node.type, *m_strings, "Text") ||
 					typeIs(node.type, *m_strings, "Panel") || typeIs(node.type, *m_strings, "Split") ||
 					typeIs(node.type, *m_strings, "CheckList") || typeIs(node.type, *m_strings, "Tab") || node.progressBar ||
 					node.label || node.badge || node.spinner || node.image || node.iconWidget || node.treeView || node.dockHost || node.dockPanel;
-				if (interactive || structuralBlocker || node.style.has(PropId::Bg)) return index;
+				if (interactive || structuralBlocker || node.style.has(PropId::Bg))
+					return interactive ? index : buttonOwner(index);
 			}
 			return frontPanel;
 		}
 		// Tab headers paint as a retained-tree overlay, except when a floating panel
 		// already claimed the point above.
-		for (std::size_t i = m_nodes.size(); i > 0; --i) {
-			const u32 index = static_cast<u32>(i - 1);
+		for (std::size_t i = paintOrderCount; i > 0; --i) {
+			const u32 index = reversePaintNode(i);
 			const Node& tabs = m_nodes[index];
 			if (!tabs.tabs || tabs.disabled || !visible(index))
 				continue;
@@ -6688,15 +7535,15 @@ namespace xui {
 			if (scrollVisible(index) && rect.contains(localPoint) && localPoint.y < rect.y + 34.f)
 				return index;
 		}
-		for (std::size_t i = m_nodes.size(); i > 0; --i) {
-			const u32 index = static_cast<u32>(i - 1);
+		for (std::size_t i = paintOrderCount; i > 0; --i) {
+			const u32 index = reversePaintNode(i);
 			const Node& node = m_nodes[index];
 			if (!node.scrollView || !visible(index) || !scrollVisible(index))
 				continue;
 			if (scrollBarRect(index, false).contains(point) || scrollBarRect(index, true).contains(point)) return index;
 		}
-		for (std::size_t i = m_nodes.size(); i > 0; --i) {
-			const u32 index = static_cast<u32>(i - 1);
+		for (std::size_t i = paintOrderCount; i > 0; --i) {
+			const u32 index = reversePaintNode(i);
 			const Node& node = m_nodes[index];
 			if (!visible(index) || !scrollVisible(index))
 				continue;
@@ -6705,10 +7552,11 @@ namespace xui {
 			const Rect rect = m_layout.absRect(node.layout);
 			if (rect.empty() || !rect.contains(inverseTransformPoint(node.paintTransform, point))) continue;
 
-			const bool interactive = node.button || node.checkItem || node.checkBox || node.slider || node.listView || node.table || node.dropdown ||
-				node.colorPicker || node.textBox || node.textArea || node.tabs || node.treeView ||
-				node.switchToggle || node.toggleButton || node.radioGroup ||
-				node.segmented || node.stepper || node.rating || node.breadcrumb || node.keybindField || node.datePicker;
+			const bool interactive = node.button || node.checkItem || node.checkBox || node.slider || node.listView ||
+									 node.table || node.dropdown || node.colorPicker || node.textBox || node.textArea ||
+									 node.tabs || node.treeView || node.switchToggle || node.toggleButton ||
+									 node.radioGroup || node.segmented || node.stepper || node.rating ||
+									 node.breadcrumb || node.keybindField || node.datePicker;
 			const bool structuralBlocker = typeIs(node.type, *m_strings, "Window") || typeIs(node.type, *m_strings, "Text") ||
 				typeIs(node.type, *m_strings, "Panel") || typeIs(node.type, *m_strings, "Split") ||
 				typeIs(node.type, *m_strings, "CheckList") || typeIs(node.type, *m_strings, "Tab") ||
@@ -6717,7 +7565,8 @@ namespace xui {
 			// Node storage follows paint order: descendants and later siblings are on top.
 			// Transparent Row/Column containers pass input through; painted containers block
 			// controls behind them. Tooltip bubbles are deliberately pointer-transparent.
-			if (interactive || structuralBlocker || styledBlocker) return index;
+			if (interactive || structuralBlocker || styledBlocker)
+				return interactive ? index : buttonOwner(index);
 		}
 		return 0xFFFFFFFFu;
 	}
@@ -6743,7 +7592,8 @@ namespace xui {
 		if (node.disabled) states |= stateBit(State::Disabled);
 		else states |= stateBit(State::Enabled);
 		if ((node.textBox || node.textArea) && node.readOnly) states |= stateBit(State::ReadOnly);
-		if ((node.numberField && node.inputInvalid) || !node.validationError.empty()) states |= stateBit(State::Error);
+		if ((node.numberField && node.inputInvalid) || !node.validationError.empty())
+			states |= stateBit(State::Error);
 		if (node.popupOpen) states |= stateBit(State::Open);
 		if (node.tab && node.parentIndex < m_nodes.size() && m_nodes[node.parentIndex].tabs) {
 			const Node& tabs = m_nodes[node.parentIndex];
@@ -6767,6 +7617,8 @@ namespace xui {
 
 	bool UiRuntime::isNodeVisible(u32 index, PaintScope scope) const {
 		if (index >= m_nodes.size()) return false;
+		if (!m_nodes[index].modelVisible)
+			return false;
 		if (scope.active()) {
 			bool insidePanel = false;
 			u32 current = index;
@@ -6800,7 +7652,11 @@ namespace xui {
 		}
 		u32 child = index;
 		while (m_nodes[child].parentIndex != 0xFFFFFFFFu) {
+			if (!m_nodes[child].modelVisible)
+				return false;
 			const u32 parent = m_nodes[child].parentIndex;
+			if (!m_nodes[parent].modelVisible)
+				return false;
 			if (!scope.active() && m_nodes[parent].dockNativeSurface)
 				return false;
 			if (scope.active() && parent == scope.dockPanel) {
@@ -6859,12 +7715,14 @@ namespace xui {
 				const f32 dt = std::clamp(std::chrono::duration<f32>(now - m_textAutoScrollLast).count(), 0.f, 0.05f);
 				m_textAutoScrollLast = now;
 				const Rect rect = m_layout.absRect(field.layout);
-				const f32 fontSize = field.style.has(PropId::FontSize) ? number(field.style.get(PropId::FontSize), 0, 16.f) : 16.f;
+				const f32 fontSize =
+					field.style.has(PropId::FontSize) ? number(field.style.get(PropId::FontSize), 0, 16.f) : 16.f;
 				const f32 border = field.style.has(PropId::Border) ? number(field.style.get(PropId::Border), 0) : 0.f;
 				const f32 pad = field.style.has(PropId::Pad) ? number(field.style.get(PropId::Pad), 0) : 0.f;
 				const f32 contentHeight = std::max(0.f, rect.h - 2.f * (pad + border));
 				const f32 contentWidth = std::max(1.f, rect.w - 2.f * (pad + border));
-				const TextLayout& layout = m_text->layout(field.font, field.text, fontSize * m_dpiScale, contentWidth * m_dpiScale);
+				const TextLayout& layout =
+					m_text->layout(field.font, field.text, fontSize * m_dpiScale, contentWidth * m_dpiScale);
 				const f32 maxScroll = std::max(0.f, layout.height / m_dpiScale - contentHeight);
 				const f32 before = field.textScrollY;
 				field.textScrollY = std::clamp(before + m_textAutoScrollVelocity * dt, 0.f, maxScroll);
@@ -7030,7 +7888,8 @@ namespace xui {
 		if (m_animationsPaused) return -1.0;
 		f64 delay = -1.0;
 		if (m_textAutoScrollDeadline.time_since_epoch().count() != 0) {
-			const f64 autoScrollDelay = std::max(0.0, std::chrono::duration<f64>(m_textAutoScrollDeadline - now).count());
+			const f64 autoScrollDelay =
+				std::max(0.0, std::chrono::duration<f64>(m_textAutoScrollDeadline - now).count());
 			delay = autoScrollDelay;
 		}
 		if (m_tooltipOwner != 0xFFFFFFFFu && !m_tooltipVisible)
@@ -7135,9 +7994,11 @@ namespace xui {
 	std::string_view UiRuntime::controlError(std::string_view id) const {
 		const StrId idKey = m_strings ? m_strings->find(id) : StrId{};
 		const auto found = m_nodeById.find(idKey);
-		if (found == m_nodeById.end() || found->second >= m_nodes.size()) return {};
+		if (found == m_nodeById.end() || found->second >= m_nodes.size())
+			return {};
 		const Node* node = &m_nodes[found->second];
-		if (!node->validationError.empty()) return node->validationError;
+		if (!node->validationError.empty())
+			return node->validationError;
 		return node->inputInvalid ? std::string_view("Invalid value") : std::string_view{};
 	}
 
@@ -7625,9 +8486,14 @@ namespace xui {
 			if (node.treeView || node.listView) {
 				const std::string* selectedPath = std::get_if<std::string>(&valueToSet);
 				if (!selectedPath) return false;
-				if (node.treeView && !selectedPath->empty() && std::none_of(payload(node).treeEntries.begin(), payload(node).treeEntries.end(),
-					[&](const Node::TreeEntry& entry) { return entry.path == *selectedPath; })) return false;
-				if (node.listView && !selectedPath->empty() && std::find(payload(node).options.begin(), payload(node).options.end(), *selectedPath) == payload(node).options.end()) return false;
+				if (node.treeView && !selectedPath->empty() &&
+					std::none_of(payload(node).treeEntries.begin(), payload(node).treeEntries.end(),
+								 [&](const Node::TreeEntry& entry) { return entry.path == *selectedPath; }))
+					return false;
+				if (node.listView && !selectedPath->empty() &&
+					std::find(payload(node).options.begin(), payload(node).options.end(), *selectedPath) ==
+						payload(node).options.end())
+					return false;
 				changed = node.treeSelection != *selectedPath;
 				if (changed) {
 					node.treeSelection = *selectedPath;
@@ -7640,7 +8506,7 @@ namespace xui {
 				const u32* selected = std::get_if<u32>(&valueToSet);
 				if (!selected)
 					return false;
-				if (*selected != std::numeric_limits<u32>::max() && *selected >= payload(node).tableRows.size())
+				if (*selected != std::numeric_limits<u32>::max() && *selected >= listItemCount(node))
 					return false;
 				const i32 next = *selected == std::numeric_limits<u32>::max() ? -1 : static_cast<i32>(*selected);
 				changed = node.tableSelectedRow != next;
@@ -7737,45 +8603,45 @@ namespace xui {
 			if (node.checkItem || node.checkBox) {
 				const bool* value = std::get_if<bool>(&valueToSet); if (!value) return false;
 				changed = node.checked != *value; node.checked = *value;
-			}
-			else if (node.rangeSlider) {
-				const Vec2* range = std::get_if<Vec2>(&valueToSet); if (!range) return false;
-				const f32 low = std::clamp(range->x, node.minValue, node.maxValue), high = std::clamp(range->y, low, node.maxValue);
-				changed = node.rangeLow != low || node.rangeHigh != high; node.rangeLow = low; node.rangeHigh = high;
-			}
-			else if (node.slider || node.progressBar) {
+			} else if (node.rangeSlider) {
+				const Vec2* range = std::get_if<Vec2>(&valueToSet);
+				if (!range)
+					return false;
+				const f32 low = std::clamp(range->x, node.minValue, node.maxValue),
+						  high = std::clamp(range->y, low, node.maxValue);
+				changed = node.rangeLow != low || node.rangeHigh != high;
+				node.rangeLow = low;
+				node.rangeHigh = high;
+			} else if (node.slider || node.progressBar) {
 				const f64* value = std::get_if<f64>(&valueToSet); if (!value) return false;
 				const f32 clamped = std::clamp(static_cast<f32>(*value), node.minValue, node.maxValue);
 				changed = node.value != clamped; node.value = clamped;
-			}
-			else if (node.switchToggle || node.toggleButton) {
+			} else if (node.switchToggle || node.toggleButton) {
 				const bool* value = std::get_if<bool>(&valueToSet); if (!value) return false;
 				changed = node.checked != *value; node.checked = *value;
-			}
-			else if (node.radioGroup || node.segmented || node.breadcrumb) {
+			} else if (node.radioGroup || node.segmented || node.breadcrumb) {
 				const std::string* value = std::get_if<std::string>(&valueToSet); if (!value) return false;
 				const auto found = std::find(payload(node).options.begin(), payload(node).options.end(), *value);
 				if (found == payload(node).options.end())
 					return false;
 				const u32 selected = static_cast<u32>(found - payload(node).options.begin());
 				changed = node.selectedOption != selected; node.selectedOption = selected;
-			}
-			else if (node.datePicker) {
+			} else if (node.datePicker) {
 				const std::string* value = std::get_if<std::string>(&valueToSet); if (!value) return false;
 				i32 year = 0; u32 month = 0, day = 0;
 				if (!(std::sscanf(value->data(), "%4d-%2u-%2u", &year, &month, &day) == 3 && month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth(year, month))) return false;
 				changed = !(year == node.dateYear && month == node.dateMonth && day == node.dateDay);
 				node.dateYear = year; node.dateMonth = month; node.dateDay = day;
 				node.viewYear = year; node.viewMonth = month;
-				node.text = formatDateText(year, month, day);
+				node.text = formatDateText(year, month, day, m_locale);
 				if (changed) m_layout.markContentChanged(node.layout);
-			}
-			else if (node.numberField || node.stepper) {
+			} else if (node.numberField || node.stepper) {
 				if (const f64* number = std::get_if<f64>(&valueToSet)) {
 					const f32 clamped = node.numberBounded ? std::clamp(static_cast<f32>(*number), std::min(node.minValue, node.maxValue), std::max(node.minValue, node.maxValue)) : static_cast<f32>(*number);
 					changed = node.value != clamped;
 					node.value = clamped;
-					node.text = formatNumberText(clamped, node.numberPrecision) + (node.unit.empty() ? std::string{} : node.unit);
+					node.text = formatNumberText(clamped, node.numberPrecision, m_locale) +
+								(node.unit.empty() ? std::string{} : node.unit);
 					node.caret = node.selectionAnchor = node.text.size();
 					if (changed) m_layout.markContentChanged(node.layout);
 				}
@@ -7786,8 +8652,7 @@ namespace xui {
 					changed = commitNumberText(node);
 				}
 				else return false;
-			}
-			else if (node.dropdown) {
+			} else if (node.dropdown) {
 				const std::string* value = std::get_if<std::string>(&valueToSet); if (!value) return false;
 				const auto found = std::find(payload(node).options.begin(), payload(node).options.end(), *value);
 				if (found == payload(node).options.end())
@@ -7795,14 +8660,13 @@ namespace xui {
 				const u32 selected = static_cast<u32>(found - payload(node).options.begin());
 				changed = node.selectedOption != selected; node.selectedOption = selected; node.text = *value;
 				if (changed) m_layout.markContentChanged(node.layout);
-			}
-			else if (node.textBox || node.textArea || typeIs(node.type, *m_strings, "Text") || node.label || node.badge || node.keybindField) {
+			} else if (node.textBox || node.textArea || typeIs(node.type, *m_strings, "Text") || node.label ||
+					   node.badge || node.keybindField) {
 				const std::string* value = std::get_if<std::string>(&valueToSet); if (!value) return false;
 				std::string next = truncateUtf8(*value, node.maxLength);
 				changed = node.text != next; node.text = std::move(next); node.caret = node.selectionAnchor = node.text.size();
 				if (changed) m_layout.markContentChanged(node.layout);
-			}
-			else if (node.colorPicker) {
+			} else if (node.colorPicker) {
 				Color next;
 				if (const Color* colorValue = std::get_if<Color>(&valueToSet)) next = *colorValue;
 				else if (const std::string* stringValue = std::get_if<std::string>(&valueToSet)) { if (!parseColorText(*stringValue, next)) return false; }
@@ -7811,18 +8675,16 @@ namespace xui {
 				changed = node.pickerColor != next; node.pickerColor = next; node.text = colorText(next, node.pickerFormat, node.pickerAlpha, node.pickerPrecision);
 				if (changed) syncPickerEditors(static_cast<u32>(&node - m_nodes.data()));
 				if (changed) m_layout.markContentChanged(node.layout);
-			}
-			else if (node.tabs) {
+			} else if (node.tabs) {
 				const u32* value = std::get_if<u32>(&valueToSet); if (!value) return false;
 				const u32 count = m_layout.childCount(node.layout); if (!count) return false;
 				const u32 selected = std::min(*value, count - 1); changed = node.selectedTab != selected; node.selectedTab = selected;
 				if (changed) for (u32 i = 0; i < m_nodes.size(); ++i) if (m_nodes[i].focused && !isNodeVisible(i)) m_nodes[i].focused = false;
-			}
-			else if (node.scrollView) {
+			} else if (node.scrollView) {
 				const Vec2* offset = std::get_if<Vec2>(&valueToSet); if (!offset) return false;
 				changed = setScrollOffset(static_cast<u32>(&node - m_nodes.data()), *offset, false);
-			}
-			else return false;
+			} else
+				return false;
 			if (changed) {
 				addDamage(m_layout.absRect(node.layout));
 				if (notify && node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
@@ -7926,22 +8788,22 @@ namespace xui {
 			const f32 rowHeight = std::max(22.f, fontSize * 1.65f);
 			f32 widest = 120.f;
 			if (m_text && runtimeNode->font.valid()) for (u32 index : rows) {
-				const Node::TreeEntry& item = payload(*runtimeNode).treeEntries[index];
-				const f32 textWidth = m_text->layout(runtimeNode->font, item.label, fontSize * dpiScale).width / dpiScale;
-				widest = std::max(widest, f32(item.depth) * 16.f + textWidth + 30.f);
+					const Node::TreeEntry& item = payload(*runtimeNode).treeEntries[index];
+					const f32 textWidth =
+						m_text->layout(runtimeNode->font, item.label, fontSize * dpiScale).width / dpiScale;
+					widest = std::max(widest, f32(item.depth) * 16.f + textWidth + 30.f);
 			}
 			return { widest, std::max(rowHeight, rowHeight * f32(rows.size())) };
 		}
 		if (runtimeNode->table) {
-			return {360.f, 30.f + 26.f * std::min(8u, static_cast<u32>(payload(*runtimeNode).tableRows.size()))};
+			return {360.f, 30.f + 26.f * std::min(8u, listItemCount(*runtimeNode))};
 		}
 		if (runtimeNode->listView) {
 			const f32 fontSize = runtimeNode->style.has(PropId::FontSize)
 									 ? number(runtimeNode->style.get(PropId::FontSize), 0, 14.f)
 									 : 14.f;
 			const f32 rowHeight = std::max(24.f, fontSize * 1.8f);
-			return {180.f, std::max(rowHeight,
-									rowHeight * std::min(8u, static_cast<u32>(payload(*runtimeNode).options.size())))};
+			return {180.f, std::max(rowHeight, rowHeight * std::min(8u, listItemCount(*runtimeNode)))};
 		}
 		// Empty controls still need a useful preferred size. Without these defaults, an auto-sized
 		// Slider/ProgressBar or an empty placeholder field measured to 0x0 until the app authored

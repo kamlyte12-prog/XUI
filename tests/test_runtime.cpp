@@ -2485,19 +2485,21 @@ Tooltip { resting: { bg: #202a40, fg: #ffffff, pad: 6px, radius: 4px } }
 	std::vector<std::string> events;
 	ui.setEventHandler([](void* context, std::string_view name) { static_cast<std::vector<std::string>*>(context)->emplace_back(name); }, &events);
 	u32 validationCalls = 0;
-	ui.setInputValidationHandler([](void* context, std::string_view handler, std::string_view id,
-		std::string_view proposed, std::string& errorMessage) {
-		++*static_cast<u32*>(context);
-		if (handler == "rejectBang" && id == "name" && proposed.find('!') != std::string_view::npos) {
-			errorMessage = "Exclamation marks are not allowed";
-			return false;
-		}
-		if (handler == "rejectBang" && id == "name" && proposed.empty()) {
-			errorMessage = "Name cannot be empty";
-			return false;
-		}
-		return true;
-	}, &validationCalls);
+	ui.setInputValidationHandler(
+		[](void* context, std::string_view handler, std::string_view id, std::string_view proposed,
+		   std::string& errorMessage) {
+			++*static_cast<u32*>(context);
+			if (handler == "rejectBang" && id == "name" && proposed.find('!') != std::string_view::npos) {
+				errorMessage = "Exclamation marks are not allowed";
+				return false;
+			}
+			if (handler == "rejectBang" && id == "name" && proposed.empty()) {
+				errorMessage = "Name cannot be empty";
+				return false;
+			}
+			return true;
+		},
+		&validationCalls);
 	CHECK(ui.setValue("name", std::string("XYZZ")));
 	CHECK(std::get<std::string>(*ui.value("name")) == "XYZZ");
 	CHECK(!ui.setValue("name", true));
@@ -2535,7 +2537,10 @@ Tooltip { resting: { bg: #202a40, fg: #ffffff, pad: 6px, radius: 4px } }
 	CHECK_EQ(std::get<std::string>(*ui.value("name")), "😀CD");
 	CHECK(ui.keyDown(Key::End, static_cast<u8>(Mod::Shift), nullptr));
 	CHECK(ui.keyDown(Key::Backspace));
-	CHECK_EQ(std::get<std::string>(*ui.value("name")), "");
+	// The filter sees the proposed whole string, so deleting the selection down to
+	// nothing is rejected just like the later Ctrl+A case; the selection stays live.
+	CHECK_EQ(std::get<std::string>(*ui.value("name")), "😀CD");
+	CHECK_EQ(ui.controlError("name"), "Name cannot be empty");
 	CHECK(ui.textInput("replace"));
 	CHECK_EQ(std::get<std::string>(*ui.value("name")), "replac");
 	CHECK(ui.keyDown(Key::A, static_cast<u8>(Mod::Ctrl), nullptr));

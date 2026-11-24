@@ -69,7 +69,7 @@ namespace xui {
 		u32 glyphCount() const { return u32(m_entries.size()); }
 		u32 generation() const {
 			return m_generation;
-		}												///< changes whenever atlas coordinates may be repacked
+		} ///< changes whenever atlas coordinates may be repacked
 		u64 rasterCount() const { return m_rasters; }   ///< test/telemetry: how many actual rasterisations
 		void beginFrame();
 		const FrameStats& frameStats() const { return m_frameStats; }

@@ -1,44 +1,107 @@
 tokens {
   color.window = #202020
+  color.surface = #252425
+  color.panel = #252426ff
   color.text = #f5f5f5
   color.muted = #a7a7a7
+  color.subtle = #777777
   color.key = #323232
-  color.key-hover = #3b3b3b
-  color.key-pressed = #454545
-  color.stroke = #252525
+  color.key-hover = #3d3b40
+  color.key-pressed = #49464e
+  color.stroke = #292829
   color.accent = #c6b8f5
   color.accent-hover = #d3c8fa
   color.accent-pressed = #b6a5ed
 }
 
-Window { resting: { bg: color.window, fg: color.text } }
-Column.calculator { resting: { bg: color.window } }
-Row.toolbar { resting: { align: Center } }
-Text.mode-title { resting: { fg: color.text, font-size: 24px, font-weight: 600, align: Start } }
-Button.toolbar-button {
-  resting: { bg: #00000000, fg: color.text, radius: 5px, font-size: 21px }
-  hover: { bg: color.key-hover }
-  pressed: { bg: color.key-pressed }
+Window { resting: { bg: color.window, fg: color.text, font-size: 14px } }
+// Calculator SVGs are transparent line art. Remove the framework's light Image card default.
+Image { resting: { bg: #00000000, border: 1px solid #00000000, radius: 0px } }
+TitleBar.window-titlebar { resting: { bg: color.window, fg: color.text, pad: 5px 10px, gap: 8px } }
+Text.window-title { resting: { fg: color.text, font-size: 12px, align: Start, pad: 4px 0px } }
+TitleButton {
+  resting: { fg: color.text }
+  hover: { bg: color.key-hover, fg: color.text }
+  pressed: { bg: color.key-pressed, fg: color.text }
 }
-Text.expression { resting: { fg: color.muted, font-size: 16px, align: End } }
-Text.display { resting: { fg: color.text, font-size: 56px, align: End } }
-Button.memory-button {
-  resting: { bg: #00000000, fg: color.text, radius: 4px, font-size: 13px }
-  hover: { bg: color.key-hover }
-  pressed: { bg: color.key-pressed }
-}
-Button.memory-disabled { resting: { bg: #00000000, fg: #777777, radius: 4px, font-size: 13px } }
-Button.number-key, Button.function-key {
-  resting: { bg: color.key, fg: color.text, radius: 5px, border: 1px solid #292929, font-size: 20px }
+
+Column.calculator { resting: { bg: color.window, gap: 4px, pad: 6px } }
+Row.toolbar { resting: { align: Center, gap: 4px } }
+Text.mode-title { resting: { fg: color.text, font-size: 24px, font-weight: 600, align: Start, pad: 0px 8px } }
+Button.toolbar-button, Button.panel-back {
+  resting: { bg: #00000000, fg: color.text, radius: 5px }
   hover: { bg: color.key-hover }
   pressed: { bg: color.key-pressed }
   focus: { border: 1px solid #ffffff55 }
+  transition: resting -> hover 100ms ease-out
+  transition: hover -> resting 130ms ease-out
+  transition: hover -> pressed 60ms ease-out
+  transition: pressed -> resting 120ms ease-out
+}
+Text.expression { resting: { fg: color.muted, font-size: 16px, align: End } }
+Text.display { resting: { fg: color.text, font-size: 56px, align: End } }
+Row.memory { resting: { gap: 2px, align: Center } }
+Button.memory-button {
+  resting: { bg: #00000000, fg: color.text, border: 1px solid #00000000, radius: 4px, font-size: 13px }
+  hover: { bg: color.key-hover }
+  pressed: { bg: color.key-pressed }
+}
+Button.memory-disabled { resting: { bg: #00000000, fg: color.subtle, border: 1px solid #00000000, radius: 4px, font-size: 13px } }
+Button.number-key, Button.function-key {
+  resting: { bg: color.key, fg: color.text, radius: 5px, border: 1px solid color.stroke, font-size: 20px }
+  hover: { bg: color.key-hover }
+  pressed: { bg: color.key-pressed, transform: scale(0.985), opacity: 0.92 }
+  focus: { border: 1px solid #ffffff55 }
+  transition: resting -> hover 90ms ease-out
+  transition: hover -> resting 120ms ease-out
+  transition: hover -> pressed 55ms ease-out
+  transition: pressed -> resting 120ms ease-out
 }
 Button.number-key { font-weight: 600 }
 Button.function-key { font-weight: 400 }
 Button.operator { font-size: 24px }
+Button.icon-key { align: Center }
 Button.equals-key {
-  resting: { bg: color.accent, fg: #171329, radius: 5px, border: 1px solid #292929, font-size: 24px, font-weight: 600 }
+  resting: { bg: color.accent, fg: #171329, radius: 5px, border: 1px solid color.stroke, font-size: 24px, font-weight: 600, transform: scale(1) }
   hover: { bg: color.accent-hover }
-  pressed: { bg: color.accent-pressed }
+  pressed: { bg: color.accent-pressed, transform: scale(0.985), opacity: 0.94 }
+  transition: resting -> hover 90ms ease-out
+  transition: hover -> resting 120ms ease-out
+  transition: hover -> pressed 55ms ease-out
+  transition: pressed -> resting 120ms ease-out
 }
+
+Panel.side-panel {
+  resting: { bg: color.panel, fg: color.text, radius: 10px, border: 1px solid #ffffff18, shadow: 0px 8px 28px 3px #00000066 }
+}
+Row.panel-heading { resting: { gap: 8px, align: Center, pad: 2px 4px } }
+Text.panel-title { resting: { fg: color.text, font-size: 16px, font-weight: 600, align: Start } }
+Tabs.history-tabs { resting: { bg: #00000000, fg: color.text, font-size: 14px, border: 1px solid #00000000, radius: 7px } }
+Tab {
+  resting: { bg: #2d2c2eff, fg: color.muted, font-size: 14px, font-weight: 500, pad: 8px, border: 1px solid #00000000 }
+  hover: { bg: #373639ff, fg: color.text }
+  selected: { bg: #343237ff, fg: color.text, font-weight: 600 }
+  transition: resting -> hover 100ms ease-out
+  transition: hover -> resting 130ms ease-out
+  transition: resting -> selected 120ms ease-out
+}
+Column.history-content { resting: { gap: 12px, pad: 4px } }
+Text.empty-message { resting: { fg: #dedde0, font-size: 14px, align: Start, pad: 8px 4px } }
+Text.history-entry { resting: { fg: color.text, font-size: 18px, align: End, pad: 8px, bg: #ffffff08, radius: 6px } }
+
+Panel.navigation-drawer {
+  resting: { bg: #252426ff, fg: color.text, radius: 10px, border: 1px solid #ffffff18, shadow: 0px 8px 28px 3px #00000066 }
+}
+Row.drawer-top { resting: { align: Center, gap: 8px, pad: 8px } }
+Text.drawer-heading { resting: { fg: #c9c6ca, font-size: 14px, font-weight: 600, align: Start, pad: 8px 14px } }
+Text.drawer-label { resting: { fg: color.text, font-size: 15px, align: Start } }
+Button.nav-item {
+  resting: { bg: #00000000, fg: color.text, radius: 5px, border: 1px solid #00000000, font-size: 15px, align: Start }
+  hover: { bg: #ffffff0d }
+  pressed: { bg: #ffffff18 }
+  focus: { border: 1px solid #ffffff44 }
+}
+Button.nav-selected { resting: { bg: #ffffff12, border: 1px solid #ffffff08 } }
+Button.settings-item { resting: { border: 1px solid #ffffff12, radius: 0px } }
+ScrollView { resting: { bg: #00000000, border: 1px solid #00000000, radius: 0px } }
+ScrollView.drawer-scroll { resting: { min-size: 0px 0px, scrollbar-size: 6px, scrollbar-visibility: auto, scroll-track: #00000000, scroll-thumb: #777777a0, scroll-speed: 44 } hover: { scroll-thumb: #a0a0a0d0 } }

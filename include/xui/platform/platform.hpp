@@ -135,6 +135,9 @@ namespace xui {
 		virtual bool pumpEvents(Event& out) = 0;
 		/// Sleep until an event arrives or @p timeoutSec passes (0 = wait indefinitely). No busy waiting.
 		virtual void waitEvents(f64 timeoutSec) = 0;
+		/// Thread-safe wake for work posted to the UI loop. Backends that block in waitEvents()
+		/// should override this (GLFW uses glfwPostEmptyEvent); the default has no effect.
+		virtual void wakeEventLoop() {}
 		virtual f64 time() const = 0;      ///< seconds on a monotonic clock
 
 		virtual void* nativeWindowHandle(WindowHandle) = 0;   ///< HWND / GLFWwindow* / nullptr

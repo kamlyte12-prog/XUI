@@ -312,6 +312,26 @@ Panel.paint-card { resting: { bg: color.surface, fg: color.text, pad: 14px, bord
 Panel.glow-card { resting: { glow: 14px 1px color.glow } }
 Panel.shadow-card { resting: { shadow: 0px 8px 22px 2px color.shadow, border: 1px solid color.stroke-strong } }
 Panel.glow-swatch { resting: { bg: color.surface, border: 1px solid color.stroke, radius: 7px, glow: 9px 0px color.glow, align: Center, justify: Center } }
+Button.all-style-transition {
+  resting: { bg: color.chip, fg: color.text, border: 1px solid color.stroke-strong, radius: 8px, pad: 10px 12px, font-size: 13px, font-weight: 500, letter-spacing: 0px, outline: 0px solid #00000000, shadow: 0px 2px 5px 0px color.shadow }
+  hover: { bg: color.surface-hover, fg: color.accent-hover, border: 1px solid color.accent-border, font-size: 16px, font-weight: 700, letter-spacing: 0.8px, outline: 2px solid color.accent-border, shadow: 0px 8px 18px 2px color.glow }
+  pressed: { bg: color.surface-pressed, font-size: 15px, shadow: 0px 3px 8px 1px color.shadow }
+  focus: { outline: 2px solid color.accent, outline-offset: 2px }
+  transition: resting -> hover 180ms ease-out all
+  transition: hover -> resting 150ms ease-in-out all
+  transition: hover -> pressed 70ms ease-out bg font-size shadow
+  transition: pressed -> resting 120ms ease-out all
+}
+Image.tint-image { resting: { bg: color.image, border: 1px solid color.stroke, radius: 7px, image-tint: #ffffff } }
+Image.tint-cyan { resting: { image-tint: #68e1ff } }
+Image.tint-violet { resting: { image-tint: #d7a2ff } }
+Stack.z-index-demo { resting: { bg: color.field, border: 1px solid color.stroke, radius: 8px, overflow: hidden } }
+Panel.z-card { resting: { border: 1px solid color.stroke-strong, radius: 8px, pad: 10px, align: Center, justify: Center, shadow: 0px 5px 14px 1px color.shadow } }
+Panel.z-card-back { resting: { z-index: 0, bg: color.surface-raised } }
+Panel.z-card-front { resting: { z-index: 3, bg: color.tab-selected, border: 1px solid color.accent-border } }
+Panel.overflow-clip-demo { resting: { bg: color.field, border: 1px solid color.accent-border, radius: 8px, pad: 8px, overflow: hidden } }
+Panel.overflow-spill { resting: { z-index: 2, bg: color.accent-soft, border: 1px solid color.accent-border, radius: 6px, align: Center, justify: Center } }
+Text.overflow-spill-label { resting: { fg: color.accent-hover, font-size: 11px, align: Center } }
 Text.glow-title { resting: { fg: color.text, font-size: 15px, font-weight: 700 } }
 Text.gradient-label { resting: { fg: #ffffff, font-size: 13px, font-weight: 600, align: Center } }
 Text.swatch-label { resting: { fg: color.text, font-size: 13px, font-weight: 600, align: Center } }

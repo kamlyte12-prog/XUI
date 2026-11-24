@@ -1,58 +1,132 @@
-Window(title: "Calculator", size: 400x665) {
-  Column[class: "calculator", width: 100%, height: 100%, pad: 6px, gap: 4px] {
-    Row[class: "toolbar", width: 100%, height: 46px, gap: 4px] {
-      Button(label: "...")[id: "menu", class: "toolbar-button", width: 40px, height: 40px, press: onMenu]
-      Text("Standard")[class: "mode-title", grow: 1]
-      Button(label: "A")[id: "always-on-top", class: "toolbar-button", width: 40px, height: 40px, press: onAlwaysOnTop]
-      Button(label: "H")[id: "history", class: "toolbar-button", width: 40px, height: 40px, press: onHistory]
+// Compact Windows Calculator inspired demo. The document owns layout, chrome and icon images;
+// the C++ sample owns calculator state and mutually exclusive overlay visibility.
+Window(title: "Calculator", size: 400x695)[platformTopMenu: false] {
+  TitleBar[class: "window-titlebar", width: 100%, height: 32px] {
+    Image("calculator.svg")[width: 16px, height: 16px]
+    Text("Calculator")[class: "window-title", grow: 1]
+  }
+  Stack[class: "app-stage", width: 100%, grow: 1, minSize: 0x0] {
+    Column[class: "calculator", width: 100%, height: 100%, pad: 6px, gap: 4px] {
+      Row[class: "toolbar", width: 100%, height: 46px, gap: 4px] {
+        Button[id: "menu", class: "toolbar-button", width: 40px, height: 40px, press: onMenu] {
+          Image("menu.svg")[width: 20px, height: 20px]
+        }
+        Text("Standard")[class: "mode-title", grow: 1]
+        Button[id: "history", class: "toolbar-button", width: 40px, height: 40px, tooltip: "History and memory", press: onHistory] {
+          Image("clock-rotate-right.svg")[width: 21px, height: 21px]
+        }
+      }
+      Column[class: "readout", width: 100%, height: 142px, pad: 8px, gap: 0px, align: End, justify: End] {
+        Text("")[id: "expression", class: "expression", width: 100%, height: 28px]
+        Text("0")[id: "display", class: "display", width: 100%, height: 86px]
+      }
+      Row[class: "memory", width: 100%, height: 34px, gap: 2px] {
+        Button(label: "MC")[class: "memory-disabled", press: onMemoryClear]
+        Button(label: "MR")[class: "memory-disabled", press: onMemoryRecall]
+        Button(label: "M+")[class: "memory-button", press: onMemoryAdd]
+        Button(label: "M−")[class: "memory-button", press: onMemorySubtract]
+        Button(label: "MS")[class: "memory-button", press: onMemoryStore]
+        Button(label: "M⌄")[class: "memory-disabled", press: onMemoryPanel]
+      }
+      Row[class: "key-row", width: 100%, grow: 1, gap: 3px] {
+        Button(label: "%")[class: "function-key", press: onPercent]
+        Button(label: "CE")[class: "function-key", press: onClearEntry]
+        Button(label: "C")[class: "function-key", press: onClear]
+        Button[id: "backspace", class: "function-key icon-key", tooltip: "Backspace", press: onBackspace] {
+          Image("arrow-left-tag.svg")[width: 20px, height: 20px]
+        }
+      }
+      Row[class: "key-row", width: 100%, grow: 1, gap: 3px] {
+        Button(label: "1/x")[class: "function-key", press: onReciprocal]
+        Button(label: "x²")[class: "function-key", press: onSquare]
+        Button(label: "²√x")[class: "function-key", press: onSquareRoot]
+        Button(label: "÷")[class: "function-key operator", press: onDivide]
+      }
+      Row[class: "key-row", width: 100%, grow: 1, gap: 3px] {
+        Button(label: "7")[class: "number-key", press: onDigit7]
+        Button(label: "8")[class: "number-key", press: onDigit8]
+        Button(label: "9")[class: "number-key", press: onDigit9]
+        Button(label: "×")[class: "function-key operator", press: onMultiply]
+      }
+      Row[class: "key-row", width: 100%, grow: 1, gap: 3px] {
+        Button(label: "4")[class: "number-key", press: onDigit4]
+        Button(label: "5")[class: "number-key", press: onDigit5]
+        Button(label: "6")[class: "number-key", press: onDigit6]
+        Button(label: "−")[class: "function-key operator", press: onSubtract]
+      }
+      Row[class: "key-row", width: 100%, grow: 1, gap: 3px] {
+        Button(label: "1")[class: "number-key", press: onDigit1]
+        Button(label: "2")[class: "number-key", press: onDigit2]
+        Button(label: "3")[class: "number-key", press: onDigit3]
+        Button(label: "+")[class: "function-key operator", press: onAdd]
+      }
+      Row[class: "key-row last-row", width: 100%, grow: 1, gap: 3px] {
+        Button(label: "+/−")[class: "function-key", press: onNegate]
+        Button(label: "0")[class: "number-key", press: onDigit0]
+        Button(label: ".")[class: "number-key", press: onDecimal]
+        Button(label: "=")[class: "equals-key", press: onEquals]
+      }
     }
-    Column[class: "readout", width: 100%, height: 142px, pad: 8px, gap: 0px, align: End, justify: End] {
-      Text("")[id: "expression", class: "expression", width: 100%, height: 28px]
-      Text("0")[id: "display", class: "display", width: 100%, height: 86px]
+
+    // History is a single opaque left drawer; it cannot be covered by the mode drawer.
+    Panel[if: historyOpen, class: "side-panel", width: 360px, height: 100%, align: Start] {
+      Column[width: 100%, height: 100%, pad: 12px, gap: 8px] {
+        Row[class: "panel-heading", width: 100%, height: 40px, gap: 8px, align: Center] {
+          Button[id: "history-back", class: "panel-back", width: 32px, height: 32px, tooltip: "Close history", press: onHistory] {
+            Image("arrow-left-tag.svg")[width: 19px, height: 19px]
+          }
+          Text("History & memory")[class: "panel-title", grow: 1]
+        }
+        Tabs[id: "history-tabs", selected: 0, width: 100%, height: 100%, grow: 1, minSize: 0x0] {
+          Tab(title: "History") {
+            Column[class: "history-content", width: 100%, height: 100%, pad: 4px, gap: 12px] {
+              Text("There’s no history yet.")[id: "history-empty", class: "empty-message", width: 100%, height: 32px]
+              Text("")[id: "history-entry", class: "history-entry", width: 100%, height: 54px]
+            }
+          }
+          Tab(title: "Memory") {
+            Column[class: "history-content", width: 100%, height: 100%, pad: 4px, gap: 12px] {
+              Text("There’s nothing saved in memory.")[id: "memory-empty", class: "empty-message", width: 100%, height: 32px]
+              Text("")[id: "memory-entry", class: "history-entry", width: 100%, height: 54px]
+            }
+          }
+        }
+      }
     }
-    Row[class: "memory", width: 100%, height: 34px, gap: 2px] {
-      Button(label: "MC")[class: "memory-disabled", press: onMemoryClear]
-      Button(label: "MR")[class: "memory-disabled", press: onMemoryRecall]
-      Button(label: "M+")[class: "memory-button", press: onMemoryAdd]
-      Button(label: "M−")[class: "memory-button", press: onMemorySubtract]
-      Button(label: "MS")[class: "memory-button", press: onMemoryStore]
-      Button(label: "M⌄")[class: "memory-disabled", press: onMemoryClear]
-    }
-    Row[class: "key-row", width: 100%, grow: 1, gap: 3px] {
-      Button(label: "%")[class: "function-key", press: onPercent]
-      Button(label: "CE")[class: "function-key", press: onClearEntry]
-      Button(label: "C")[class: "function-key", press: onClear]
-      Button(label: "DEL")[class: "function-key", press: onBackspace]
-    }
-    Row[class: "key-row", width: 100%, grow: 1, gap: 3px] {
-      Button(label: "1/x")[class: "function-key", press: onReciprocal]
-      Button(label: "x²")[class: "function-key", press: onSquare]
-      Button(label: "²√x")[class: "function-key", press: onSquareRoot]
-      Button(label: "÷")[class: "function-key operator", press: onDivide]
-    }
-    Row[class: "key-row", width: 100%, grow: 1, gap: 3px] {
-      Button(label: "7")[class: "number-key", press: onDigit7]
-      Button(label: "8")[class: "number-key", press: onDigit8]
-      Button(label: "9")[class: "number-key", press: onDigit9]
-      Button(label: "×")[class: "function-key operator", press: onMultiply]
-    }
-    Row[class: "key-row", width: 100%, grow: 1, gap: 3px] {
-      Button(label: "4")[class: "number-key", press: onDigit4]
-      Button(label: "5")[class: "number-key", press: onDigit5]
-      Button(label: "6")[class: "number-key", press: onDigit6]
-      Button(label: "−")[class: "function-key operator", press: onSubtract]
-    }
-    Row[class: "key-row", width: 100%, grow: 1, gap: 3px] {
-      Button(label: "1")[class: "number-key", press: onDigit1]
-      Button(label: "2")[class: "number-key", press: onDigit2]
-      Button(label: "3")[class: "number-key", press: onDigit3]
-      Button(label: "+")[class: "function-key operator", press: onAdd]
-    }
-    Row[class: "key-row last-row", width: 100%, grow: 1, gap: 3px] {
-      Button(label: "+/−")[class: "function-key", press: onNegate]
-      Button(label: "0")[class: "number-key", press: onDigit0]
-      Button(label: ".")[class: "number-key", press: onDecimal]
-      Button(label: "=")[class: "equals-key", press: onEquals]
+
+    // The drawer is a single clipped scroll surface. Fixed items no longer compete with a
+    // second oversized ScrollView for the remaining height.
+    Panel[if: drawerOpen, class: "navigation-drawer", width: 320px, height: 100%, align: Start] {
+      Column[width: 100%, height: 100%, pad: 8px, gap: 4px] {
+        Row[class: "drawer-top", width: 100%, height: 44px, gap: 8px, pad: 8px, align: Center] {
+          Button[id: "drawer-close", class: "toolbar-button", width: 32px, height: 32px, press: onMenu] { Image("menu.svg")[width: 20px, height: 20px] }
+        }
+        ScrollView[class: "drawer-scroll", width: 100%, grow: 1, minSize: 0x0] {
+          Column[width: 100%, gap: 2px] {
+            Text("Calculator")[class: "drawer-heading", width: 100%, height: 32px]
+            Button[id: "mode-standard", class: "nav-item nav-selected", width: 100%, height: 44px, press: onMode] { Row[width: 100%, height: 100%, gap: 16px, pad: 8px, align: Center] { Image("calculator.svg")[width: 20px, height: 20px] Text("Standard")[class: "drawer-label"] } }
+            Button[id: "mode-scientific", class: "nav-item", width: 100%, height: 44px, press: onMode] { Row[width: 100%, height: 100%, gap: 16px, pad: 8px, align: Center] { Image("flask.svg")[width: 20px, height: 20px] Text("Scientific")[class: "drawer-label"] } }
+            Button[id: "mode-graphing", class: "nav-item", width: 100%, height: 44px, press: onMode] { Row[width: 100%, height: 100%, gap: 16px, pad: 8px, align: Center] { Image("graph-up.svg")[width: 20px, height: 20px] Text("Graphing")[class: "drawer-label"] } }
+            Button[id: "mode-programmer", class: "nav-item", width: 100%, height: 44px, press: onMode] { Row[width: 100%, height: 100%, gap: 16px, pad: 8px, align: Center] { Image("code.svg")[width: 20px, height: 20px] Text("Programmer")[class: "drawer-label"] } }
+            Button[id: "mode-date", class: "nav-item", width: 100%, height: 44px, press: onMode] { Row[width: 100%, height: 100%, gap: 16px, pad: 8px, align: Center] { Image("calendar.svg")[width: 20px, height: 20px] Text("Date calculation")[class: "drawer-label"] } }
+            Text("Converter")[class: "drawer-heading", width: 100%, height: 32px]
+            Button[class: "nav-item", width: 100%, height: 44px] { Row[width: 100%, height: 100%, gap: 16px, pad: 8px, align: Center] { Image("dollar-circle.svg")[width: 20px, height: 20px] Text("Currency")[class: "drawer-label"] } }
+            Button[class: "nav-item", width: 100%, height: 44px] { Row[width: 100%, height: 100%, gap: 16px, pad: 8px, align: Center] { Image("cube.svg")[width: 20px, height: 20px] Text("Volume")[class: "drawer-label"] } }
+            Button[class: "nav-item", width: 100%, height: 44px] { Row[width: 100%, height: 100%, gap: 16px, pad: 8px, align: Center] { Image("ruler.svg")[width: 20px, height: 20px] Text("Length")[class: "drawer-label"] } }
+            Button[class: "nav-item", width: 100%, height: 44px] { Row[width: 100%, height: 100%, gap: 16px, pad: 8px, align: Center] { Image("weight.svg")[width: 20px, height: 20px] Text("Weight and mass")[class: "drawer-label"] } }
+            Button[class: "nav-item", width: 100%, height: 44px] { Row[width: 100%, height: 100%, gap: 16px, pad: 8px, align: Center] { Image("temperature-high.svg")[width: 20px, height: 20px] Text("Temperature")[class: "drawer-label"] } }
+            Button[class: "nav-item", width: 100%, height: 44px] { Row[width: 100%, height: 100%, gap: 16px, pad: 8px, align: Center] { Image("thunderstorm.svg")[width: 20px, height: 20px] Text("Energy")[class: "drawer-label"] } }
+            Button[class: "nav-item", width: 100%, height: 44px] { Row[width: 100%, height: 100%, gap: 16px, pad: 8px, align: Center] { Image("perspective-view.svg")[width: 20px, height: 20px] Text("Area")[class: "drawer-label"] } }
+            Button[class: "nav-item", width: 100%, height: 44px] { Row[width: 100%, height: 100%, gap: 16px, pad: 8px, align: Center] { Image("running.svg")[width: 20px, height: 20px] Text("Speed")[class: "drawer-label"] } }
+            Button[class: "nav-item", width: 100%, height: 44px] { Row[width: 100%, height: 100%, gap: 16px, pad: 8px, align: Center] { Image("clock.svg")[width: 20px, height: 20px] Text("Time")[class: "drawer-label"] } }
+            Button[class: "nav-item", width: 100%, height: 44px] { Row[width: 100%, height: 100%, gap: 16px, pad: 8px, align: Center] { Image("battery-indicator.svg")[width: 20px, height: 20px] Text("Power")[class: "drawer-label"] } }
+            Button[class: "nav-item", width: 100%, height: 44px] { Row[width: 100%, height: 100%, gap: 16px, pad: 8px, align: Center] { Image("database.svg")[width: 20px, height: 20px] Text("Data")[class: "drawer-label"] } }
+            Button[class: "nav-item", width: 100%, height: 44px] { Row[width: 100%, height: 100%, gap: 16px, pad: 8px, align: Center] { Image("meter-arrow-down-right.svg")[width: 20px, height: 20px] Text("Pressure")[class: "drawer-label"] } }
+            Button[class: "nav-item", width: 100%, height: 44px] { Row[width: 100%, height: 100%, gap: 16px, pad: 8px, align: Center] { Image("three-points-circle.svg")[width: 20px, height: 20px] Text("Angle")[class: "drawer-label"] } }
+          }
+        }
+        Button[class: "nav-item settings-item", width: 100%, height: 48px] { Row[width: 100%, height: 100%, gap: 16px, pad: 8px, align: Center] { Image("settings.svg")[width: 20px, height: 20px] Text("Settings")[class: "drawer-label"] } }
+      }
     }
   }
 }

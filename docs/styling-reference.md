@@ -43,9 +43,10 @@ Side shorthands use one to four values: one applies to all sides; two means vert
 | `grow` | One number | Flex grow factor; default 0. | Flow-layout children. |
 | `shrink` | One number | Flex shrink factor; default 1. | Flow-layout children. |
 | `cursor` | `default`, `pointer`, `text`, `crosshair`, `resize-ew`, `resize-ns`, `resize-nwse`, `resize-nesw`, `move`, `not-allowed`, `grab`, `grabbing`, `hidden` | Explicit `.xss` value overrides widget cursor defaults. Backends may map unsupported shapes to a nearby cursor. | Pointer hit targets; window-edge cursors remain platform-owned. |
-| `z-index` | One number | Accepted and compiled but not applied. Runtime stacking follows tree order; tab headers and popups use fixed overlay layers. | No authored node currently uses this property. |
+| `z-index` | One number | Stable stacking priority; descendant priorities accumulate through ancestors. Painting and pointer hit testing use the same parent-safe order. Floating dock surfaces and built-in popup layers retain their dedicated stacking behavior. | Runtime nodes. |
 | `clip` | One identifier or number | Accepted and compiled; runtime clips text to widget bounds and popups to their boxes, but does not apply this property. | No authored node currently uses this property; built-in clipping is separate. |
-| `overflow` | 1–2 identifiers | Accepted and compiled; not interpreted by the standard runtime. | No standard runtime target currently applies it. |
+| `overflow` | 1–2 identifiers: `visible`, `hidden`, `clip`, `scroll`, or `auto` | `hidden`, `clip`, `scroll`, and `auto` clip descendant paint and pointer hit testing to the widget bounds. This property does not add scrolling; use `ScrollView` for scroll interaction. | Any runtime container; clips its descendants. |
+| `image-tint` | One color | Multiplies the rendered image's RGBA channels. Defaults to white, which preserves the source image. | `Image`. |
 | `animation` | Name, duration, optional iteration count or `infinite` or `paused`, optional easing, optional `cancel(stop)` or `cancel(finish)` | Named keyframes start automatically unless `paused` is present. `cancel(...)` overrides the widget's `animation-cancel` rule for this animation. Duration accepts `ms` or `s`; default is one iteration. | Runtime nodes with a declared keyframe; only implemented paint properties animate. |
 | `animation-keep` | `until-done` | Legacy transition policy: retarget an in-flight transition when its state changes instead of stopping it immediately. | Runtime nodes with active state transitions. |
 | `animation-cancel` | `stop` or `finish` | Per-widget cancellation policy. `stop` is the default and applies the newest state immediately. `finish` completes the current transition target or current keyframe iteration before applying the newest state. | Runtime nodes with transitions/keyframes. |
@@ -102,7 +103,7 @@ Every runtime-created authored node receives a matched `StyleSetId` and resolves
 | `Menu` popup rows | Popup surface geometry (row heights, insets, flip rules) is internal; rows are virtual targets, not laid-out children | Per-item selectors are not available. The `Menu` rule styles the popup surface; the `MenuItem` rule styles every row with `resting`/`hover`/`checked`/`disabled` states. |
 | Theme-driven layout metrics | Changing palette re-resolves paint/text but does not reconstruct the merged `.xui`/`.xss` `LayoutStyle` | Explicit `.xui` geometry precedence must be preserved during a theme swap; keep `pad`, `gap`, `size`, min/max, and margins theme-invariant for now. |
 
-No widget type is wholly unstyleable in the standard runtime. `blur`, `z-index`, and generic `overflow` are accepted by the compiler but are not applied by the runtime. Transformed clips use axis-aligned scissor bounds, and overlay popups remain in window coordinates.
+No widget type is wholly unstyleable in the standard runtime. `blur` and the separate `clip` property are accepted by the compiler but are not applied by the runtime. Transformed clips use axis-aligned scissor bounds, and overlay popups remain in window coordinates.
 
 ## Alpha, gradients, and glow
 
@@ -114,7 +115,7 @@ Gradients are authored as a single `gradient` value. Linear/conic forms take an 
 
 ## Transitions and keyframes
 
-Transitions animate changed paint values when a control enters the declared destination state. `all` selects all supported paint properties; otherwise list property names:
+Transitions animate changed values when a control enters the declared destination state. `all` selects supported paint and typography properties; otherwise list property names. Compatible values include colors, same-unit numbers, shadows, outlines, image tint, transforms, font size, font weight, and letter spacing. Font size and letter spacing are sampled during paint; they do not trigger container relayout during the transition. Padding, size, and other layout metrics are not currently transitionable:
 
 ```xss
 Button.action {
@@ -136,7 +137,7 @@ keyframes pulse {
 }
 ```
 
-Numbers with matching units, colors, and compatible transform function sequences animate. Layout and font face/weight are not interpolated. `animation: name duration paused ...` holds the first keyframe until `Xui::playAnimation(id, mode)` is called. `Once` plays one cycle and leaves the last sample applied; `Loop` repeats until `cancelAnimation(id)`, which always stops immediately and holds its current sample. A later play request overrides and restarts playback. Visible animations schedule frames on a 16 ms timer; static and paused screens return to the platform event wait. GLFW reports pointer exit and window visibility, so hover-out animations run and hidden/minimized windows pause animation clocks. See [the motion showcase](../examples/showcase/showcase.xui) and [stylesheet](../examples/showcase/showcase.xss).
+Numbers with matching units, colors, and compatible transform function sequences animate. In state transitions, `all` includes paint values, font size, font weight, and letter spacing; layout metrics and font-family changes are not interpolated. Font weight changes smoothly when the selected font face exposes a variable weight axis; static faces select the closest registered weight as the value changes. `animation: name duration paused ...` holds the first keyframe until `Xui::playAnimation(id, mode)` is called. `Once` plays one cycle and leaves the last sample applied; `Loop` repeats until `cancelAnimation(id)`, which always stops immediately and holds its current sample. A later play request overrides and restarts playback. Visible animations schedule frames on a 16 ms timer; static and paused screens return to the platform event wait. GLFW reports pointer exit and window visibility, so hover-out animations run and hidden/minimized windows pause animation clocks. See [the motion showcase](../examples/showcase/showcase.xui) and [stylesheet](../examples/showcase/showcase.xss).
 
 ## Cursor values
 

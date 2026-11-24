@@ -371,6 +371,17 @@ Dropdown, DatePicker, ColorPicker, Slider, Tabs, Tab, Menu, MenuItem, KeybindFie
 					return false;
 				}
 			}
+			if (d.prop == PropId::Overflow) {
+				for (const Atom& atom : shown) {
+					const std::string_view value =
+						atom.kind == AtomKind::Ident ? m_in.view(atom.str()) : std::string_view{};
+					if (value != "visible" && value != "hidden" && value != "clip" && value != "scroll" &&
+						value != "auto") {
+						err(d.off, d.len, "overflow values must be visible, hidden, clip, scroll, or auto");
+						return false;
+					}
+				}
+			}
 			if (d.prop == PropId::Outline) {
 				if (kinds.empty() || kinds[0] != AtomKind::Number ||
 					(shown[0].unit != Unit::None && shown[0].unit != Unit::Px && shown[0].unit != Unit::Dp)) {

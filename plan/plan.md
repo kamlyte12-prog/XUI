@@ -4,7 +4,7 @@ This is the canonical readiness plan. The detailed chronology and rationale for 
 
 ## Current progress
 
-Automated test cases: **243**
+Automated test cases: **244**
 
 ### What works
 
@@ -61,13 +61,14 @@ Automated test cases: **243**
 
 ### What does not work
 
-- Parser/schema recognition is broader than runtime support. Bindings, arbitrary dynamic expressions, conditional/repeated nodes, and the unsupported objects listed in the [widget reference](../docs/widgets.md) do not render as runtime features. Components currently accept only literal parameters and handler names; runtime binding expressions, per-instance part selectors, and selector combinators are not implemented.
+- Parser/schema recognition remains broader than runtime support. Initial scalar model bindings, `if`, and build-time `for` expansion now run, but `for` does not reconcile a changed collection and expression calls remain unsupported. Other unsupported objects are listed in the [widget reference](../docs/widgets.md). Components still accept only literal parameters and handler names; per-instance part selectors and selector combinators are not implemented.
 - There is no separate native Win32 backend target in this checkout. `xui_hello` is also GLFW/OpenGL; it does not verify Win32-specific behavior.
 - The installed CMake package covers the portable libraries only; optional GLFW/OpenGL backends are not exported.
 - Custom backends that implement only the original single-surface `Renderer` methods cannot present native DockPanel windows; Xui falls back to in-app floating for those backends. The optional surface methods compile and are implemented by the GLFW/OpenGL pair.
 
 ### What partially works or remains unverified
 
+- The data-layer foundation now includes dependency-indexed scalar bindings, two-way TextBox/TextArea bindings, conditional layout removal, initial array/range `for` expansion, nested update batching, UI-thread `Xui::invoke`, basic locale string/plural/gender tables and NumberField/DatePicker numeric formatting, and callback-backed virtual ListView/Table rows. Dynamic loop reconciliation, expression functions, full locale plural rules/month labels, and automatic RTL layout mirroring remain incomplete. The Windows dev build compiles this slice and the direct suite passes **244 tests, 0 failed**; none of the new binding, `if`/`for`, provider, or localization paths has a recorded visible interaction check. See [`tracking.md`](tracking.md).
 - Variable-font `wght` selection, matching HarfBuzz GPOS variation positioning, advances, and outlines use bundled FreeType 2.15.0 and HarfBuzz 15.0.0. Windows Release tests verify Roboto's `H/i/m/.` advances at weights 100/400/700/900, `To` pair adjustments that vary with weight, atlas advances, simultaneous face instances, and `.xss` weight on Text/Button/TextBox including parent inheritance. The same suite passes with Roboto Flex and static Segoe UI; Inter and Source Sans 3 assets are unavailable locally. Visible manual GLFW text inspection and macOS/Linux builds remain unverified; see [`tracking.md`](tracking.md).
 - The 2026-11-22 Windows dev build rebuilt all targets, including the new `xui_calculator_demo`; the direct suite reports **243 tests, 0 failed** and CTest reports 1/1. That build also landed the P3 widget pair (`ListView`, `Table`, `RangeSlider`, `ComboBox`, `IconButton`), keyboard focus traversal with Shift+Tab, mouse text selection with clipboard shortcuts, editor undo/redo and IME preedit, `dumpLayout`/`loadLayout`, `dumpAccessibilityTree`, the immutable `PaintScope`, and schema warnings for accepted-but-unimplemented properties. CI now fails when the roadmap test count drifts from `tests/*.cpp`. None of the new widgets or the IME/layout-restore paths have a recorded visible interaction check, so this remains build-plus-headless evidence.
 - An earlier Windows MSVC Release build compiles `xui_tests` and `xui_glfw_demo`; the direct test executable passed with **220 tests, 0 failures**. The five-second `--profile-docking` GLFW run measured **384.272 FPS** with VSync disabled. This is continuous-render throughput, not measured live pointer-drag or resize pacing; manual tear-off interactions, input, live resize, and DWM corner appearance remain unverified. Variable-font/GPOS evidence and font availability limits are in [`tracking.md`](tracking.md).

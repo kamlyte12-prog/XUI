@@ -259,13 +259,15 @@ namespace xui {
 		glyphs.clear();
 		glyphs.reserve(count);
 		for (unsigned i = 0; i < count; ++i) {
-			ShapedGlyph shaped{ infos[i].codepoint, static_cast<f32>(positions[i].x_advance),
-				static_cast<f32>(positions[i].x_offset), static_cast<f32>(positions[i].y_offset), infos[i].cluster };
+			ShapedGlyph shaped{infos[i].codepoint, static_cast<f32>(positions[i].x_advance),
+							   static_cast<f32>(positions[i].x_offset), static_cast<f32>(positions[i].y_offset),
+							   infos[i].cluster};
 			std::array<hb_position_t, 8> ligatureCarets{};
 			unsigned caretCount = static_cast<unsigned>(ligatureCarets.size());
-			const unsigned totalCarets = hb_ot_layout_get_ligature_carets(m_shaping->font, direction,
-				infos[i].codepoint, 0, &caretCount, ligatureCarets.data());
-			shaped.ligatureCaretCount = static_cast<u8>(std::min<unsigned>(caretCount, static_cast<unsigned>(shaped.ligatureCarets.size())));
+			const unsigned totalCarets = hb_ot_layout_get_ligature_carets(
+				m_shaping->font, direction, infos[i].codepoint, 0, &caretCount, ligatureCarets.data());
+			shaped.ligatureCaretCount =
+				static_cast<u8>(std::min<unsigned>(caretCount, static_cast<unsigned>(shaped.ligatureCarets.size())));
 			for (u8 caret = 0; caret < shaped.ligatureCaretCount; ++caret)
 				shaped.ligatureCarets[caret] = static_cast<f32>(ligatureCarets[caret]);
 			shaped.rtl = direction == HB_DIRECTION_RTL;

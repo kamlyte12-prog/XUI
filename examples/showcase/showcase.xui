@@ -586,6 +586,44 @@ Window[platformTopMenu: false] {
                       }
                     }
                   }
+
+                  Panel[class: "section", width: 100%] {
+                    Text("Runtime styling: tint, z-order, and overflow")[class: "section-title"]
+                    Text("Hover the action to transition its outline, shadow, font size, weight, and tracking. The overlapping cards use z-index; the chip on the right is clipped by its overflow viewport.")[class: "help prose"]
+                    Row(gap: 12px)[width: 100%, align: Center] {
+                      Button(label: "Hover to animate styles")[class: "all-style-transition", width: 230px, height: 58px]
+                      Column(gap: 5px)[class: "tint-column", width: 180px, align: Center] {
+                        Image("xui-demo-image.svg")[class: "tint-image tint-cyan", fit: Contain, width: 150px, height: 64px]
+                        Text("Cyan image tint")[class: "help"]
+                      }
+                      Column(gap: 5px)[class: "tint-column", width: 180px, align: Center] {
+                        Image("xui-demo-image.svg")[class: "tint-image tint-violet", fit: Contain, width: 150px, height: 64px]
+                        Text("Violet image tint")[class: "help"]
+                      }
+                    }
+                    Row(gap: 18px)[width: 100%, align: Center] {
+                      Column(gap: 5px)[grow: 1] {
+                        Text("Stacked panels use authored z-index for both paint and pointer hit order.")[class: "help prose"]
+                        Stack[id: "z-index-demo", class: "z-index-demo", width: 330px, height: 116px, align: Start] {
+                          Panel[class: "z-card z-card-back", position: Absolute, left: 12px, top: 12px, width: 190px, height: 82px] {
+                            Text("z-index: 0")[class: "z-card-label"]
+                          }
+                          Panel[class: "z-card z-card-front", position: Absolute, left: 124px, top: 30px, width: 190px, height: 82px] {
+                            Text("z-index: 3")[class: "z-card-label"]
+                          }
+                        }
+                      }
+                      Column(gap: 5px) {
+                        Text("Overflow viewport · 240 px")[class: "help"]
+                        Panel[id: "overflow-demo", class: "overflow-clip-demo", width: 240px, height: 84px] {
+                          Text("Children are clipped at this rounded edge.")[class: "help"]
+                          Panel[class: "overflow-spill", position: Absolute, left: 174px, top: 34px, width: 130px, height: 38px] {
+                            Text("Clipped child")[class: "overflow-spill-label"]
+                          }
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }

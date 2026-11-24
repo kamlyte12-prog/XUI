@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <cmath>
 #include <cctype>
+#include <exception>
 
 namespace xui {
 	namespace {
@@ -260,6 +261,9 @@ namespace xui {
 			? start + std::chrono::milliseconds(m_tickIntervalMs) : Clock::time_point{};
 		m_stats = {};
 		while (running) {
+			if (m_externalRedraw.exchange(false, std::memory_order_acq_rel))
+				redraw = true;
+			redraw |= drainInvocations();
 			bool resized = false;
 			Event event;
 			while (m_platform->pumpEvents(event)) {
@@ -376,13 +380,17 @@ namespace xui {
 				case EventType::Tick: redraw = true; break;
 				default: break;
 				}
-			if (m_platform) {
-				const Rect imeRect = m_runtime.imeCursorRect();
-				if (!imeRect.empty()) m_platform->setImeCursorRect(event.window.valid() ? event.window : m_window, imeRect);
-			}
+				if (m_platform) {
+					const Rect imeRect = m_runtime.imeCursorRect();
+					if (!imeRect.empty())
+						m_platform->setImeCursorRect(event.window.valid() ? event.window : m_window, imeRect);
+				}
 				reconcileFloatingPanels();
 			}
 			if (!running) break;
+			if (m_externalRedraw.exchange(false, std::memory_order_acq_rel))
+				redraw = true;
+			redraw |= drainInvocations();
 			const bool visible = anyWindowVisible();
 			if (visible != wasVisible) {
 				m_runtime.setAnimationsPaused(!visible);
@@ -583,10 +591,49 @@ namespace xui {
 		if (m_attached) m_runtime.setEventHandler(handler, context);
 	}
 
+	void Xui::invoke(std::function<void()> work) {
+		if (!work)
+			return;
+		{
+			std::lock_guard lock(m_invocationMutex);
+			m_invocations.push_back(std::move(work));
+		}
+		m_externalRedraw.store(true, std::memory_order_release);
+		if (m_platform && m_window.valid())
+			m_platform->wakeEventLoop();
+	}
+
+	void Xui::endUpdate() {
+		if (m_runtime.endUpdate()) {
+			m_externalRedraw.store(true, std::memory_order_release);
+			if (m_platform && m_window.valid())
+				m_platform->wakeEventLoop();
+		}
+	}
+
+	bool Xui::drainInvocations() {
+		std::deque<std::function<void()>> work;
+		{
+			std::lock_guard lock(m_invocationMutex);
+			work.swap(m_invocations);
+		}
+		for (auto& callback : work) {
+			try {
+				callback();
+			} catch (const std::exception& exception) {
+				setError(std::string("UI-thread invocation failed: ") + exception.what());
+			} catch (...) {
+				setError("UI-thread invocation failed with an unknown exception");
+			}
+		}
+		return !work.empty();
+	}
+
 	void Xui::setInputValidationHandler(UiInputValidationFn handler, void* context) {
 		m_inputValidationHandler = handler;
 		m_inputValidationContext = context;
-		if (m_attached) m_runtime.setInputValidationHandler(handler, context);
+		if (m_attached)
+			m_runtime.setInputValidationHandler(handler, context);
 	}
 
 	void Xui::setTickHandler(XuiTickFn handler, void* context, u32 intervalMs) {
@@ -604,6 +651,11 @@ namespace xui {
 	}
 
 	void Xui::shutdown() {
+		{
+			std::lock_guard lock(m_invocationMutex);
+			m_invocations.clear();
+		}
+		m_externalRedraw.store(false, std::memory_order_release);
 		m_tickHandler = nullptr;
 		m_tickContext = nullptr;
 		m_tickIntervalMs = 0;

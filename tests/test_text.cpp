@@ -377,13 +377,16 @@ TEST(text_shaping_matches_pen_advance_sum) {
 
 TEST(text_layout_caches_utf8_caret_stops_for_wrapped_runs) {
 	FontFixture fx;
-	if (!fx.have()) return;
+	if (!fx.have())
+		return;
 	TextSystem text;
 	const FontHandle font = text.loadFont(fx.bytes);
-	CHECK(font.valid()); if (!font.valid()) return;
+	CHECK(font.valid());
+	if (!font.valid())
+		return;
 	const std::string input = "A\xC3\xA9 B";
 	const TextLayout& layout = text.layout(font, input, 16.f, 14.f);
-	const std::size_t expectedOffsets[] = { 0, 1, 3, 4, 5 };
+	const std::size_t expectedOffsets[] = {0, 1, 3, 4, 5};
 	CHECK_EQ(layout.caretStops.size(), std::size(expectedOffsets));
 	for (std::size_t i = 0; i < std::size(expectedOffsets); ++i) {
 		CHECK_EQ(layout.caretStops[i].byteOffset, expectedOffsets[i]);
@@ -392,7 +395,8 @@ TEST(text_layout_caches_utf8_caret_stops_for_wrapped_runs) {
 	CHECK(layout.lineStarts.size() > 1);
 	const TextLayout& ligatureText = text.layout(font, "office", 16.f);
 	CHECK_EQ(ligatureText.caretStops.size(), 7u);
-	for (const TextCaretStop& stop : ligatureText.caretStops) CHECK(std::isfinite(stop.x));
+	for (const TextCaretStop& stop : ligatureText.caretStops)
+		CHECK(std::isfinite(stop.x));
 	const std::string arabic = "\xD8\xB3\xD9\x84\xD8\xA7\xD9\x85"; // سلام
 	const TextLayout& rtl = text.layout(font, arabic, 16.f);
 	CHECK(!rtl.glyphs.empty());

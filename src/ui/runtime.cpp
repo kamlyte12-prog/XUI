@@ -958,13 +958,13 @@ namespace xui {
 			}
 			return 0.0;
 		};
-		auto lookupPath = [&](std::string path) -> ModelValue {
+		auto lookupPath = [&](std::string_view path) -> ModelValue {
 			if (path.empty())
 				return {};
 			ModelValue current;
 			std::size_t offset = 0;
 			const std::size_t dot = path.find('.');
-			const std::string first = path.substr(0, dot);
+			const std::string first(path.substr(0, dot));
 			if (scope) {
 				if (auto scopeIt = scope->find(first); scopeIt != scope->end())
 					current = scopeIt->second;
@@ -972,11 +972,11 @@ namespace xui {
 					current = modelIt->second;
 			} else if (auto rootIt = m_model.find(first); rootIt != m_model.end())
 				current = rootIt->second;
-			offset = dot == std::string::npos ? path.size() : dot + 1;
+			offset = dot == std::string_view::npos ? path.size() : dot + 1;
 			while (offset < path.size()) {
 				const std::size_t next = path.find('.', offset);
-				const std::string part =
-					path.substr(offset, next == std::string::npos ? path.size() - offset : next - offset);
+				const std::string part(
+					path.substr(offset, next == std::string_view::npos ? path.size() - offset : next - offset));
 				if (const auto* objectValues = std::get_if<ModelValue::Object>(&current.data)) {
 					auto memberIt = objectValues->find(part);
 					current = memberIt == objectValues->end() ? ModelValue{} : memberIt->second;
@@ -986,7 +986,7 @@ namespace xui {
 					current = end && *end == '\0' && index < arrayValues->size() ? (*arrayValues)[index] : ModelValue{};
 				} else
 					return {};
-				if (next == std::string::npos)
+				if (next == std::string_view::npos)
 					break;
 				offset = next + 1;
 			}
@@ -1004,7 +1004,7 @@ namespace xui {
 		case XExprKind::Size:
 			return ModelValue(std::to_string(e.num) + "x" + std::to_string(e.num2));
 		case XExprKind::Name:
-			return lookupPath(std::string(m_strings->view(e.name)));
+			return lookupPath(m_strings->view(e.name));
 		case XExprKind::Member:
 			return lookupPath(modelPathFromExpression(document, *m_strings, expression));
 		case XExprKind::Index: {
@@ -1201,36 +1201,38 @@ namespace xui {
 		const std::string root(path.substr(0, dot));
 		if (root.empty())
 			return false;
-		ModelValue* target = &m_model[root];
-		std::size_t offset = dot == std::string_view::npos ? path.size() : dot + 1;
-		while (offset < path.size()) {
-			const std::size_t next = path.find('.', offset);
-			const std::string key(
-				path.substr(offset, next == std::string_view::npos ? path.size() - offset : next - offset));
-			if (key.empty())
-				return false;
-			if (next == std::string_view::npos) {
+		if (dot == std::string_view::npos) {
+			m_model[root] = std::move(value);
+		} else {
+			ModelValue* target = &m_model[root];
+			std::size_t offset = dot + 1;
+			while (offset < path.size()) {
+				const std::size_t next = path.find('.', offset);
+				const std::string key(
+					path.substr(offset, next == std::string_view::npos ? path.size() - offset : next - offset));
+				if (key.empty())
+					return false;
+				if (next == std::string_view::npos) {
+					if (auto* objectValues = std::get_if<ModelValue::Object>(&target->data))
+						(*objectValues)[key] = std::move(value);
+					else if (std::holds_alternative<std::monostate>(target->data)) {
+						ModelValue::Object createdObject;
+						createdObject[key] = std::move(value);
+						target->data = std::move(createdObject);
+					} else
+						return false;
+					break;
+				}
 				if (auto* objectValues = std::get_if<ModelValue::Object>(&target->data))
-					(*objectValues)[key] = std::move(value);
+					target = &(*objectValues)[key];
 				else if (std::holds_alternative<std::monostate>(target->data)) {
-					ModelValue::Object createdObject;
-					createdObject[key] = std::move(value);
-					target->data = std::move(createdObject);
+					target->data = ModelValue::Object{};
+					target = &std::get<ModelValue::Object>(target->data)[key];
 				} else
 					return false;
-				break;
+				offset = next + 1;
 			}
-			if (auto* objectValues = std::get_if<ModelValue::Object>(&target->data))
-				target = &(*objectValues)[key];
-			else if (std::holds_alternative<std::monostate>(target->data)) {
-				target->data = ModelValue::Object{};
-				target = &std::get<ModelValue::Object>(target->data)[key];
-			} else
-				return false;
-			offset = next + 1;
 		}
-		if (dot == std::string_view::npos)
-			*target = std::move(value);
 		bool updated = false;
 		for (const auto& [dependency, nodes] : m_bindingNodes) {
 			const bool overlaps =
@@ -1376,7 +1378,7 @@ namespace xui {
 		Node node;
 		node.type = source.type;
 		node.parentIndex = parentIndex;
-		node.modelScope = modelScope;
+		node.modelScope = std::move(modelScope);
 		node.button = typeIs(source.type, *m_strings, "Button") || typeIs(source.type, *m_strings, "IconButton");
 		node.iconButton = typeIs(source.type, *m_strings, "IconButton");
 		node.checkList = typeIs(source.type, *m_strings, "CheckList");

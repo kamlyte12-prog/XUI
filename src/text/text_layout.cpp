@@ -213,7 +213,6 @@ namespace xui {
             w.glyphFirst = u32(tg.size());
 			w.rtl = runDirectionRtl;
             std::vector<Font::ShapedGlyph> shaped;
-            const std::string_view run = text.substr(runStart, i - runStart);
 			std::size_t segmentStart = runStart;
 			while (segmentStart < i) {
 				std::size_t cpEnd = segmentStart;

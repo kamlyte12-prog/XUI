@@ -31,21 +31,31 @@ namespace xui {
 		ModelValue(Object value) : data(std::move(value)) {}
 
 		bool truthy() const {
-			if (const auto* value = std::get_if<bool>(&data)) return *value;
-			if (const auto* value = std::get_if<f64>(&data)) return *value != 0.0;
-			if (const auto* value = std::get_if<std::string>(&data)) return !value->empty();
-			if (const auto* value = std::get_if<Array>(&data)) return !value->empty();
-			if (std::holds_alternative<Object>(data)) return true;
+			if (const auto* value = std::get_if<bool>(&data))
+				return *value;
+			if (const auto* value = std::get_if<f64>(&data))
+				return *value != 0.0;
+			if (const auto* value = std::get_if<std::string>(&data))
+				return !value->empty();
+			if (const auto* value = std::get_if<Array>(&data))
+				return !value->empty();
+			if (std::holds_alternative<Object>(data))
+				return true;
 			return false;
 		}
 		std::string toString() const {
-			if (const auto* value = std::get_if<bool>(&data)) return *value ? "true" : "false";
+			if (const auto* value = std::get_if<bool>(&data))
+				return *value ? "true" : "false";
 			if (const auto* value = std::get_if<f64>(&data)) {
-				std::ostringstream text; text << std::setprecision(15) << *value; return text.str();
+				std::ostringstream text;
+				text << std::setprecision(15) << *value;
+				return text.str();
 			}
-			if (const auto* value = std::get_if<std::string>(&data)) return *value;
+			if (const auto* value = std::get_if<std::string>(&data))
+				return *value;
 			if (const auto* value = std::get_if<Color>(&data)) {
-				std::ostringstream text; text << '#' << std::hex << std::setfill('0') << std::setw(8) << value->toRGBA8();
+				std::ostringstream text;
+				text << '#' << std::hex << std::setfill('0') << std::setw(8) << value->toRGBA8();
 				return text.str();
 			}
 			return {};

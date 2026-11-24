@@ -478,7 +478,9 @@ namespace xui {
 		void syncPickerEditors(u32 ownerIndex, u32 preserveIndex = 0xFFFFFFFFu);
 		bool updatePickerFromEditor(Node& editor);
 		struct PaintScope {
-			u32 dockPanel = 0xFFFFFFFFu;
+			constexpr PaintScope() : dockPanel(0xFFFFFFFFu) {}
+			constexpr explicit PaintScope(u32 panel) : dockPanel(panel) {}
+			u32 dockPanel;
 			bool active() const {
 				return dockPanel != 0xFFFFFFFFu;
 			}

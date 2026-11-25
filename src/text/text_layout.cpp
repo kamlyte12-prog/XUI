@@ -212,7 +212,7 @@ namespace xui {
             Word w;
             w.glyphFirst = u32(tg.size());
 			w.rtl = runDirectionRtl;
-            std::vector<Font::ShapedGlyph> shaped;
+			std::vector<Font::ShapedGlyph> shaped;
 			std::size_t segmentStart = runStart;
 			while (segmentStart < i) {
 				std::size_t cpEnd = segmentStart;

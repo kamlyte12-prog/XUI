@@ -111,6 +111,12 @@ namespace {
 #ifdef _WIN32
 		candidates.emplace_back("C:/Windows/Fonts/segoeui.ttf");
 		candidates.emplace_back("C:/Windows/Fonts/arial.ttf");
+#elif defined(__APPLE__)
+		candidates.emplace_back("/System/Library/Fonts/Supplemental/Arial.ttf");
+		candidates.emplace_back("/System/Library/Fonts/Supplemental/Verdana.ttf");
+#else
+		candidates.emplace_back("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
+		candidates.emplace_back("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf");
 #endif
 		for (const auto& path : candidates) {
 			std::ifstream file(path, std::ios::binary);
@@ -1756,7 +1762,7 @@ TEST(ui_runtime_empty_textbox_displays_focused_blinking_caret) {
 		return;
 	const std::string bytes = readTestFont();
 	if (bytes.empty())
-		return; // The caret needs a font; Linux/macOS CI has no configured test font.
+		return; // The caret needs a font; skip when no platform test font is available.
 	NullRenderer renderer;
 	TextSystem text;
 	CHECK(text.initAtlas(&renderer));

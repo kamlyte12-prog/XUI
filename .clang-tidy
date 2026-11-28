@@ -1,0 +1,29 @@
+# Curated clang-tidy checks.
+#
+# The sources predate this file, so checks are enabled deliberately: each one
+# below either already passed or had its findings fixed, which keeps CI green.
+# Add checks one at a time after fixing their findings.
+#
+# HeaderFilterRegex suppresses diagnostics from all headers, including the
+# vendored trees under libs/, so the job reviews the translation units only.
+Checks: >
+  -*,
+  bugprone-dangling-handle,
+  bugprone-infinite-loop,
+  bugprone-move-forwarding-reference,
+  bugprone-string-constructor,
+  bugprone-string-integer-assignment,
+  bugprone-suspicious-stringview-data-usage,
+  bugprone-too-small-loop-variable,
+  bugprone-unique-ptr-array-mismatch,
+  bugprone-use-after-move,
+  misc-redundant-expression,
+  performance-for-range-copy,
+  performance-inefficient-string-concatenation,
+  performance-inefficient-vector-operation,
+  performance-move-const-arg,
+  performance-type-promotion-in-math-fn,
+  performance-unnecessary-copy-initialization,
+  performance-unnecessary-value-param,
+  readability-container-size-empty
+HeaderFilterRegex: '^$'

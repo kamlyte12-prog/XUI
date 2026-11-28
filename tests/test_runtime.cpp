@@ -60,6 +60,24 @@ namespace xui {
 			}
 			return {};
 		}
+		static std::string dockPanelAt(const UiRuntime& runtime, Vec2 point) {
+			u32 index = runtime.hitTestNode(point);
+			for (u32 guard = 0; index < runtime.m_nodes.size() && guard < runtime.m_nodes.size(); ++guard) {
+				const UiRuntime::Node& node = runtime.m_nodes[index];
+				if (node.dockPanel && node.id.v)
+					return std::string(runtime.m_strings->view(node.id));
+				if (node.parentIndex == 0xFFFFFFFFu)
+					break;
+				index = node.parentIndex;
+			}
+			return {};
+		}
+		static f32 firstDockSplitRatio(const UiRuntime& runtime) {
+			for (const UiRuntime::DockHostState& host : runtime.m_dockHosts)
+				if (host.tree.splitterCount())
+					return host.tree.splitRatio(host.tree.splitterAt(0).node);
+			return -1.f;
+		}
 	};
 }
 
@@ -76,7 +94,6 @@ namespace {
 		if (name == "onSubmit") ++*static_cast<u32*>(context);
 		if (name == "onChange") ++static_cast<u32*>(context)[1];
 	}
-	void recordDock(void* context, std::string_view) { ++*static_cast<u32*>(context); }
 	struct DockPressProbe { std::string last; };
 	void recordDockPress(void* context, std::string_view name) { static_cast<DockPressProbe*>(context)->last = name; }
 	struct CheckListProbe { UiRuntime* runtime = nullptr; u32 calls = 0; CheckListValue selected; };
@@ -94,6 +111,12 @@ namespace {
 #ifdef _WIN32
 		candidates.emplace_back("C:/Windows/Fonts/segoeui.ttf");
 		candidates.emplace_back("C:/Windows/Fonts/arial.ttf");
+#elif defined(__APPLE__)
+		candidates.emplace_back("/System/Library/Fonts/Supplemental/Arial.ttf");
+		candidates.emplace_back("/System/Library/Fonts/Supplemental/Verdana.ttf");
+#else
+		candidates.emplace_back("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
+		candidates.emplace_back("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf");
 #endif
 		for (const auto& path : candidates) {
 			std::ifstream file(path, std::ios::binary);
@@ -590,6 +613,38 @@ DockPreview { resting: { bg: #5386d866, border: 1px solid #69a7ff, radius: 4px }
 		restore.floating = false; restore.targetPanel = "editor"; restore.region = DockZone::Center; restore.active = true;
 		CHECK(ui.setValue("console", restore));
 		CHECK(!std::get<DockPanelValue>(*ui.value("console")).floating);
+		DockPanelValue inspectorPlacement = std::get<DockPanelValue>(*ui.value("inspector"));
+		inspectorPlacement.targetPanel = "editor";
+		inspectorPlacement.region = DockZone::Left;
+		CHECK(ui.setValue("inspector", inspectorPlacement));
+		const std::string dockedSnapshot = ui.dumpLayout();
+		UiRuntime restoredDocked;
+		std::string dockedError;
+		CHECK(restoredDocked.build(*document, *styles, strings, text, {}, dockedError));
+		restoredDocked.layout(640.f, 420.f);
+		CHECK(restoredDocked.loadLayout(dockedSnapshot));
+		const auto restoredInspector = restoredDocked.value("inspector");
+		CHECK(restoredInspector.has_value());
+		if (restoredInspector)
+			CHECK(restoredDocked.bounds({4, 1}).right() <= restoredDocked.bounds({2, 1}).x + 0.1f);
+		floating = std::get<DockPanelValue>(*ui.value("console"));
+		floating.floating = true;
+		floating.bounds = {72.f, 48.f, 310.f, 190.f};
+		CHECK(ui.setValue("console", floating));
+		const std::string layoutSnapshot = ui.dumpLayout();
+		UiRuntime restored;
+		std::string restoreError;
+		CHECK(restored.build(*document, *styles, strings, text, {}, restoreError));
+		restored.layout(640.f, 420.f);
+		CHECK(restored.loadLayout(layoutSnapshot));
+		const auto restoredConsole = restored.value("console");
+		CHECK(restoredConsole.has_value());
+		if (restoredConsole) {
+			const auto restoredPanel = std::get<DockPanelValue>(*restoredConsole);
+			CHECK(restoredPanel.floating);
+			CHECK_NEAR(restoredPanel.bounds.x, 72.f, 0.01f);
+			CHECK_NEAR(restoredPanel.bounds.w, 310.f, 0.01f);
+		}
 	}
 
 	TEST(ui_runtime_os_window_float_policy_paints_one_panel_and_can_redock_by_drop_point) {
@@ -685,7 +740,10 @@ Window(size: 520x360) {
 		const Vec2 closePoint{ panel.right() - 15.f, panel.y + 15.f };
 		CHECK(ui.pointerDown(closePoint));
 		ui.pointerUp(closePoint);
-		CHECK(!ui.value("tool").has_value());
+		const auto closedValue = ui.value("tool");
+		CHECK(closedValue.has_value());
+		if (closedValue)
+			CHECK(std::get<DockPanelValue>(*closedValue).closed);
 	}
 
 	TEST(ui_runtime_floating_panel_raise_matches_content_paint_and_hit_order) {
@@ -901,6 +959,149 @@ Button.overlay-action { resting: { pad: 0px, bg: #00CC44FF, fg: #FFFFFFFF, borde
 		std::cout << "Dock native-surface proof: scoped subtree pixel header=(110,10) blue; child=(180,60) green; no sibling paint or ancestor clip.\n";
 	}
 
+	TEST(ui_runtime_rounded_parent_masks_child_background_in_corners) {
+		constexpr std::string_view xuiSource = R"(
+Window(size: 200x160) {
+  Panel[id: "rounded", class: "rounded", width: 120px, height: 120px] {
+    Panel[id: "child", class: "child", width: 100%, height: 100%]
+  }
+}
+)";
+		constexpr std::string_view xssSource = R"(
+Window { resting: { pad: 0px, bg: #0000FFFF } }
+Panel.rounded { resting: { pad: 0px, bg: #101820FF, radius: 28px, border: 0px solid #00000000 } }
+Panel.child { resting: { pad: 0px, bg: #00FF00FF, border: 0px solid #00000000 } }
+)";
+		StringInterner strings;
+		auto document = parseXui(xuiSource, "rounded-parent.xui", strings);
+		auto styles = compileXss(xssSource, "rounded-parent.xss", strings);
+		CHECK(document.has_value());
+		CHECK(styles.has_value());
+		if (!document || !styles)
+			return;
+		TextSystem text;
+		UiRuntime ui;
+		std::string error;
+		CHECK(ui.build(*document, *styles, strings, text, {}, error));
+		if (!error.empty())
+			return;
+		ui.layout(200.f, 160.f);
+		const Rect parent = UiRuntimeFontWeightProbe::bounds(ui, "rounded");
+		CHECK(parent.w == 120.f && parent.h == 120.f);
+		SoftRenderer renderer;
+		CHECK(renderer.init({200, 160, 1.f, nullptr, false}));
+		Painter painter;
+		painter.begin(200, 160, 1.f);
+		ui.paint(painter);
+		renderer.beginFrame({200, 160, 1.f, Color{0.f, 0.f, 1.f, 1.f}, 1});
+		renderer.submit(painter.finish());
+		renderer.endFrame();
+		const Image image = renderer.snapshot();
+		auto at = [&](f32 x, f32 y) { return image.px(static_cast<u32>(x), static_cast<u32>(y)); };
+		const u8* topLeft = at(parent.x + 1.f, parent.y + 1.f);
+		const u8* bottomRight = at(parent.right() - 2.f, parent.bottom() - 2.f);
+		const u8* insideArc = at(parent.x + 12.f, parent.y + 12.f);
+		const u8* middle = at(parent.x + 60.f, parent.y + 60.f);
+		// The child fills the parent edge to edge; only the rounded clip keeps it off the corners.
+		CHECK(topLeft && topLeft[1] < 40 && topLeft[2] > 180);
+		CHECK(bottomRight && bottomRight[1] < 40 && bottomRight[2] > 180);
+		CHECK(insideArc && insideArc[1] > 180 && insideArc[2] < 80);
+		CHECK(middle && middle[1] > 180 && middle[2] < 80);
+		std::cout << "Rounded parent proof: child green fills the body but corners (" << parent.x + 1.f << ','
+				  << parent.y + 1.f << ") and (" << parent.right() - 2.f << ',' << parent.bottom() - 2.f
+				  << ") stay clear colour.\n";
+	}
+
+	TEST(ui_runtime_floating_dock_panel_paints_above_chrome_and_owns_pointer) {
+		constexpr std::string_view xuiSource = R"(
+Window(size: 460x320) {
+  DockHost[id: "host", width: 100%, height: 100%, gutter: 12px, headerHeight: 24px] {
+    DockPanel(title: "Left")[id: "left", region: "Center", preferredSize: 200x280] {
+      Text("Left body")
+    }
+    DockPanel(title: "Right")[id: "right", region: "Right", target: "left", preferredSize: 200x280] {
+      Text("Right body")
+    }
+    DockPanel(title: "Float")[id: "float", floating: true, closable: false, preferredSize: 180x140] {
+      Button[id: "float-action", class: "float-action", label: "Press", width: 100%, height: 100%, press: onFloat]
+    }
+    DockPanel(title: "Top")[id: "top", floating: true, closable: false, preferredSize: 180x140] {
+      Text("Top body")
+    }
+  }
+}
+)";
+		constexpr std::string_view xssSource = R"(
+Window, DockHost { resting: { pad: 0px, border: 0px solid #00000000 } }
+DockPanel { resting: { pad: 0px, bg: #101820FF, fg: #FFFFFFFF, border: 0px solid #00000000, shadow: 0px 0px 0px 0px #00000000 } }
+DockHeader { resting: { bg: #FF0000FF, fg: #FFFFFFFF, border: 0px solid #00000000, pad: 4px }
+  floating: { bg: #00FF00FF } }
+DockSplitter { resting: { bg: #FF0000FF } }
+Button.float-action { resting: { bg: #00CC44FF, fg: #FFFFFFFF, pad: 0px, border: 0px solid #00000000 } }
+)";
+		StringInterner strings;
+		auto document = parseXui(xuiSource, "dock-floating-chrome.xui", strings);
+		auto styles = compileXss(xssSource, "dock-floating-chrome.xss", strings);
+		CHECK(document.has_value());
+		CHECK(styles.has_value());
+		if (!document || !styles)
+			return;
+		TextSystem text;
+		UiRuntime ui;
+		std::string error;
+		CHECK(ui.build(*document, *styles, strings, text, {}, error));
+		if (!error.empty())
+			return;
+		ui.layout(460.f, 320.f);
+		const Vec2 origin = UiRuntimeFontWeightProbe::dockHostContentOrigin(ui, "host");
+		const Rect left = UiRuntimeFontWeightProbe::bounds(ui, "left");
+		const Rect right = UiRuntimeFontWeightProbe::bounds(ui, "right");
+		const f32 gutterX = (left.right() + right.x) * 0.5f;
+		DockPanelValue floatValue = std::get<DockPanelValue>(*ui.value("float"));
+		floatValue.bounds = {gutterX - origin.x - 60.f, 30.f, 180.f, 140.f};
+		CHECK(ui.setValue("float", floatValue));
+		DockPanelValue topValue = std::get<DockPanelValue>(*ui.value("top"));
+		topValue.bounds = {floatValue.bounds.x + 90.f, 80.f, 180.f, 140.f};
+		CHECK(ui.setValue("top", topValue));
+		ui.layout(460.f, 320.f);
+		const Rect floatRect = UiRuntimeFontWeightProbe::bounds(ui, "float");
+		CHECK(floatRect.w > 0.f && floatRect.h > 0.f);
+		CHECK(floatRect.contains({gutterX, floatRect.y + 60.f}));
+
+		SoftRenderer renderer;
+		CHECK(renderer.init({460, 320, 1.f, nullptr, false}));
+		Painter painter;
+		painter.begin(460, 320, 1.f);
+		ui.paint(painter);
+		renderer.beginFrame({460, 320, 1.f, Color{0, 0, 0, 1}, 1});
+		renderer.submit(painter.finish());
+		renderer.endFrame();
+		const Image image = renderer.snapshot();
+		// The floating title bar was skipped while floating panels were laid out inactive.
+		const u8* headerPixel =
+			image.px(static_cast<u32>(floatRect.right() - 6.f), static_cast<u32>(floatRect.y + 10.f));
+		CHECK(headerPixel && headerPixel[1] > 180 && headerPixel[0] < 80);
+		// The floating body must cover the docked splitter, which now lives on a higher layer
+		// than page content but below floating panels.
+		const u8* gutterPixel = image.px(static_cast<u32>(gutterX), static_cast<u32>(floatRect.y + 60.f));
+		CHECK(gutterPixel && gutterPixel[1] > 120 && gutterPixel[0] < 80);
+
+		const f32 ratioBefore = UiRuntimeFontWeightProbe::firstDockSplitRatio(ui);
+		const Vec2 floatBodyPoint{origin.x + floatValue.bounds.x + 20.f, origin.y + floatValue.bounds.y + 60.f};
+		const Vec2 overlapPoint{origin.x + floatValue.bounds.x + 100.f, origin.y + 100.f};
+		CHECK_EQ(UiRuntimeFontWeightProbe::dockPanelAt(ui, overlapPoint), std::string("top"));
+		DockPressProbe probe;
+		ui.setEventHandler(recordDockPress, &probe);
+		CHECK(ui.pointerDown(floatBodyPoint));
+		ui.pointerUp(floatBodyPoint);
+		// Pressing a floating body raises it instead of starting a splitter drag behind it.
+		CHECK_EQ(UiRuntimeFontWeightProbe::dockPanelAt(ui, overlapPoint), std::string("float"));
+		CHECK_NEAR(UiRuntimeFontWeightProbe::firstDockSplitRatio(ui), ratioBefore, 0.0001f);
+		std::cout << "Dock floating chrome proof: header pixel green, body-over-gutter pixel green, "
+					 "body press raised float and left the split ratio at "
+				  << ratioBefore << ".\n";
+	}
+
 	std::string readExample(std::string_view filename) {
 		const std::filesystem::path path = std::filesystem::path(XUI_EXAMPLE_DIR) / filename;
 		std::ifstream file(path, std::ios::binary);
@@ -1047,6 +1248,47 @@ Window(size: 420x220) {
 	CHECK(automatic.y > spanning.bottom());
 }
 
+TEST(ui_runtime_grid_children_fill_stretched_cells) {
+	constexpr std::string_view xuiSource = R"(
+Window(size: 400x200) {
+  Column {
+    Grid("100px|1fr")[id: "grid", rows: "40px", gap: 8px, width: 100%, height: 80px] {
+      Text("Fixed cell")[id: "fixed-cell", gridColumn: 0, gridRow: 0]
+      Text("Flexible cell")[id: "flexible-cell", gridColumn: 1, gridRow: 0]
+    }
+  }
+}
+)";
+	// `align` doubles as inherited text alignment. A page-level start alignment must not
+	// leak into the Grid container and disable cell stretching.
+	constexpr std::string_view xssSource = R"(
+Column { resting: { align: Start } }
+)";
+	StringInterner strings;
+	UiAssetBundle assets;
+	std::string error;
+	CHECK(loadUiAssets(xuiSource, xssSource, strings, assets, error));
+	if (!error.empty()) {
+		std::cerr << "grid stretch assets: " << error << '\n';
+		return;
+	}
+	TextSystem text;
+	UiRuntime ui;
+	CHECK(ui.build(assets.document, assets.styles, strings, text, {}, error));
+	if (!error.empty()) {
+		std::cerr << "grid stretch build: " << error << '\n';
+		return;
+	}
+	ui.layout(400.f, 200.f);
+	const Rect fixed = ui.bounds({3, 1});
+	const Rect flexible = ui.bounds({4, 1});
+	CHECK_NEAR(fixed.w, 100.f, 0.01f);
+	CHECK(fixed.right() <= flexible.x);
+	CHECK(flexible.w > fixed.w);
+	CHECK_NEAR(fixed.h, 40.f, 0.01f);
+	CHECK_NEAR(flexible.h, 40.f, 0.01f);
+}
+
 TEST(ui_runtime_grid_rejects_invalid_track_definitions) {
 	for (const std::string_view tracks : { "0fr|auto", "12px||1fr", "1px|2px|3px|4px|5px|6px|7px|8px|9px" }) {
 		const std::string xui = "Window(size: 200x100) { Grid(\"" + std::string(tracks) + "\") { Text(\"cell\") } }";
@@ -1098,7 +1340,7 @@ Window(size: 280x150) {
 TEST(ui_runtime_xss_hover_transition_interpolates_without_idle_timer) {
 	constexpr std::string_view xuiSource = R"(Window(size: 240x120) { Button[id: "animated", width: 160px, height: 48px] })";
 	constexpr std::string_view xssSource = R"(
-Button { resting: { bg: #000000ff } hover: { bg: #ffffffff } transition: resting -> hover 120ms linear }
+Button { resting: { bg: #000000ff } hover: { bg: #ffffffff } transition: resting -> hover 600ms linear }
 )";
 	StringInterner strings; auto document = parseXui(xuiSource, "animation.xui", strings);
 	CHECK(document.has_value()); if (!document) return;
@@ -1115,11 +1357,13 @@ Button { resting: { bg: #000000ff } hover: { bg: #ffffffff } transition: resting
 	const Rect rect = ui.bounds({ 1, 1 });
 	CHECK(ui.pointerMove({ rect.x + 8.f, rect.y + 8.f }));
 	(void)paintColor();
-	std::this_thread::sleep_for(std::chrono::milliseconds(65));
+	// Generous durations keep the sampled phases valid on slow CI runners, where a
+	// supposedly sub-100 ms sleep can overshoot a short transition.
+	std::this_thread::sleep_for(std::chrono::milliseconds(325));
 	const u32 midway = paintColor();
 	CHECK(midway != resting);
 	CHECK(ui.nextTimerDelay() >= 0.0);
-	std::this_thread::sleep_for(std::chrono::milliseconds(90));
+	std::this_thread::sleep_for(std::chrono::milliseconds(450));
 	const u32 complete = paintColor();
 	CHECK(complete == 0xFFFFFFFFu);
 }
@@ -1128,8 +1372,8 @@ TEST(ui_runtime_animation_timer_continues_without_pointer_input_and_after_leave)
 	constexpr std::string_view xuiSource = R"(Window(size: 240x120) { Button[id: "animated", width: 160px, height: 48px] })";
 	constexpr std::string_view xssSource = R"(
 Button { resting: { bg: #000000ff } hover: { bg: #ffffffff }
-  transition: resting -> hover 120ms linear
-  transition: hover -> resting 120ms linear }
+  transition: resting -> hover 600ms linear
+  transition: hover -> resting 600ms linear }
 )";
 	StringInterner strings; auto document = parseXui(xuiSource, "animation-leave.xui", strings);
 	CHECK(document.has_value()); if (!document) return;
@@ -1152,17 +1396,17 @@ Button { resting: { bg: #000000ff } hover: { bg: #ffffffff }
 	CHECK(ui.updateTimers(scheduledAt));
 	const f64 remainingFrameDelay = ui.nextTimerDelay(scheduledAt + std::chrono::milliseconds(5));
 	CHECK(remainingFrameDelay > 0.0 && remainingFrameDelay < frameDelay);
-	std::this_thread::sleep_for(std::chrono::milliseconds(65));
+	std::this_thread::sleep_for(std::chrono::milliseconds(325));
 	CHECK(ui.updateTimers()); // no pointer events are needed to schedule the next animation frame
 	const u32 hoverSample = paintColor();
 	CHECK(ui.pointerLeave());
 	(void)paintColor(); // resolves hover -> resting into a new active transition
 	CHECK(ui.nextTimerDelay() > 0.0);
-	std::this_thread::sleep_for(std::chrono::milliseconds(65));
+	std::this_thread::sleep_for(std::chrono::milliseconds(325));
 	CHECK(ui.updateTimers()); // the mouse-leave event does not disable the timer path
 	const u32 leaveSample = paintColor();
 	CHECK(leaveSample != hoverSample);
-	std::this_thread::sleep_for(std::chrono::milliseconds(75));
+	std::this_thread::sleep_for(std::chrono::milliseconds(375));
 	CHECK(ui.updateTimers());
 	CHECK_EQ(paintColor(), Color::fromRGBA8(0x000000FFu).toRGBA8());
 	CHECK(ui.nextTimerDelay() < 0.0);
@@ -1172,8 +1416,8 @@ TEST(ui_runtime_animation_cancel_finish_completes_transition_before_new_state) {
 	constexpr std::string_view xuiSource = R"(Window(size: 240x120) { Button[id: "animated", width: 160px, height: 48px] })";
 	constexpr std::string_view xssSource = R"(
 Button { resting: { bg: #000000ff, animation-cancel: finish } hover: { bg: #ffffffff }
-  transition: resting -> hover 120ms linear
-  transition: hover -> resting 120ms linear }
+  transition: resting -> hover 600ms linear
+  transition: hover -> resting 600ms linear }
 )";
 	StringInterner strings; auto document = parseXui(xuiSource, "animation-finish.xui", strings);
 	CHECK(document.has_value()); if (!document) return;
@@ -1190,16 +1434,16 @@ Button { resting: { bg: #000000ff, animation-cancel: finish } hover: { bg: #ffff
 	const Rect rect = ui.bounds({ 1, 1 });
 	CHECK(ui.pointerMove({ rect.x + 8.f, rect.y + 8.f }));
 	(void)paintColor();
-	std::this_thread::sleep_for(std::chrono::milliseconds(65));
+	std::this_thread::sleep_for(std::chrono::milliseconds(325));
 	(void)paintColor();
 	CHECK(ui.pointerLeave());
 	(void)paintColor(); // finish the hover transition before applying the resting target
-	std::this_thread::sleep_for(std::chrono::milliseconds(75));
+	std::this_thread::sleep_for(std::chrono::milliseconds(375));
 	CHECK(ui.updateTimers());
 	CHECK_EQ(paintColor(), Color::fromRGBA8(0xFFFFFFFFu).toRGBA8());
 	(void)paintColor();
 	CHECK(ui.nextTimerDelay() > 0.0); // the resting transition starts after the hover target completes
-	std::this_thread::sleep_for(std::chrono::milliseconds(140));
+	std::this_thread::sleep_for(std::chrono::milliseconds(700));
 	CHECK(ui.updateTimers());
 	CHECK_EQ(paintColor(), Color::fromRGBA8(0x000000FFu).toRGBA8());
 	CHECK(ui.nextTimerDelay() < 0.0);
@@ -1208,7 +1452,7 @@ Button { resting: { bg: #000000ff, animation-cancel: finish } hover: { bg: #ffff
 TEST(ui_runtime_animation_clock_pauses_and_resumes_for_hidden_window) {
 	constexpr std::string_view xuiSource = R"(Window(size: 240x120) { Button[id: "animated", width: 160px, height: 48px] })";
 	constexpr std::string_view xssSource = R"(
-Button { resting: { bg: #000000ff } hover: { bg: #ffffffff } transition: resting -> hover 180ms linear }
+Button { resting: { bg: #000000ff } hover: { bg: #ffffffff } transition: resting -> hover 900ms linear }
 )";
 	StringInterner strings; auto document = parseXui(xuiSource, "animation-hidden.xui", strings);
 	CHECK(document.has_value()); if (!document) return;
@@ -1222,11 +1466,11 @@ Button { resting: { bg: #000000ff } hover: { bg: #ffffffff } transition: resting
 	ui.pointerMove({ rect.x + 8.f, rect.y + 8.f }); paint();
 	const auto pausedAt = std::chrono::steady_clock::now();
 	ui.setAnimationsPaused(true, pausedAt);
-	std::this_thread::sleep_for(std::chrono::milliseconds(220));
+	std::this_thread::sleep_for(std::chrono::milliseconds(1100));
 	CHECK(!ui.updateTimers()); CHECK(ui.nextTimerDelay() < 0.0);
 	ui.setAnimationsPaused(false);
 	CHECK(ui.nextTimerDelay() > 0.0 && ui.nextTimerDelay() <= 1.0 / 60.0);
-	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	std::this_thread::sleep_for(std::chrono::milliseconds(500));
 	CHECK(ui.updateTimers()); paint(); // animation retains its pre-hide elapsed time
 	CHECK(ui.nextTimerDelay() > 0.0);
 }
@@ -1234,7 +1478,7 @@ Button { resting: { bg: #000000ff } hover: { bg: #ffffffff } transition: resting
 TEST(ui_runtime_animation_cancel_finish_completes_current_keyframe_iteration) {
 	constexpr std::string_view xuiSource = R"(Window(size: 240x120) { Panel[id: "animated", width: 160px, height: 48px] })";
 	constexpr std::string_view xssSource = R"(
-Panel { resting: { bg: #000000ff } hover: { animation: pulse 180ms infinite linear cancel(finish) }
+Panel { resting: { bg: #000000ff } hover: { animation: pulse 900ms infinite linear cancel(finish) }
   transition: resting -> hover 0ms linear }
 keyframes pulse { from { bg: #000000ff } to { bg: #ffffffff } }
 )";
@@ -1253,11 +1497,11 @@ keyframes pulse { from { bg: #000000ff } to { bg: #ffffffff } }
 	const Rect rect = ui.bounds({ 1, 1 });
 	ui.pointerMove({ rect.x + 8.f, rect.y + 8.f });
 	(void)paintColor(); // enter the hover keyframe animation
-	std::this_thread::sleep_for(std::chrono::milliseconds(45));
+	std::this_thread::sleep_for(std::chrono::milliseconds(225));
 	(void)paintColor();
 	ui.pointerLeave();
 	(void)paintColor(); // finish the current infinite iteration, then leave the hover state
-	std::this_thread::sleep_for(std::chrono::milliseconds(160));
+	std::this_thread::sleep_for(std::chrono::milliseconds(800));
 	CHECK(ui.updateTimers());
 	CHECK_EQ(paintColor(), Color::fromRGBA8(0xFFFFFFFFu).toRGBA8());
 	CHECK_EQ(paintColor(), Color::fromRGBA8(0x000000FFu).toRGBA8());
@@ -1274,10 +1518,52 @@ TEST(ui_runtime_f4_draw_batch_counter_is_independent_of_fps_sampling) {
 	CHECK(!ui.drawBatchCounterEnabled());
 }
 
+TEST(ui_runtime_fps_overlay_reports_clip_cap_fallbacks_only_when_hit) {
+	constexpr std::string_view xuiSource = R"(Window(size: 240x120) { FpsCounter[id: "fps"] })";
+	constexpr std::string_view xssSource = R"(FpsCounter { resting: { fg: #ffffffff } })";
+	StringInterner strings;
+	auto document = parseXui(xuiSource, "fps-cap.xui", strings);
+	CHECK(document.has_value());
+	if (!document)
+		return;
+	auto styles = compileXss(xssSource, "fps-cap.xss", strings);
+	CHECK(styles.has_value());
+	if (!styles)
+		return;
+	TextSystem text;
+	UiRuntime ui;
+	std::string error;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error));
+	if (!error.empty())
+		return;
+	ui.layout(240.f, 120.f);
+	CHECK(ui.keyDown(Key::F4));
+	ui.setDrawBatchCount(7);
+	Painter painter;
+
+	painter.begin(240, 120, 1.f);
+	ui.paint(painter, 1.f);
+	(void)painter.finish();
+	CHECK_EQ(std::string(ui.controlText("fps")), std::string("Batches: 7"));
+
+	// A frame that exceeded the rounded-clip cap appends a diagnostic without changing the
+	// common label; clearing the counter returns to the plain text.
+	ui.setClipShapeCapFallbacks(2);
+	painter.begin(240, 120, 1.f);
+	ui.paint(painter, 1.f);
+	(void)painter.finish();
+	CHECK_EQ(std::string(ui.controlText("fps")), std::string("Batches: 7 | ClipCaps: 2"));
+	ui.setClipShapeCapFallbacks(0);
+	painter.begin(240, 120, 1.f);
+	ui.paint(painter, 1.f);
+	(void)painter.finish();
+	CHECK_EQ(std::string(ui.controlText("fps")), std::string("Batches: 7"));
+}
+
 TEST(ui_runtime_xss_keyframes_tick_only_while_visible_animation_runs) {
 	constexpr std::string_view xuiSource = R"(Window(size: 240x120) { Panel[id: "animated", class: "animated", width: 160px, height: 48px] })";
 	constexpr std::string_view xssSource = R"(
-Panel.animated { resting: { bg: #000000ff, animation: fade-in 120ms 1 linear } }
+Panel.animated { resting: { bg: #000000ff, animation: fade-in 600ms 1 linear } }
 keyframes fade-in { from { opacity: 0, bg: #000000ff } to { opacity: 1, bg: #ffffffff } }
 )";
 	StringInterner strings; auto document = parseXui(xuiSource, "keyframes.xui", strings);
@@ -1294,12 +1580,12 @@ keyframes fade-in { from { opacity: 0, bg: #000000ff } to { opacity: 1, bg: #fff
 	const u32 initial = paintColor();
 	const f64 firstFrameDelay = ui.nextTimerDelay();
 	CHECK(firstFrameDelay > 0.0 && firstFrameDelay <= 1.0 / 60.0);
-	std::this_thread::sleep_for(std::chrono::milliseconds(65));
+	std::this_thread::sleep_for(std::chrono::milliseconds(325));
 	// No pointer or keyboard input is sent: the animation timer alone must wake the runtime.
 	CHECK(ui.updateTimers());
 	const u32 midway = paintColor();
 	CHECK(midway != initial);
-	std::this_thread::sleep_for(std::chrono::milliseconds(90));
+	std::this_thread::sleep_for(std::chrono::milliseconds(450));
 	CHECK(paintColor() == 0xFFFFFFFFu);
 	CHECK(ui.nextTimerDelay() < 0.0);
 }
@@ -1307,7 +1593,7 @@ keyframes fade-in { from { opacity: 0, bg: #000000ff } to { opacity: 1, bg: #fff
 TEST(ui_runtime_keyframe_play_cancel_and_progress_value) {
 	constexpr std::string_view xuiSource = R"(Window(size: 240x120) { ProgressBar[id: "meter", class: "meter", value: 0, width: 180px, height: 18px] })";
 	constexpr std::string_view xssSource = R"(
-ProgressBar.meter { resting: { animation: fill 120ms paused linear } }
+ProgressBar.meter { resting: { animation: fill 600ms paused linear } }
 keyframes fill { from { value: 0 } to { value: 1 } }
 )";
 	StringInterner strings; auto document = parseXui(xuiSource, "animation-control.xui", strings);
@@ -1323,17 +1609,17 @@ keyframes fill { from { value: 0 } to { value: 1 } }
 	CHECK(ui.nextTimerDelay() < 0.0); // paused animations do not keep the event loop awake
 	CHECK(ui.playAnimation("meter", AnimationMode::Once));
 	CHECK(ui.nextTimerDelay() > 0.0 && ui.nextTimerDelay() <= 1.0 / 60.0);
-	std::this_thread::sleep_for(std::chrono::milliseconds(65));
+	std::this_thread::sleep_for(std::chrono::milliseconds(325));
 	CHECK(ui.updateTimers()); paint();
 	const f64 halfway = std::get<f64>(*ui.value("meter"));
 	CHECK(halfway > 0.0 && halfway < 1.0);
-	std::this_thread::sleep_for(std::chrono::milliseconds(90));
+	std::this_thread::sleep_for(std::chrono::milliseconds(450));
 	CHECK(ui.updateTimers()); paint();
 	CHECK_EQ(std::get<f64>(*ui.value("meter")), 1.0);
 	CHECK(ui.nextTimerDelay() < 0.0);
 	CHECK(ui.setValue("meter", 0.0));
 	CHECK(ui.playAnimation("meter", AnimationMode::Loop));
-	std::this_thread::sleep_for(std::chrono::milliseconds(65));
+	std::this_thread::sleep_for(std::chrono::milliseconds(325));
 	CHECK(ui.updateTimers()); paint();
 	const f64 loopValue = std::get<f64>(*ui.value("meter"));
 	CHECK(loopValue > 0.0 && loopValue < 1.0);
@@ -1400,16 +1686,89 @@ TEST(ui_runtime_transform_moves_paint_and_hit_testing_together) {
 	CHECK_EQ(calls, 1u);
 }
 
+TEST(ui_runtime_transformed_tabs_align_header_hover_and_click_hitboxes) {
+	constexpr std::string_view xuiSource = R"(Window(size: 260x140) {
+  Tabs[id: "sections", class: "shifted", selected: 0, change: onChange, width: 180px, height: 110px] {
+    Tab[title: "First"] { Text("First page") }
+    Tab[title: "Second"] { Text("Second page") }
+  }
+})";
+	constexpr std::string_view xssSource = R"(
+Tabs.shifted { resting: { transform: translate(40px, 12px) } }
+Tab { resting: { bg: #112233ff } hover: { bg: #aabbccff } }
+)";
+	StringInterner strings;
+	auto document = parseXui(xuiSource, "tabs-transform.xui", strings);
+	CHECK(document.has_value());
+	if (!document)
+		return;
+	auto styles = compileXss(xssSource, "tabs-transform.xss", strings);
+	CHECK(styles.has_value());
+	if (!styles)
+		return;
+	TextSystem text;
+	UiRuntime ui;
+	std::string error;
+	u32 calls = 0;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error));
+	if (!error.empty())
+		return;
+	ui.setEventHandler(
+		[](void* context, std::string_view name) {
+			if (name == "onChange")
+				++*static_cast<u32*>(context);
+		},
+		&calls);
+	ui.layout(260.f, 140.f);
+	const Rect tabs = ui.bounds({1, 1});
+	Painter painter;
+	const u32 hoverColor = Color::fromRGBA8(0xaabbccffu).toRGBA8();
+	auto hoverPaintedAt = [&](f32 left) {
+		painter.begin(260, 140, 1.f);
+		ui.paint(painter);
+		const DrawList hovered = painter.finish();
+		for (u32 i = 0; i < hovered.nVerts; ++i) {
+			const Vertex& vertex = hovered.verts[i];
+			if (vertex.c0 == hoverColor && std::abs(vertex.x - left) < 0.01f &&
+				std::abs(vertex.y - (tabs.y + 12.f)) < 0.01f)
+				return true;
+		}
+		return false;
+	};
+	const Vec2 firstHeader{tabs.x + 40.f + tabs.w * 0.25f, tabs.y + 12.f + 16.f};
+	const Vec2 secondHeader{tabs.x + 40.f + tabs.w * 0.75f, tabs.y + 12.f + 16.f};
+	CHECK(ui.pointerMove(firstHeader));
+	CHECK(hoverPaintedAt(tabs.x + 40.f));
+	CHECK(ui.pointerMove(secondHeader)); // Adjacent headers share the same Tabs hit target but must repaint on switch.
+	CHECK(hoverPaintedAt(tabs.x + 40.f + tabs.w * 0.5f));
+	const Vec2 pageInterior{tabs.x + 40.f + 24.f, tabs.y + 12.f + 72.f};
+	CHECK(ui.pointerMove(pageInterior)); // Moving over the active page's own children clears header hover.
+	CHECK(!hoverPaintedAt(tabs.x + 40.f + tabs.w * 0.5f));
+	CHECK(ui.pointerMove(secondHeader));
+	CHECK(hoverPaintedAt(tabs.x + 40.f + tabs.w * 0.5f));
+	CHECK(ui.pointerDown(secondHeader));
+	CHECK_EQ(std::get<u32>(*ui.value("sections")), 1u);
+	CHECK_EQ(calls, 1u);
+}
+
 TEST(ui_runtime_empty_textbox_displays_focused_blinking_caret) {
 	constexpr std::string_view xuiSource = R"(Window(size: 240x100) { TextBox[id: "field", placeholder: "Type here", width: 180px, height: 40px] })";
 	constexpr std::string_view xssSource = R"(TextBox { resting: { fg: #ffffffff, bg: #202a3aff, pad: 8px } })";
 	StringInterner strings; auto document = parseXui(xuiSource, "caret.xui", strings);
 	CHECK(document.has_value()); if (!document) return;
 	auto styles = compileXss(xssSource, "caret.xss", strings);
-	CHECK(styles.has_value()); if (!styles) return;
-	TextSystem text; NullRenderer renderer; CHECK(text.initAtlas(&renderer));
-	const std::string bytes = readTestFont(); std::string error;
-	const FontHandle font = bytes.empty() ? FontHandle{} : text.loadFont(bytes, &error);
+	CHECK(styles.has_value());
+	if (!styles)
+		return;
+	const std::string bytes = readTestFont();
+	if (bytes.empty())
+		return; // The caret needs a font; skip when no platform test font is available.
+	NullRenderer renderer;
+	TextSystem text;
+	CHECK(text.initAtlas(&renderer));
+	std::string error;
+	const FontHandle font = text.loadFont(bytes, &error);
+	CHECK(font.valid());
 	UiRuntime ui; CHECK(ui.build(*document, *styles, strings, text, font, error)); if (!error.empty()) return;
 	ui.layout(240.f, 100.f); const Rect bounds = ui.bounds({ 1, 1 });
 	CHECK(ui.pointerDown({ bounds.x + 12.f, bounds.y + bounds.h * 0.5f }));
@@ -1473,6 +1832,49 @@ Window(size: 320x180) {
 	CHECK(ui.pointerDown(point)); CHECK(ui.pointerUp(point));
 	CHECK_EQ(events.size(), std::size_t{ 1 });
 	if (!events.empty()) CHECK_EQ(events.front(), "onVisible");
+}
+
+TEST(ui_runtime_tabs_pages_fill_content_box_when_alignment_is_centered) {
+	constexpr std::string_view xuiSource = R"(
+Window(size: 420x260) {
+  Tabs[id: "outer", selected: 0, width: 100%, height: 100%] {
+    Tab(title: "Outer") {
+      Tabs[id: "inner", selected: 0, width: 100%, height: 100%] {
+        Tab(title: "Inner") {
+          Panel[width: 620px, height: 40px]
+        }
+        Tab(title: "Other") { Text("Other page") }
+      }
+    }
+  }
+})";
+	// A Tab's align declaration is also used for its header label. It must not shrink-wrap
+	// and center the page inside a nested Tabs control.
+	constexpr std::string_view xssSource = R"(
+Tab { resting: { align: Center } }
+)";
+	StringInterner strings;
+	auto document = parseXui(xuiSource, "tabs-fill.xui", strings);
+	CHECK(document.has_value());
+	if (!document)
+		return;
+	auto styles = compileXss(xssSource, "tabs-fill.xss", strings);
+	CHECK(styles.has_value());
+	if (!styles)
+		return;
+	TextSystem text;
+	UiRuntime ui;
+	std::string error;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error));
+	if (!error.empty())
+		return;
+	ui.layout(420.f, 260.f);
+	const Rect inner = ui.bounds({3, 1});
+	const Rect page = ui.bounds({4, 1});
+	CHECK(!inner.empty() && !page.empty());
+	CHECK(page.x >= inner.x - 0.01f);
+	CHECK(page.right() <= inner.right() + 0.01f);
+	CHECK(page.w <= inner.w + 0.01f);
 }
 
 TEST(cross_platform_example_assets_parse_and_build_in_shared_runtime) {
@@ -1539,6 +1941,27 @@ TEST(xui_facade_loads_assets_attaches_backends_and_runs_frames) {
 	CHECK(!app.window().valid());
 }
 
+TEST(xui_facade_exposes_validation_warnings_and_can_opt_into_errors) {
+	const auto base = std::filesystem::temp_directory_path() / "xui-schema-warning-tests";
+	std::filesystem::create_directories(base);
+	const auto xuiPath = base / "unsupported.xui";
+	{
+		std::ofstream file(xuiPath, std::ios::binary);
+		file << "Window(resizable: false) {}";
+	}
+	Xui app;
+	CHECK(app.loadXui(xuiPath.string()));
+	CHECK_EQ(app.validationWarnings().size(), std::size_t{1});
+	if (!app.validationWarnings().empty())
+		CHECK_EQ(app.validationWarnings().front().items().size(), std::size_t{1});
+	XuiOptions options;
+	options.warningsAsErrors = true;
+	Xui strict(options);
+	CHECK(!strict.loadXui(xuiPath.string()));
+	CHECK(strict.lastError().find("error: 'resizable' is accepted on Window but is not implemented") !=
+		  std::string::npos);
+}
+
 TEST(xui_facade_resolves_window_defaults_with_fieldwise_precedence) {
 	auto runCase = [](std::string_view xuiSource, std::string_view xssSource, XuiOptions options,
 		std::string_view expectedTitle, u32 expectedWidth, u32 expectedHeight) {
@@ -1560,12 +1983,15 @@ TEST(xui_facade_resolves_window_defaults_with_fieldwise_precedence) {
 		CHECK_EQ(size.x, static_cast<f32>(expectedWidth));
 		CHECK_EQ(size.y, static_cast<f32>(expectedHeight));
 		CHECK_EQ(platform.lastCornerRadius(), 12.f);
+		// A rounded client uses its authored background for the native frame border so DWM's
+		// default light line cannot step along the corner arc.
+		CHECK_EQ(platform.lastChromeBorderColor(), 0x123456FFu);
 		CHECK_EQ(app.runtime().windowTitle(), std::string(expectedTitle));
 		app.shutdown();
 	};
 
 	constexpr std::string_view xssSource = R"(
-Window.surface { resting: { window-title: "Style title", size: 800px 600px, radius: 12px } }
+Window.surface { resting: { window-title: "Style title", size: 800px 600px, radius: 12px, bg: #123456 } }
 )";
 	runCase(R"(Window[class: "surface"] { Text("x") })", xssSource, {}, "Style title", 800, 600);
 	runCase(R"(Window(title: "Document title", size: 900x650)[class: "surface"] { Text("x") })",
@@ -1681,6 +2107,25 @@ Button.primary {
 	renderer.shutdown();
 }
 
+TEST(ui_load_assets_exposes_schema_warnings_and_supports_opt_in_strict_validation) {
+	constexpr std::string_view xuiSource = R"(Window(size: 180x100) { Text("Paragraph")[maxLines: 2] })";
+	StringInterner strings;
+	UiAssetBundle assets;
+	std::string error;
+	CHECK(loadUiAssets(xuiSource, "", strings, assets, error));
+	CHECK(error.empty());
+	CHECK_EQ(assets.validationWarnings.size(), std::size_t{1});
+	if (!assets.validationWarnings.empty()) {
+		const auto warnings = assets.validationWarnings.front().items();
+		CHECK_EQ(warnings.size(), std::size_t{1});
+		if (!warnings.empty())
+			CHECK(warnings.front().severity == Severity::Warning);
+	}
+	UiAssetBundle strictAssets;
+	CHECK(!loadUiAssets(xuiSource, "", strings, strictAssets, error, "<memory>.xui", "<memory>.xss", {true}));
+	CHECK(error.find("error: 'maxLines' is accepted on Text but is not implemented") != std::string::npos);
+}
+
 TEST(ui_runtime_resolves_stylesheet_percent_lengths_once) {
 	constexpr std::string_view xuiSource = R"(
 Window(title: "Percent", size: 400x200) {
@@ -1761,10 +2206,10 @@ Row.bar { resting: { bg: #cbd5e1 } }
 	UiRuntime ui; CHECK(ui.build(assets.document, assets.styles, strings, text, font, error));
 	for (const f32 dpi : { 1.f, 1.25f, 1.5f }) {
 		ui.layout(760.f, 480.f, dpi);
-		CHECK(ui.bounds({ 2, 1 }).w > 700.f); // Column still stretches text on its cross axis.
-		for (const auto [index, sample] : { std::pair{ 4u, std::string_view("World! Extension") },
-			std::pair{ 6u, std::string_view("!") },
-			std::pair{ 8u, std::string_view("World!") } }) {
+		CHECK(ui.bounds({2, 1}).w > 700.f); // Column still stretches text on its cross axis.
+		for (const auto& [index, sample] :
+			 {std::pair{4u, std::string_view("World! Extension")}, std::pair{6u, std::string_view("!")},
+			  std::pair{8u, std::string_view("World!")}}) {
 			const Rect rect = ui.bounds({ index, 1 });
 			const TextLayout& measured = text.layout(font, sample, 16.f * dpi);
 			CHECK_EQ(measured.glyphs.size(), static_cast<std::size_t>(std::count_if(sample.begin(), sample.end(), [](char ch) { return ch != ' '; })));
@@ -1775,9 +2220,12 @@ Row.bar { resting: { bg: #cbd5e1 } }
 	CHECK_NEAR(wrapped.w, 120.f, 0.01f);
 	CHECK(wrapped.h > text.layout(font, "Long text wraps inside a narrow row without losing its final glyph.", 24.f, 180.f).lineHeight / 1.5f);
 	CHECK(ui.bounds({ 12, 1 }).w >= 96.f); // A button remains content-sized when hosted by Row.
-	Painter painter; painter.begin(1140, 720, 1.5f); text.beginFrame(); ui.paint(painter, 1.5f);
+	Painter painter;
+	painter.begin(1140, 720, 1.5f);
+	text.beginFrame();
+	ui.paint(painter, 1.5f);
 	const DrawList list = painter.finish();
-	for (const auto [index, expectedGlyphs] : { std::pair{ 4u, 15u }, std::pair{ 6u, 1u }, std::pair{ 8u, 6u } }) {
+	for (const auto& [index, expectedGlyphs] : {std::pair{4u, 15u}, std::pair{6u, 1u}, std::pair{8u, 6u}}) {
 		const Rect rect = ui.bounds({ index, 1 });
 		bool matchedClip = false;
 		f32 rightmostGlyph = -std::numeric_limits<f32>::infinity();
@@ -1900,8 +2348,16 @@ ColorPicker.control { resting: { size: 220px 36px, bg: #223344, fg: #ffffff } ho
 )";
 	StringInterner strings; UiAssetBundle assets; std::string error;
 	CHECK(loadUiAssets(xuiSource, xssSource, strings, assets, error));
-	TextSystem text; UiRuntime ui;
+	SoftRenderer renderer;
+	CHECK(renderer.init({400, 400, 1.f, nullptr, false}));
+	TextSystem text;
+	CHECK(text.initAtlas(&renderer));
+	const std::string fontBytes = readTestFont();
+	const FontHandle font = text.loadFont(fontBytes, &error);
+	CHECK(font.valid());
+	UiRuntime ui;
 	CHECK(ui.build(assets.document, assets.styles, strings, text, {}, error));
+	CHECK(ui.setFont(font, error));
 	ui.layout(400, 400);
 	std::vector<std::string> events;
 	ui.setEventHandler([](void* context, std::string_view name) { static_cast<std::vector<std::string>*>(context)->emplace_back(name); }, &events);
@@ -1955,6 +2411,20 @@ ColorPicker.control { resting: { size: 220px 36px, bg: #223344, fg: #ffffff } ho
 	}
 	CHECK(ui.controlText("accent").starts_with("#"));
 	CHECK(ui.pointerDown({ picker.x + 90.f,popupY + 283.f })); // HEX field is active again
+	ui.pointerUp({picker.x + 90.f, popupY + 283.f});
+	CHECK(ui.pointerDown({picker.x + 90.f, popupY + 283.f})); // select all from the value editor
+	CHECK(ui.keyDown(Key::Home));
+	CHECK(ui.keyDown(Key::End, static_cast<u8>(Mod::Shift), nullptr));
+	NullPlatform mouseSelectionClipboard;
+	CHECK(ui.keyDown(static_cast<Key>('C'), static_cast<u8>(Mod::Ctrl), &mouseSelectionClipboard));
+	CHECK_EQ(mouseSelectionClipboard.clipboardText(), ui.controlText("accent"));
+	CHECK(ui.keyDown(Key::A, static_cast<u8>(Mod::Ctrl), nullptr));
+	NullPlatform pickerClipboard;
+	CHECK(ui.keyDown(static_cast<Key>('C'), static_cast<u8>(Mod::Ctrl), &pickerClipboard));
+	CHECK_EQ(pickerClipboard.clipboardText(), ui.controlText("accent"));
+	CHECK(ui.keyDown(static_cast<Key>('X'), static_cast<u8>(Mod::Ctrl), &pickerClipboard));
+	CHECK(ui.keyDown(static_cast<Key>('V'), static_cast<u8>(Mod::Ctrl), &pickerClipboard));
+	CHECK(ui.controlText("accent").starts_with("#"));
 	CHECK(ui.keyDown(Key::A, static_cast<u8>(Mod::Ctrl), nullptr));
 	CHECK(ui.textInput("#ff00ff80"));
 	CHECK(ui.controlColor("accent").r > 0.99f && ui.controlColor("accent").b > 0.99f);
@@ -1962,6 +2432,8 @@ ColorPicker.control { resting: { size: 220px 36px, bg: #223344, fg: #ffffff } ho
 	CHECK(ui.controlText("accent").starts_with("rgb"));
 	CHECK(std::get<Color>(*ui.value("accent")) == ui.controlColor("accent"));
 	ui.pointerUp({ picker.x + 10.f,popupY + 170.f });
+	text.atlas()->shutdown();
+	renderer.shutdown();
 }
 
 TEST(ui_runtime_slider_change_fires_for_each_live_drag_value) {
@@ -1990,7 +2462,7 @@ TEST(ui_runtime_text_fields_check_box_tabs_and_delayed_tooltips) {
 	constexpr std::string_view xuiSource = R"(
 Window(title: "Inputs", size: 480x360) {
   Column {
-    TextBox[id: "name", value: "A", placeholder: "Name", maxLength: 6, tooltip: "Type a short name", tooltipShowDelay: 100, tooltipHideDelay: 200, tooltipTrigger: "hover", change: onChange]
+    TextBox[id: "name", value: "A", placeholder: "Name", maxLength: 6, tooltip: "Type a short name", tooltipShowDelay: 100, tooltipHideDelay: 200, tooltipTrigger: "hover", change: onChange, filter: rejectBang]
   TextArea[id: "notes", value: "", placeholder: "Notes", maxLength: 20, tabSize: 2, tooltip: "Use multiple lines", tooltipDisabled: true, change: onChange]
     CheckBox(label: "Enabled")[id: "enabled", checked: true, change: onChange]
     Tabs[id: "pages", selected: 0, change: onChange] {
@@ -2021,6 +2493,22 @@ Tooltip { resting: { bg: #202a40, fg: #ffffff, pad: 6px, radius: 4px } }
 
 	std::vector<std::string> events;
 	ui.setEventHandler([](void* context, std::string_view name) { static_cast<std::vector<std::string>*>(context)->emplace_back(name); }, &events);
+	u32 validationCalls = 0;
+	ui.setInputValidationHandler(
+		[](void* context, std::string_view handler, std::string_view id, std::string_view proposed,
+		   std::string& errorMessage) {
+			++*static_cast<u32*>(context);
+			if (handler == "rejectBang" && id == "name" && proposed.find('!') != std::string_view::npos) {
+				errorMessage = "Exclamation marks are not allowed";
+				return false;
+			}
+			if (handler == "rejectBang" && id == "name" && proposed.empty()) {
+				errorMessage = "Name cannot be empty";
+				return false;
+			}
+			return true;
+		},
+		&validationCalls);
 	CHECK(ui.setValue("name", std::string("XYZZ")));
 	CHECK(std::get<std::string>(*ui.value("name")) == "XYZZ");
 	CHECK(!ui.setValue("name", true));
@@ -2039,7 +2527,12 @@ Tooltip { resting: { bg: #202a40, fg: #ffffff, pad: 6px, radius: 4px } }
 	CHECK(ui.pointerMove({ name.x + 10, name.y + 10 }));
 	const Vec2 namePoint{ name.x + 10, name.y + 10 };
 	CHECK(ui.pointerDown(namePoint));
+	CHECK(ui.textInput('!'));
+	CHECK_EQ(std::get<std::string>(*ui.value("name")), "A");
+	CHECK_EQ(ui.controlError("name"), "Exclamation marks are not allowed");
+	CHECK_EQ(validationCalls, 1u);
 	CHECK(ui.textInput('B'));
+	CHECK(ui.controlError("name").empty());
 	CHECK(std::get<std::string>(*ui.value("name")) == "AB");
 	CHECK(ui.keyDown(Key::Backspace));
 	CHECK(std::get<std::string>(*ui.value("name")) == "A");
@@ -2053,9 +2546,16 @@ Tooltip { resting: { bg: #202a40, fg: #ffffff, pad: 6px, radius: 4px } }
 	CHECK_EQ(std::get<std::string>(*ui.value("name")), "😀CD");
 	CHECK(ui.keyDown(Key::End, static_cast<u8>(Mod::Shift), nullptr));
 	CHECK(ui.keyDown(Key::Backspace));
-	CHECK_EQ(std::get<std::string>(*ui.value("name")), "");
+	// The filter sees the proposed whole string, so deleting the selection down to
+	// nothing is rejected just like the later Ctrl+A case; the selection stays live.
+	CHECK_EQ(std::get<std::string>(*ui.value("name")), "😀CD");
+	CHECK_EQ(ui.controlError("name"), "Name cannot be empty");
 	CHECK(ui.textInput("replace"));
 	CHECK_EQ(std::get<std::string>(*ui.value("name")), "replac");
+	CHECK(ui.keyDown(Key::A, static_cast<u8>(Mod::Ctrl), nullptr));
+	CHECK(ui.keyDown(Key::Backspace));
+	CHECK_EQ(std::get<std::string>(*ui.value("name")), "replac");
+	CHECK_EQ(ui.controlError("name"), "Name cannot be empty");
 	CHECK(ui.keyDown(Key::A, static_cast<u8>(Mod::Ctrl), nullptr));
 	CHECK(ui.textInput('X'));
 	CHECK_EQ(std::get<std::string>(*ui.value("name")), "X");
@@ -2084,6 +2584,28 @@ Tooltip { resting: { bg: #202a40, fg: #ffffff, pad: 6px, radius: 4px } }
 	CHECK(ui.keyDown(Key::Enter));
 	CHECK(ui.textInput('N'));
 	CHECK(std::get<std::string>(*ui.value("notes")) == "\nN");
+	CHECK(ui.setValue("notes", std::string("alpha beta  gamma!")));
+	CHECK(ui.keyDown(Key::Home, static_cast<u8>(Mod::Super), nullptr));
+	CHECK(ui.keyDown(Key::Right, static_cast<u8>(Mod::Super), nullptr));
+	CHECK(ui.keyDown(Key::Right, static_cast<u8>(Mod::Ctrl) | static_cast<u8>(Mod::Shift), nullptr));
+	CHECK(ui.keyDown(static_cast<Key>('C'), static_cast<u8>(Mod::Super), &clipboard));
+	CHECK_EQ(clipboard.clipboardText(), "beta  ");
+	CHECK(ui.keyDown(Key::Home, static_cast<u8>(Mod::Ctrl), nullptr));
+	CHECK(!ui.keyDown(Key::Backspace, static_cast<u8>(Mod::Ctrl), nullptr));
+	CHECK(ui.keyDown(Key::Right, static_cast<u8>(Mod::Ctrl), nullptr));
+	CHECK(ui.keyDown(Key::Backspace, static_cast<u8>(Mod::Ctrl), nullptr));
+	CHECK_EQ(std::get<std::string>(*ui.value("notes")), "beta  gamma!");
+	CHECK(ui.setValue("notes", std::string("alpha beta  gamma!")));
+	CHECK(ui.keyDown(Key::Home, static_cast<u8>(Mod::Ctrl), nullptr));
+	CHECK(ui.keyDown(Key::Right, static_cast<u8>(Mod::Ctrl), nullptr));
+	CHECK(ui.keyDown(Key::Delete, static_cast<u8>(Mod::Ctrl), nullptr));
+	CHECK_EQ(std::get<std::string>(*ui.value("notes")), "alpha gamma!");
+	CHECK(ui.keyDown(static_cast<Key>('Z'), static_cast<u8>(Mod::Ctrl), nullptr));
+	CHECK_EQ(std::get<std::string>(*ui.value("notes")), "alpha beta  gamma!");
+	CHECK(ui.keyDown(static_cast<Key>('Y'), static_cast<u8>(Mod::Ctrl), nullptr));
+	CHECK_EQ(std::get<std::string>(*ui.value("notes")), "alpha gamma!");
+	CHECK(ui.imeCompose("候補", 0, 3));
+	CHECK(ui.imeCompose(""));
 	CHECK(ui.setValue("notes", std::string("first\nsecond")));
 	CHECK(ui.keyDown(Key::Home));
 	CHECK(ui.keyDown(Key::Backspace));
@@ -2114,6 +2636,103 @@ Tooltip { resting: { bg: #202a40, fg: #ffffff, pad: 6px, radius: 4px } }
 	CHECK(events.back() == "onSecond");
 }
 
+TEST(ui_runtime_theme_switch_clears_transitions_started_in_previous_theme) {
+	constexpr std::string_view xuiSource = R"(
+Window(size: 320x160) {
+  ToggleButton(label: "Light mode")[id: "theme-toggle", class: "theme-toggle", width: 140px, height: 36px]
+}
+)";
+	constexpr std::string_view xssSource = R"(
+tokens {
+  color.chip = #ffffff0a
+  color.surface-hover = #1d2e4a
+  color.surface-pressed = #0b1422
+  color.accent-soft = #60cdff1c
+  color.accent = #60cdff
+  color.accent-border = #60cdff66
+  color.stroke = #ffffff14
+  color.text = #f2f7ff
+  color.text-secondary = #a7b6cb
+}
+@theme light {
+  tokens {
+    color.chip = #0f172a08
+    color.surface-hover = #e8eef8
+    color.surface-pressed = #dce5f2
+    color.accent-soft = #0067c014
+    color.accent = #0067c0
+    color.accent-border = #0067c066
+    color.stroke = #0f172a1a
+    color.text = #16202f
+    color.text-secondary = #4e5e74
+  }
+}
+ToggleButton.theme-toggle {
+  resting: { bg: color.chip, fg: color.text-secondary, border: 1px solid color.stroke, radius: 6px }
+  hover: { bg: color.surface-hover, fg: color.text }
+  pressed: { bg: color.surface-pressed }
+  checked: { bg: color.accent-soft, fg: color.accent, border: 1px solid color.accent-border }
+  focus: { outline: 2px solid color.accent-border, outline-offset: 2px }
+  transition: resting -> hover 140ms ease-out
+  transition: hover -> resting 180ms ease-out
+}
+)";
+	StringInterner strings;
+	auto document = parseXui(xuiSource, "theme-tween.xui", strings);
+	CHECK(document.has_value());
+	if (!document)
+		return;
+	auto styles = compileXss(xssSource, "theme-tween.xss", strings);
+	CHECK(styles.has_value());
+	if (!styles)
+		return;
+	TextSystem text;
+	UiRuntime ui;
+	std::string error;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error));
+	if (!error.empty())
+		return;
+	ui.layout(320.f, 160.f);
+	Painter painter;
+	auto fillAt = [&](Vec2 point) {
+		painter.begin(320, 160, 1.f);
+		ui.paint(painter, 1.f);
+		const DrawList list = painter.finish();
+		u32 fill = 0;
+		for (u32 i = 0; i + 3 < list.nVerts; i += 4) {
+			// Focus outlines are border-only rounded rectangles: their quad still covers
+			// the button centre but carries a transparent fill. Track the topmost filled
+			// rectangle instead.
+			if (list.verts[i].prim != static_cast<u8>(Prim::RoundRect) || (list.verts[i].c0 & 0xFFu) == 0)
+				continue;
+			f32 left = list.verts[i].x, right = left, top = list.verts[i].y, bottom = top;
+			for (u32 k = 1; k < 4; ++k) {
+				left = std::min(left, list.verts[i + k].x);
+				right = std::max(right, list.verts[i + k].x);
+				top = std::min(top, list.verts[i + k].y);
+				bottom = std::max(bottom, list.verts[i + k].y);
+			}
+			if (point.x >= left && point.x <= right && point.y >= top && point.y <= bottom)
+				fill = list.verts[i].c0;
+		}
+		return fill;
+	};
+	const Rect toggle = ui.bounds({1, 1});
+	const Vec2 point{toggle.x + 8.f, toggle.y + toggle.h * 0.5f};
+	CHECK(ui.pointerMove(point));
+	(void)fillAt(point); // begin the resting -> hover transition in the dark palette
+	CHECK(ui.pointerDown(point));
+	(void)fillAt(point); // pressing retargets the transition to the dark pressed color
+	CHECK(ui.pointerUp(point));
+	CHECK(ui.setTheme("light"));
+	(void)fillAt(point);
+	// Theme switches clear in-flight tweens, so the checked state applies immediately;
+	// the wait only has to outlast the longest former transition on a loaded runner.
+	std::this_thread::sleep_for(std::chrono::milliseconds(800));
+	(void)ui.updateTimers();
+	CHECK_EQ(fillAt(point), Color::fromRGBA8(0x0067C014u).toRGBA8());
+}
+
 TEST(controls_example_assets_parse_validate_and_build) {
 	const std::string xuiSource = readFixture("controls.xui");
 	const std::string xssSource = readFixture("controls.xss");
@@ -2133,11 +2752,11 @@ TEST(controls_example_assets_parse_validate_and_build) {
 }
 
 TEST(showcase_example_assets_parse_validate_and_build) {
-	const std::string xuiSource = readExample("showcase.xui");
-	const std::string xssSource = readExample("showcase.xss");
+	const std::string xuiSource = readExample("showcase/showcase.xui");
+	const std::string xssSource = readExample("showcase/showcase.xss");
 	CHECK(!xuiSource.empty()); CHECK(!xssSource.empty());
 	StringInterner strings; UiAssetBundle assets; std::string error;
-	CHECK(loadUiAssets(xuiSource, xssSource, strings, assets, error, "showcase.xui", "showcase.xss"));
+	CHECK(loadUiAssets(xuiSource, xssSource, strings, assets, error, "showcase/showcase.xui", "showcase/showcase.xss"));
 	if (!error.empty()) { std::cerr << error << '\n'; return; }
 	const std::string_view showcasedTypes[] = { "Text", "Label", "Button", "TextBox", "TextArea", "CheckBox", "CheckItem",
 		"RadioGroup", "Switch", "ToggleButton", "Slider", "Dropdown", "ColorPicker", "Tabs", "Tab", "ScrollView",
@@ -2166,6 +2785,7 @@ TEST(showcase_example_assets_parse_validate_and_build) {
 	CHECK(ui.value("task-layout").has_value());
 	CHECK(ui.value("task-resize").has_value());
 	CHECK(ui.value("query").has_value());
+	CHECK(ui.value("due-date").has_value());
 	CHECK(ui.value("delay").has_value());
 	CHECK(ui.value("whitespace-toggle").has_value());
 	CHECK(ui.value("live-sync").has_value());
@@ -2198,6 +2818,16 @@ TEST(showcase_example_assets_parse_validate_and_build) {
 		if (found == runtimeIndexById.end()) return Rect{};
 		return ui.bounds({ found->second, 1 });
 		};
+	// DatePicker shares popup routing with optional-data widgets, but has no option list.
+	// Select its authored tab first, then open it to exercise the payload-index allocation
+	// path used after the P1 sidecar refactor.
+	CHECK(ui.setValue("demo-sections", u32(3)));
+	ui.layout(1080, 760);
+	const Rect dateBounds = rectFor("due-date");
+	const Vec2 datePoint{dateBounds.x + dateBounds.w * 0.5f, dateBounds.y + dateBounds.h * 0.5f};
+	CHECK(dateBounds.w > 0.f && dateBounds.h > 0.f);
+	CHECK(ui.pointerDown(datePoint));
+	CHECK(ui.pointerUp(datePoint));
 	auto separatedVertically = [](Rect a, Rect b) { return a.empty() || b.empty() || a.bottom() <= b.y + 0.01f; };
 
 	const Rect name = rectFor("display-name"), passphrase = rectFor("passphrase"), readOnly = rectFor("readonly-field");
@@ -2325,10 +2955,21 @@ TEST(showcase_example_assets_parse_validate_and_build) {
 	const Rect split = rectFor("main-split"), leftPaneBefore = rectFor("tasks-panel");
 	const Vec2 gutterPoint{ leftPaneBefore.right() + 4.f, split.y + split.h * 0.5f };
 	CHECK(ui.pointerDown(gutterPoint));
-	CHECK(ui.pointerMove({ gutterPoint.x + 24.f, gutterPoint.y }));
+	CHECK(ui.pointerMove({gutterPoint.x + 24.f, gutterPoint.y}));
 	ui.layout(1080, 760);
 	CHECK(rectFor("tasks-panel").w > leftPaneBefore.w + 10.f);
-	(void)ui.pointerUp({ gutterPoint.x + 24.f, gutterPoint.y });
+	(void)ui.pointerUp({gutterPoint.x + 24.f, gutterPoint.y});
+
+	// Motion & Style nests a second Tabs control. Its pages must fill the nested control
+	// even though the surrounding Tab style centers header labels.
+	CHECK(ui.setValue("demo-sections", u32{7}));
+	CHECK(ui.setValue("motion-tabs", u32{1}));
+	ui.layout(1080, 760);
+	const Rect motionTabs = rectFor("motion-tabs"), motionPage = rectFor("motion-animation");
+	CHECK(!motionTabs.empty() && !motionPage.empty());
+	CHECK(motionPage.x >= motionTabs.x - 0.01f);
+	CHECK(motionPage.right() <= motionTabs.right() + 0.01f);
+	CHECK(motionPage.w <= motionTabs.w + 0.01f);
 }
 
 TEST(tetris_game_example_assets_parse_validate_and_build) {
@@ -2355,6 +2996,54 @@ TEST(tetris_game_example_assets_parse_validate_and_build) {
 	CHECK(ui.bounds(ui.root()).w > 0.f);
 }
 
+TEST(calculator_example_assets_parse_validate_and_layout) {
+	const std::string xuiSource = readExample("calculator/calculator.xui");
+	const std::string xssSource = readExample("calculator/calculator.xss");
+	CHECK(!xuiSource.empty());
+	CHECK(!xssSource.empty());
+	StringInterner strings;
+	UiAssetBundle assets;
+	std::string error;
+	CHECK(loadUiAssets(xuiSource, xssSource, strings, assets, error, "calculator.xui", "calculator.xss"));
+	if (!error.empty()) {
+		std::cerr << error << '\n';
+		return;
+	}
+	TextSystem text;
+	UiRuntime ui;
+	CHECK(ui.build(assets.document, assets.styles, strings, text, {}, error));
+	if (!error.empty()) {
+		std::cerr << error << '\n';
+		return;
+	}
+	ui.layout(320.f, 500.f);
+	CHECK(ui.bounds(ui.root()).w > 0.f);
+	// The demo mirrors the real Windows 11 Calculator geometry: a 320x500 client area and a
+	// 468px stage (48 toolbar + 23 expression + 44 result + 33 memory + 320 keypad). The 4x6
+	// keypad uses pad 3 and gap 2, so keys are 77 x 50.67 at the default size.
+	const Rect root = ui.bounds(ui.root());
+	const Rect key = UiRuntimeFontWeightProbe::bounds(ui, "key-7");
+	const Rect equals = UiRuntimeFontWeightProbe::bounds(ui, "key-equals");
+	const Rect display = UiRuntimeFontWeightProbe::bounds(ui, "display");
+	CHECK_NEAR(root.w, 320.f, 0.01f);
+	CHECK_NEAR(root.h, 500.f, 0.01f);
+	CHECK_NEAR(key.w, 77.f, 0.01f);
+	CHECK_NEAR(key.h, 304.f / 6.f, 0.01f);
+	CHECK_NEAR(display.h, 44.f, 0.01f);
+	CHECK(equals.y > key.y);
+	// The memory toolbar is a six-column Grid: pad 4 leaves 312px, so each text button is
+	// exactly 52px wide and the chevron shares the same track instead of being squeezed.
+	const Rect memoryFirst = UiRuntimeFontWeightProbe::bounds(ui, "memory-clear");
+	const Rect memoryLast = UiRuntimeFontWeightProbe::bounds(ui, "memory-panel");
+	CHECK_NEAR(memoryFirst.x, 4.f, 0.01f);
+	CHECK_NEAR(memoryFirst.w, 52.f, 0.01f);
+	CHECK_NEAR(memoryLast.w, 52.f, 0.01f);
+	CHECK_NEAR(memoryLast.right(), 316.f, 0.01f);
+	CHECK(memoryFirst.y >= display.y + display.h - 0.01f);
+	CHECK(ui.value("display").has_value());
+	CHECK(ui.nodeCount() >= 40u);
+}
+
 TEST(xui_facade_scheduled_application_tick_runs_on_ui_loop) {
 	Xui app;
 	const auto xuiPath = (std::filesystem::path(XUI_TEST_FIXTURE_DIR) / "cross_platform.xui").string();
@@ -2371,6 +3060,52 @@ TEST(xui_facade_scheduled_application_tick_runs_on_ui_loop) {
 	CHECK_EQ(app.run({ 0.025, false }), 0);
 	CHECK(probe.calls >= 3);
 	CHECK(probe.elapsed > 0.0);
+	app.shutdown();
+}
+
+TEST(xui_facade_native_tear_off_is_created_hidden_then_revealed) {
+	Xui app;
+	const auto xuiPath = (std::filesystem::path(XUI_TEST_FIXTURE_DIR) / "native_float.xui").string();
+	const auto xssPath = (std::filesystem::path(XUI_TEST_FIXTURE_DIR) / "native_float.xss").string();
+	CHECK(app.loadXui(xuiPath));
+	CHECK(app.loadXss(xssPath));
+	if (!app.lastError().empty()) {
+		std::cerr << app.lastError() << '\n';
+		return;
+	}
+	NullRenderer renderer;
+	NullPlatform platform;
+	CHECK(app.attach(renderer, platform));
+	CHECK_EQ(platform.liveWindowCount(), 1u);
+	CHECK_EQ(app.run({0.05, true}), 0);
+	// A floatMode: "os-window" panel owns a second native window. It is created hidden, painted
+	// once, and only then revealed so the client area never flashes an unpainted (black) surface.
+	CHECK_EQ(platform.liveWindowCount(), 2u);
+	CHECK_EQ(platform.hiddenCreateCount(), 1u);
+	CHECK_EQ(platform.showCount(), 1u);
+	CHECK_EQ(renderer.surfaceCount(), 1u);
+	const WindowHandle tearOff = platform.lastCreatedWindow();
+	CHECK(tearOff.valid());
+	CHECK(platform.windowVisible(tearOff));
+	// The platform rounds the tear-off window like the panel body it contains.
+	CHECK_NEAR(platform.lastCornerRadius(), 12.f, 0.01f);
+	// Closing the native window closes the panel and must not recreate the surface.
+	Event quit{};
+	quit.type = EventType::Quit;
+	quit.window = tearOff;
+	platform.pushEvent(quit);
+	CHECK_EQ(app.run({0.05, true}), 0);
+	CHECK_EQ(platform.liveWindowCount(), 1u);
+	const auto value = app.runtime().value("tear-off");
+	CHECK(value.has_value());
+	if (value) {
+		const auto* panel = std::get_if<DockPanelValue>(&*value);
+		CHECK(panel != nullptr);
+		if (panel) {
+			CHECK(panel->closed);
+			CHECK(!panel->osWindow);
+		}
+	}
 	app.shutdown();
 }
 
@@ -2407,6 +3142,10 @@ ScrollView { resting: { scroll-behavior: instant, scrollbar-visibility: always, 
 	CHECK(ui.scrollOffset("outer").y > 0.f);
 	CHECK(counts[1] > 0u);
 	CHECK(std::get<Vec2>(*ui.value("outer")) == ui.scrollOffset("outer"));
+	const f32 afterWheel = ui.scrollOffset("outer").y;
+	ui.updateTimers(std::chrono::steady_clock::now() + std::chrono::milliseconds(80));
+	CHECK(ui.scrollOffset("outer").y > afterWheel); // wheel input carries a short, decaying momentum tail
+	CHECK(ui.setValue("outer", UiValue{Vec2{0.f, 0.f}}));
 	CHECK(ui.scrollIntoView("last", false)); CHECK(ui.scrollOffset("outer").y > 0.f);
 	const u32 beforeProgrammatic = counts[1];
 	CHECK(ui.setValue("outer", UiValue{ Vec2{0.f, 0.f} })); CHECK(ui.scrollOffset("outer") == Vec2{});
@@ -2422,11 +3161,93 @@ ScrollView { resting: { scroll-behavior: instant, scrollbar-visibility: always, 
 	CHECK(ui.scrollWheel({ inner.x + 20.f, inner.y + 20.f }, { 0.f, -2.f }));
 	CHECK(ui.scrollOffset("outer").y > 0.f); // at its limit, inner lets the outer view consume
 	CHECK(ui.scrollTo("outer", { 0.f, 0.f }, false));
-	CHECK(ui.pointerDown({ outer.right() - 5.f, outer.y + 15.f }));
-	CHECK(ui.pointerMove({ outer.right() - 5.f, outer.y + 35.f }));
+	CHECK(ui.pointerDown({outer.right() - 5.f, outer.bottom() - 15.f})); // track paging works outside the thumb
 	CHECK(ui.scrollOffset("outer").y > 0.f);
-	CHECK(ui.pointerUp({ outer.right() - 5.f, outer.y + 35.f }));
+	CHECK(ui.pointerMove({outer.right() - 5.f, outer.bottom() - 35.f}));
+	CHECK(ui.scrollOffset("outer").y > 0.f);
+	CHECK(ui.pointerUp({outer.right() - 5.f, outer.bottom() - 35.f}));
 	CHECK(ui.scrollTo("outer", { 0.f, 10000.f }, false)); CHECK(ui.scrollOffset("outer").y < 10000.f);
+	const Vec2 beforeReducedMotion = ui.scrollOffset("outer");
+	ui.setReducedMotion(true);
+	CHECK(ui.scrollOffset("outer") == beforeReducedMotion);
+	CHECK(ui.scrollTo("outer", {0.f, 8.f}, true));
+	CHECK(ui.scrollOffset("outer").y == 8.f); // reduced motion settles smooth requests immediately
+}
+
+TEST(ui_runtime_shift_tab_focus_and_accessibility_tree_dump) {
+	constexpr std::string_view source = R"(
+Window(size: 320x160) {
+  Row {
+    Button(label: "First action")[id: "first", press: onFirst, width: 120px, height: 36px]
+    Button(label: "Second action")[id: "second", press: onSecond, width: 140px, height: 36px]
+  }
+  TextBox[id: "secret", value: "hidden value", password: true, tooltip: "Password", tooltipFollowCursor: true]
+}
+)";
+	StringInterner strings;
+	auto document = parseXui(source, "accessibility.xui", strings);
+	auto styles = compileXss("", "accessibility.xss", strings);
+	CHECK(document.has_value());
+	CHECK(styles.has_value());
+	if (!document || !styles)
+		return;
+	TextSystem text;
+	UiRuntime ui;
+	std::string error;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error));
+	if (!error.empty())
+		return;
+	ui.layout(320.f, 160.f);
+	std::vector<std::string> events;
+	ui.setEventHandler(
+		[](void* context, std::string_view event) {
+			static_cast<std::vector<std::string>*>(context)->emplace_back(event);
+		},
+		&events);
+	CHECK(ui.keyDown(Key::Tab, static_cast<u8>(Mod::Shift), nullptr)); // starts at the last focusable control
+	CHECK(ui.keyDown(Key::Tab, static_cast<u8>(Mod::Shift), nullptr)); // then moves backward to the second button
+	CHECK(ui.keyDown(Key::Enter));
+	CHECK_EQ(events.size(), 1u);
+	CHECK(events.back() == "onSecond");
+	const std::string tree = ui.dumpAccessibilityTree();
+	CHECK(tree.find("\"role\":\"button\"") != std::string::npos);
+	CHECK(tree.find("\"label\":\"First action\"") != std::string::npos);
+	CHECK(tree.find("\"id\":\"second\"") != std::string::npos);
+	CHECK(tree.find("hidden value") == std::string::npos); // password content is never exported
+	CHECK(tree.find("\"children\":[") != std::string::npos);
+}
+
+TEST(ui_runtime_keyboard_shortcuts_float_and_redock_active_panel) {
+	constexpr std::string_view source = R"(
+Window(size: 520x320) {
+  DockHost[id: "workspace", width: 100%, height: 100%] {
+    DockPanel(title: "Editor", region: "Center")[id: "editor"] { Text("Editor") }
+    DockPanel(title: "Inspector", region: "Right", target: "editor")[id: "inspector"] { Text("Inspector") }
+  }
+}
+)";
+	StringInterner strings;
+	auto document = parseXui(source, "dock-shortcuts.xui", strings);
+	auto styles = compileXss("", "dock-shortcuts.xss", strings);
+	CHECK(document.has_value());
+	CHECK(styles.has_value());
+	if (!document || !styles)
+		return;
+	TextSystem text;
+	UiRuntime ui;
+	std::string error;
+	CHECK(ui.build(*document, *styles, strings, text, {}, error));
+	if (!error.empty())
+		return;
+	ui.layout(520.f, 320.f);
+	const u8 mods = static_cast<u8>(Mod::Ctrl) | static_cast<u8>(Mod::Shift);
+	CHECK(ui.keyDown(static_cast<Key>('F'), mods, nullptr));
+	const bool editorFloats = std::get<DockPanelValue>(*ui.value("editor")).floating;
+	const bool inspectorFloats = std::get<DockPanelValue>(*ui.value("inspector")).floating;
+	CHECK(editorFloats || inspectorFloats);
+	CHECK(ui.keyDown(static_cast<Key>('D'), mods, nullptr));
+	CHECK(!std::get<DockPanelValue>(*ui.value("editor")).floating);
+	CHECK(!std::get<DockPanelValue>(*ui.value("inspector")).floating);
 }
 
 TEST(ui_runtime_can_activate_stylesheet_themes) {

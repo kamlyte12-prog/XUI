@@ -6,13 +6,31 @@
 ///  * Coordinates are PHYSICAL pixels, origin top-left, y down. Colours are straight (non-premultiplied) RGBA, 0xRRGGBBAA.
 ///  * One shader draws everything; the primitive kind selects a branch. Signed-distance maths (see sdf.hpp, the CPU
 ///    reference that the GLSL port mirrors) gives analytic anti-aliasing: no nine-patches, no extra geometry.
-///  * A DrawCmd is one draw call: all its indices share a texture and a scissor rectangle.
+///  * A DrawCmd is one draw call: all its indices share a texture, a scissor rectangle, and an optional
+///    set of rounded clip shapes (see ClipShape) that the fragment stage intersects analytically.
 #include <xui/core/handle.hpp>
 #include <xui/core/types.hpp>
 
 namespace xui {
 
 	struct Recti { i32 x = 0, y = 0, w = 0, h = 0; friend constexpr bool operator==(const Recti&, const Recti&) = default; };
+
+	/// One rounded-rectangle clip in PHYSICAL pixels: centre, half size, per-corner radii (TL,TR,BR,BL).
+	/// The fragment stage multiplies coverage by clamp(0.5 - distance, 0, 1), exactly like a painted shape.
+	struct ClipRound {
+		f32 cx = 0, cy = 0, hx = 0, hy = 0;
+		f32 r[4] = {0, 0, 0, 0};
+		friend bool operator==(const ClipRound&, const ClipRound&) = default;
+	};
+	/// The rounded clips active for one DrawCmd. Nested clips intersect; their coverage values multiply, so a
+	/// fragment is visible only where it satisfies every shape. The scissor Recti stays the conservative bound.
+	struct ClipShape {
+		static constexpr u32 kMaxRounds = 4;
+		u32 count = 0;
+		ClipRound rounds[kMaxRounds];
+		friend bool operator==(const ClipShape&, const ClipShape&) = default;
+	};
+	static constexpr u32 kNoClipShape = 0xFFFFFFFFu;
 
 	enum class Prim : u8 {
 		RoundRect = 0,   ///< filled/bordered/gradient rounded rectangle.  u,v = local position (px, relative to centre)
@@ -50,6 +68,7 @@ namespace xui {
 		Recti clip;                ///< scissor, physical px
 		u32 idxOffset = 0, idxCount = 0;
 		u32 customId = 0;          ///< Custom: id the application registered with Renderer::setCustomHandler
+		u32 clipShape = kNoClipShape; ///< index into DrawList::clipShapes, or kNoClipShape for a rectangular clip
 	};
 
 	/// Non-owning view of one frame's draw data. Valid until the producer's next begin().
@@ -57,5 +76,7 @@ namespace xui {
 		const Vertex* verts = nullptr;  u32 nVerts = 0;
 		const u32* idx = nullptr;       u32 nIdx = 0;
 		const DrawCmd* cmds = nullptr;  u32 nCmds = 0;
+		const ClipShape* clipShapes = nullptr;
+		u32 nClipShapes = 0;
 	};
 }

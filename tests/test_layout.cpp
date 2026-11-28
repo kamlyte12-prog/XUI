@@ -274,6 +274,36 @@ TEST(docking_tree_nested_regions_tabs_floats_and_minimums) {
 	CHECK(tree.close(4));
 	CHECK(!tree.contains(4));
 }
+TEST(docking_layout_marks_floating_panels_active_and_split_resize_clamps_to_minimums) {
+	DockTree tree;
+	tree.reserve(2, 3);
+	CHECK(tree.addPanel(1, {240, 120}, {300, 240}));
+	CHECK(tree.addPanel(2, {240, 120}, {300, 240}));
+	CHECK(tree.dock(2, 1, DockZone::Right));
+	tree.layout({0, 0, 640, 400}, 6);
+	CHECK(tree.splitterCount() == 1u);
+	const u32 split = tree.splitterAt(0).node;
+	// Dragging far past the left panel's minimum stores the feasible minimum ratio, not
+	// 0.01: reversing the pointer starts moving the splitter immediately instead of
+	// first travelling back through a dead zone.
+	CHECK(tree.resizeSplit(split, -5.f));
+	CHECK_NEAR(tree.splitRatio(split), 240.f / 634.f, 0.0001f);
+	tree.layout({0, 0, 640, 400}, 6);
+	CHECK_NEAR(tree.panelBounds(1).w, 240.f, 0.01f);
+	CHECK(!tree.resizeSplit(split, 0.f));
+	CHECK(tree.resizeSplit(split, tree.splitRatio(split) + 1.f / 634.f));
+	tree.layout({0, 0, 640, 400}, 6);
+	CHECK(tree.panelBounds(1).w > 240.f);
+	CHECK(tree.undock(2, {40, 30, 180, 120}));
+	tree.layout({0, 0, 640, 400}, 6);
+	bool floatingActive = false;
+	for (const DockPanelLayout& panel : tree.panels())
+		if (panel.panel == 2)
+			floatingActive = panel.floating && panel.active && panel.bounds == Rect{40, 30, 180, 120};
+	// Floating panels are their own active surface; dock chrome uses this flag to paint
+	// their title bar instead of treating them as an inactive tab.
+	CHECK(floatingActive);
+}
 TEST(docking_floating_panel_z_order_tracks_raise_and_hit_testing) {
 	DockTree tree;
 	tree.reserve(3, 3);

@@ -5,9 +5,9 @@
 /// NOT implemented — those scripts render with isolated forms (documented trade-off). Word wrap uses
 /// greedy first-fit with space / zero-width-space / hyphen break points, cached per width bucket.
 ///
-/// All steady-state APIs are allocation-free once caches have warmed. The cache holds at most
-/// kMaxCache entries; when full it is cleared wholesale (a miss storm is cheaper than LRU bookkeeping
-/// for UI text, where the working set is small and stable).
+/// All steady-state APIs are allocation-free once caches have warmed. The cache normally holds at
+/// most kMaxCache entries; if a frame exceeds that working set, reclamation is deferred to the next
+/// beginFrame() so references returned during the current frame remain valid.
 #include <xui/core/handle.hpp>
 #include <xui/core/math.hpp>
 #include <xui/text/atlas.hpp>
@@ -16,7 +16,9 @@
 #include <string_view>
 #include <memory>
 #include <cstdint>
+#include <array>
 #include <unordered_map>
+#include <deque>
 #include <vector>
 
 namespace xui {
@@ -28,11 +30,27 @@ namespace xui {
 		u32 glyph = 0;        ///< font glyph index
 		f32 x = 0, y = 0;     ///< pen position when drawn (bitmap offset applied by the painter)
 		f32 advance = 0;
+		FontHandle font;					  ///< face used for this glyph (fallback fonts share the same atlas)
+		u32 clusterStart = 0, clusterEnd = 0; ///< UTF-8 byte range in the original text
+		u32 line = 0;
+		std::array<f32, 8> ligatureCarets{}; ///< shaped interior caret positions in run space
+		u8 ligatureCaretCount = 0;
+		bool rtl = false;
+	};
+
+	/// Caret position at a UTF-8 character boundary, stored with the shaped run so editor
+	/// painting and pointer hit-testing never need to shape every text prefix.
+	struct TextCaretStop {
+		u32 byteOffset = 0, line = 0;
+		f32 x = 0;
 	};
 
 	/// A shaped, wrapped text run. `lineStarts[i]` indexes glyphs[] for the start of line i.
 	struct TextLayout {
 		std::vector<ShapedGlyph> glyphs;
+		std::vector<TextCaretStop> caretStops;
+		/// Same stops sorted by visual line and x coordinate for safe pointer hit-testing.
+		std::vector<TextCaretStop> visualCaretStops;
 		std::vector<u32> lineStarts;
 		std::vector<f32> lineWidths;       ///< pen advance per line, including trailing whitespace
 		f32 width = 0, height = 0;         ///< visual bounds (including glyph ink) and height (px)
@@ -40,6 +58,8 @@ namespace xui {
 		f32 inkLeft = 0;                    ///< visual left edge relative to the pen origin (px; can be negative)
 		f32 lineHeight = 0;             ///< line height used
 		u32 sizePx = 0;
+		/// Find the closest logical caret boundary. Offsets are UTF-8 byte positions.
+		TextCaretStop caretAt(u32 byteOffset) const;
 	};
 
 	/// Font registry + shaping/wrap cache. Owns the fonts and one shared glyph atlas.
@@ -62,22 +82,41 @@ namespace xui {
 		/// Return a cached variable-font instance at the requested CSS weight, or the original face
 		/// when it has no `wght` axis. Static-face fallback remains the caller's responsibility.
 		FontHandle fontAtWeight(FontHandle base, f32 weight, std::string* error = nullptr);
+		/// Append a fallback face, tried in order after @p family for unmapped code points.
+		bool addFallbackFont(FontHandle family, FontHandle fallback);
 		bool initAtlas(Renderer* r, u32 atlasSize = GlyphAtlas::kMinSize);
 		GlyphAtlas* atlas() { return &m_atlas; }
-		void beginFrame() { m_frameStats = {}; m_atlas.beginFrame(); }
+		void beginFrame() {
+			m_frameStats = {};
+			m_atlas.beginFrame();
+			// Keep TextLayout references returned during a frame stable. Once the cache has
+			// exceeded its working-set cap, defer reclamation until this frame boundary.
+			if (m_cacheClearPending) {
+				m_cache.clear();
+				m_index.assign(64, 0);
+				m_used = 0;
+				m_cacheClearPending = false;
+			}
+		}
 
 		/// Measure + shape. @p wrapWidth <= 0 means a single line (no wrapping). Cached.
+		/// The returned reference stays valid across later layout() calls in the current frame;
+		/// callers should not retain it across beginFrame() when cache reclamation is pending.
 		const TextLayout& layout(FontHandle font, std::string_view text, f32 sizePx, f32 wrapWidth = 0);
 
 		/// Cache + atlas + font stats for tests/telemetry.
 		std::size_t cacheCount() const { return m_used; }
 		u64 rasterCount() const { return m_atlas.rasterCount(); }
+		u32 fallbackGeneration() const {
+			return m_fallbackGeneration;
+		}
 		const FrameStats& frameStats() const { return m_frameStats; }
 
 	private:
 		struct CacheKey {
 			u32 font = 0;               ///< FontHandle::index
 			u32 hash = 0;               ///< FNV-1a of the text
+			u32 fallbackGeneration = 0; ///< invalidate layouts when the ordered fallback chain changes
 			u16 sizePx = 0;
 			i32 wrap = 0;               ///< wrapWidth bucketed to whole px (INT_MAX = no wrap)
 			friend bool operator==(const CacheKey&, const CacheKey&) = default;
@@ -91,15 +130,24 @@ namespace xui {
 		}
 
 		const TextLayout& shape(FontHandle fh, std::string_view text, const CacheKey& key);
+		FontHandle fontForCodepoint(FontHandle primary, u32 codepoint) const;
 
 		struct FontVariant { u32 base = 0; i32 coordinate = 0; FontHandle handle; };
+		struct FontFallback {
+			FontHandle family;
+			std::vector<FontHandle> faces;
+		};
 		std::vector<std::unique_ptr<Font>> m_fonts;
 		std::vector<FontVariant> m_variants;
+		std::vector<FontFallback> m_fallbacks;
 		GlyphAtlas m_atlas;
 		FrameStats m_frameStats;
-		std::vector<CacheEntry> m_cache;
+		// deque keeps returned TextLayout references valid when later cache misses append entries.
+		std::deque<CacheEntry> m_cache;
 		std::vector<u32> m_index;       // open addressing over m_cache: entry index + 1, 0 = empty
 		u32 m_used = 0;
+		bool m_cacheClearPending = false;
+		u32 m_fallbackGeneration = 1;
 	};
 
 } // namespace xui

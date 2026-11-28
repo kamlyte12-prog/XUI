@@ -35,6 +35,7 @@ namespace xui {
 	}
 	std::string DiagnosticList::format() const {
 		std::vector<const Diagnostic*> sorted;   // source order, regardless of which compiler phase found them
+		sorted.reserve(m_items.size());
 		for (const Diagnostic& d : m_items) sorted.push_back(&d);
 		std::stable_sort(sorted.begin(), sorted.end(), [](const Diagnostic* a, const Diagnostic* b) { return a->offset < b->offset; });
 		std::string out;

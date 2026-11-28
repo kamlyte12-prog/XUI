@@ -9,6 +9,11 @@
 #endif
 #include <windows.h>
 #include <dwmapi.h>
+#include <imm.h>
+// SDKs older than the Windows 11 border-colour attribute.
+#ifndef DWMWA_BORDER_COLOR
+#define DWMWA_BORDER_COLOR 34
+#endif
 #endif
 #include <glfw/glfw_platform.hpp>
 #ifdef _WIN32
@@ -20,13 +25,54 @@
 
 using namespace xui;
 
+namespace {
+	// GLFW reports window, cursor, and monitor geometry in screen coordinates. On Windows
+	// and X11 those are physical pixels; on macOS and Wayland they are logical points.
+	// Xui's platform contract is logical pixels everywhere, so derive the per-window
+	// conversion from the window/framebuffer/content-scale relationship instead of
+	// special-casing an OS. `content` is the monitor scale used for layout and text.
+	struct GlfwScale {
+		Vec2 toLogical{1.f, 1.f}; // multiply screen coordinates by this to get logical px
+		Vec2 content{1.f, 1.f};	  // physical pixels per logical pixel
+	};
+	GlfwScale glfwScale(GLFWwindow* window) {
+		int windowW = 0, windowH = 0, pixelW = 0, pixelH = 0;
+		float scaleX = 1.f, scaleY = 1.f;
+		glfwGetWindowSize(window, &windowW, &windowH);
+		glfwGetFramebufferSize(window, &pixelW, &pixelH);
+		glfwGetWindowContentScale(window, &scaleX, &scaleY);
+		if (!(scaleX > 0.f) || !std::isfinite(scaleX))
+			scaleX = 1.f;
+		if (!(scaleY > 0.f) || !std::isfinite(scaleY))
+			scaleY = 1.f;
+		GlfwScale result;
+		result.content = {scaleX, scaleY};
+		const f32 logicalW = f32(pixelW) / scaleX, logicalH = f32(pixelH) / scaleY;
+		if (windowW > 0 && logicalW > 0.f)
+			result.toLogical.x = f32(windowW) / logicalW;
+		if (windowH > 0 && logicalH > 0.f)
+			result.toLogical.y = f32(windowH) / logicalH;
+		return result;
+	}
+	Vec2 logicalClientPoint(GLFWwindow* window, double x, double y) {
+		const GlfwScale scale = glfwScale(window);
+		return {f32(x) / scale.toLogical.x, f32(y) / scale.toLogical.y};
+	}
+} // namespace
+
 #ifdef _WIN32
 namespace { void applySnapStyles(HWND hwnd); }
 #endif
 
 bool GlfwPlatform::init(const PlatformDesc&) { return glfwInit() == GLFW_TRUE; }
 void GlfwPlatform::shutdown() {
-	for (Window& w : m_windows) if (w.native) { removeChrome(w); glfwDestroyWindow(w.native); }
+	for (Window& w : m_windows)
+		if (w.native) {
+#ifdef _WIN32
+			removeChrome(w);
+#endif
+			glfwDestroyWindow(w.native);
+		}
 	m_windows.clear();
 	if (m_cursor) glfwDestroyCursor(m_cursor);
 	m_cursor = nullptr;
@@ -37,6 +83,10 @@ void GlfwPlatform::shutdown() {
 
 WindowHandle GlfwPlatform::createWindow(const WindowDesc& d) {
 	glfwWindowHint(GLFW_RESIZABLE, d.resizable ? GLFW_TRUE : GLFW_FALSE);
+	// WindowDesc sizes are logical. On Windows/X11, where screen coordinates are physical,
+	// this makes GLFW scale the pixel size to the target monitor and keep the logical
+	// content size stable when the window moves between mixed-DPI monitors.
+	glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
 	// Framework policy: only platforms that can also provide native window move/resize keep
 	// native decorations removed. On Windows the chrome subclass below restores drag, snap and
 	// resize borders; elsewhere GLFW has no move API, so the native title bar is retained.
@@ -56,8 +106,12 @@ WindowHandle GlfwPlatform::createWindow(const WindowDesc& d) {
 	const WindowHandle handle{ static_cast<u32>(m_windows.size()), 1 };
 	m_windows.push_back({ native, handle, this });
 	m_windows.back().cornerRadius = d.cornerRadius;
+	m_windows.back().chromeBorderColor = d.chromeBorderColor;
+	m_windows.back().contentScale = glfwScale(native).content.x;
 	glfwSetWindowUserPointer(native, &m_windows.back());
 	glfwSetWindowSizeCallback(native, onSize);
+	glfwSetWindowContentScaleCallback(native, onContentScale);
+	glfwSetWindowFocusCallback(native, onFocus);
 	glfwSetCursorPosCallback(native, onCursor);
 	glfwSetCursorEnterCallback(native, onCursorEnter);
 	glfwSetScrollCallback(native, onScroll);
@@ -74,19 +128,37 @@ WindowHandle GlfwPlatform::createWindow(const WindowDesc& d) {
 
 void GlfwPlatform::destroyWindow(WindowHandle h) {
 	Window* w = find(h); if (!w) return;
+#ifdef _WIN32
 	removeChrome(*w);
+#endif
 	glfwDestroyWindow(w->native); w->native = nullptr;
 }
 void GlfwPlatform::setWindowTitle(WindowHandle h, std::string_view s) { if (auto* w = find(h)) glfwSetWindowTitle(w->native, std::string(s).c_str()); }
 Vec2 GlfwPlatform::windowSizeLogical(WindowHandle h) const {
-	int w = 0, height = 0; if (auto* rec = find(h)) glfwGetWindowSize(rec->native, &w, &height); return { f32(w), f32(height) };
+	const Window* rec = find(h);
+	if (!rec || !rec->native)
+		return {};
+	int w = 0, height = 0;
+	glfwGetFramebufferSize(rec->native, &w, &height);
+	const GlfwScale scale = glfwScale(rec->native);
+	return {f32(w) / scale.content.x, f32(height) / scale.content.y};
 }
 Vec2i GlfwPlatform::windowSizePixels(WindowHandle h) const {
 	int w = 0, height = 0; if (auto* rec = find(h)) glfwGetFramebufferSize(rec->native, &w, &height); return { w, height };
 }
 f32 GlfwPlatform::dpiScale(WindowHandle h) const {
-	const Vec2 logical = windowSizeLogical(h); const Vec2i pixels = windowSizePixels(h);
-	return logical.x > 0 ? f32(pixels.x) / logical.x : 1.f;
+	const Window* rec = find(h);
+	if (!rec || !rec->native)
+		return 1.f;
+	return glfwScale(rec->native).content.x;
+}
+bool GlfwPlatform::prefersReducedMotion() const {
+#ifdef _WIN32
+	BOOL animationsEnabled = TRUE;
+	if (SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animationsEnabled, 0))
+		return animationsEnabled == FALSE;
+#endif
+	return false;
 }
 bool GlfwPlatform::windowVisible(WindowHandle h) const {
 	const Window* window = find(h);
@@ -94,19 +166,35 @@ bool GlfwPlatform::windowVisible(WindowHandle h) const {
 		glfwGetWindowAttrib(window->native, GLFW_VISIBLE) == GLFW_TRUE &&
 		glfwGetWindowAttrib(window->native, GLFW_ICONIFIED) != GLFW_TRUE;
 }
+void GlfwPlatform::setWindowVisible(WindowHandle h, bool visible) {
+	Window* rec = find(h);
+	if (!rec || !rec->native)
+		return;
+	if (visible)
+		glfwShowWindow(rec->native);
+	else
+		glfwHideWindow(rec->native);
+}
 Vec2 GlfwPlatform::windowPositionLogical(WindowHandle h) const {
-	int x = 0, y = 0; if (const auto* rec = find(h)) glfwGetWindowPos(rec->native, &x, &y); return { f32(x), f32(y) };
+	const Window* rec = find(h);
+	if (!rec || !rec->native)
+		return {};
+	int x = 0, y = 0;
+	glfwGetWindowPos(rec->native, &x, &y);
+	const GlfwScale scale = glfwScale(rec->native);
+	return {f32(x) / scale.toLogical.x, f32(y) / scale.toLogical.y};
 }
 Vec2 GlfwPlatform::windowClientScreenOrigin(WindowHandle h) const {
-	const Window* rec = find(h); if (!rec || !rec->native) return {};
-	int x = 0, y = 0, left = 0, top = 0, right = 0, bottom = 0;
-	glfwGetWindowPos(rec->native, &x, &y);
-	glfwGetWindowFrameSize(rec->native, &left, &top, &right, &bottom);
-	return { f32(x + left), f32(y + top) };
+	// glfwGetWindowPos already reports the content-area origin, not the outer frame
+	// (Win32 implements it with ClientToScreen(0, 0)). Adding glfwGetWindowFrameSize
+	// here would double-count the frame for decorated windows and shift docked panels.
+	return windowPositionLogical(h);
 }
 bool GlfwPlatform::setWindowPositionLogical(WindowHandle h, Vec2 position) {
 	Window* rec = find(h); if (!rec || !rec->native) return false;
-	glfwSetWindowPos(rec->native, static_cast<int>(std::lround(position.x)), static_cast<int>(std::lround(position.y)));
+	const GlfwScale scale = glfwScale(rec->native);
+	glfwSetWindowPos(rec->native, static_cast<int>(std::lround(position.x * scale.toLogical.x)),
+					 static_cast<int>(std::lround(position.y * scale.toLogical.y)));
 	return true;
 }
 bool GlfwPlatform::screenToClient(WindowHandle h, Vec2 point, Vec2& client) const {
@@ -135,6 +223,9 @@ bool GlfwPlatform::pumpEvents(Event& e) {
 	e = m_events.front(); m_events.pop_front(); return true;
 }
 void GlfwPlatform::waitEvents(f64 timeout) { if (timeout > 0) glfwWaitEventsTimeout(timeout); else glfwWaitEvents(); }
+void GlfwPlatform::wakeEventLoop() {
+	glfwPostEmptyEvent();
+}
 f64 GlfwPlatform::time() const { return glfwGetTime(); }
 void* GlfwPlatform::nativeWindowHandle(WindowHandle h) { if (auto* w = find(h)) return w->native; return nullptr; }
 void* GlfwPlatform::nativeGlContext(WindowHandle) { return glfwGetCurrentContext(); }
@@ -166,7 +257,10 @@ void GlfwPlatform::setCursor(CursorShape shape) {
 }
 void GlfwPlatform::setClipboardText(std::string_view s) { glfwSetClipboardString(nullptr, std::string(s).c_str()); }
 std::string GlfwPlatform::clipboardText() const { const char* s = glfwGetClipboardString(nullptr); return s ? s : ""; }
-void GlfwPlatform::requestRedraw(WindowHandle h) { if (auto* w = find(h)) glfwPostEmptyEvent(); }
+void GlfwPlatform::requestRedraw(WindowHandle h) {
+	if (find(h))
+		glfwPostEmptyEvent();
+}
 
 bool GlfwPlatform::setDecorated(WindowHandle h, bool decorated) {
 	Window* w = find(h);
@@ -209,6 +303,7 @@ bool GlfwPlatform::beginSystemMove(WindowHandle h) {
 }
 
 bool GlfwPlatform::beginSystemResize(WindowHandle h, WindowEdge edge) {
+	(void)edge; // Only the Windows implementation maps the edge to a native hit test.
 	Window* w = find(h);
 	if (!w || !w->native || !w->customChrome) return false;
 #ifdef _WIN32
@@ -270,6 +365,33 @@ void GlfwPlatform::setResizeInset(WindowHandle h, f32 pixels) {
 	if (Window* w = find(h)) w->resizeInset = std::clamp(pixels, 0.f, 64.f);
 }
 
+void GlfwPlatform::setImeCursorRect(WindowHandle h, Rect rect) {
+#ifdef _WIN32
+	Window* window = find(h);
+	if (!window || !window->native || rect.empty())
+		return;
+	const f32 scale = dpiScale(h);
+	HIMC context = ImmGetContext(glfwGetWin32Window(window->native));
+	if (!context)
+		return;
+	const POINT point{static_cast<LONG>(std::lround(rect.x * scale)),
+					  static_cast<LONG>(std::lround(rect.bottom() * scale))};
+	COMPOSITIONFORM composition{};
+	composition.dwStyle = CFS_POINT;
+	composition.ptCurrentPos = point;
+	ImmSetCompositionWindow(context, &composition);
+	CANDIDATEFORM candidate{};
+	candidate.dwIndex = 0;
+	candidate.dwStyle = CFS_CANDIDATEPOS;
+	candidate.ptCurrentPos = point;
+	ImmSetCandidateWindow(context, &candidate);
+	ImmReleaseContext(glfwGetWin32Window(window->native), context);
+#else
+	(void)h;
+	(void)rect;
+#endif
+}
+
 GlfwPlatform::Window* GlfwPlatform::find(WindowHandle h) { return h.index < m_windows.size() && m_windows[h.index].handle.gen == h.gen ? &m_windows[h.index] : nullptr; }
 const GlfwPlatform::Window* GlfwPlatform::find(WindowHandle h) const { return const_cast<GlfwPlatform*>(this)->find(h); }
 GlfwPlatform::Window* GlfwPlatform::record(GLFWwindow* w) { return static_cast<Window*>(glfwGetWindowUserPointer(w)); }
@@ -279,13 +401,51 @@ void GlfwPlatform::push(GLFWwindow* w, const Event& src) { if (Window* r = recor
 // event AND drives one full frame per live step so widgets and layout resize continuously.
 void GlfwPlatform::onSize(GLFWwindow* w, int width, int height) {
 	if (Window* r = record(w)) {
-		Event e{}; e.type = EventType::Resize; e.w = f32(width); e.h = f32(height);
+		const GlfwScale scale = glfwScale(w);
+		Event e{};
+		e.type = EventType::Resize;
+		e.w = f32(width) / scale.toLogical.x;
+		e.h = f32(height) / scale.toLogical.y;
 		push(w, e);
 		if (r->liveResizeFn) r->liveResizeFn(r->liveResizeContext);
 	}
 }
+// The OS move loop can span monitors with different scales before the app loop runs
+// again, so update the stored scale, queue DpiChange (new scale in .scale, old in .w),
+// and render one live frame through the same hook used by native resize.
+void GlfwPlatform::onContentScale(GLFWwindow* w, float xscale, float yscale) {
+	Window* r = record(w);
+	if (!r)
+		return;
+	const f32 previous = r->contentScale > 0.f ? r->contentScale : 1.f;
+	f32 next = xscale;
+	if (!(next > 0.f) || !std::isfinite(next))
+		next = yscale;
+	if (!(next > 0.f) || !std::isfinite(next))
+		next = previous;
+	r->contentScale = next;
+	if (std::fabs(next - previous) < 1e-4f)
+		return;
+	Event e{};
+	e.type = EventType::DpiChange;
+	e.scale = next;
+	e.w = previous;
+	push(w, e);
+	if (r->liveResizeFn)
+		r->liveResizeFn(r->liveResizeContext);
+}
+
+void GlfwPlatform::onFocus(GLFWwindow* w, int focused) {
+	Event event{};
+	event.type = focused ? EventType::FocusGained : EventType::FocusLost;
+	push(w, event);
+}
 void GlfwPlatform::onCursor(GLFWwindow* w, double x, double y) {
-	Event e{}; e.type = EventType::MouseMove; e.x = f32(x); e.y = f32(y);
+	const Vec2 point = logicalClientPoint(w, x, y);
+	Event e{};
+	e.type = EventType::MouseMove;
+	e.x = point.x;
+	e.y = point.y;
 	if (Window* r = record(w)) { const Vec2 origin = r->owner->windowClientScreenOrigin(r->handle); e.screenX = origin.x + e.x; e.screenY = origin.y + e.y; }
 	push(w, e);
 }
@@ -295,14 +455,20 @@ void GlfwPlatform::onCursorEnter(GLFWwindow* w, int entered) {
 	if (entered == GLFW_TRUE) {
 		double x = 0, y = 0;
 		glfwGetCursorPos(w, &x, &y);
-		e.x = f32(x); e.y = f32(y);
+		const Vec2 point = logicalClientPoint(w, x, y);
+		e.x = point.x;
+		e.y = point.y;
 		if (Window* r = record(w)) { const Vec2 origin = r->owner->windowClientScreenOrigin(r->handle); e.screenX = origin.x + e.x; e.screenY = origin.y + e.y; }
 	}
 	push(w, e);
 }
 void GlfwPlatform::onScroll(GLFWwindow* w, double dx, double dy) {
 	Event e{}; e.type = EventType::Wheel; e.dx = f32(dx); e.dy = f32(dy);
-	double x = 0, y = 0; glfwGetCursorPos(w, &x, &y); e.x = f32(x); e.y = f32(y);
+	double x = 0, y = 0;
+	glfwGetCursorPos(w, &x, &y);
+	const Vec2 point = logicalClientPoint(w, x, y);
+	e.x = point.x;
+	e.y = point.y;
 	if (Window* r = record(w)) { const Vec2 origin = r->owner->windowClientScreenOrigin(r->handle); e.screenX = origin.x + e.x; e.screenY = origin.y + e.y; }
 	push(w, e);
 }
@@ -310,36 +476,85 @@ void GlfwPlatform::onMouse(GLFWwindow* w, int button, int action, int mods) {
 	Event e{}; e.type = action == GLFW_PRESS ? EventType::MouseDown : EventType::MouseUp;
 	e.button = button == GLFW_MOUSE_BUTTON_RIGHT ? MouseButton::Right : button == GLFW_MOUSE_BUTTON_MIDDLE ? MouseButton::Middle : MouseButton::Left;
 	e.mods = (mods & GLFW_MOD_SHIFT ? static_cast<u8>(Mod::Shift) : 0) | (mods & GLFW_MOD_CONTROL ? static_cast<u8>(Mod::Ctrl) : 0) | (mods & GLFW_MOD_ALT ? static_cast<u8>(Mod::Alt) : 0);
-	double x = 0, y = 0; glfwGetCursorPos(w, &x, &y); e.x = f32(x); e.y = f32(y);
+	double x = 0, y = 0;
+	glfwGetCursorPos(w, &x, &y);
+	const Vec2 point = logicalClientPoint(w, x, y);
+	e.x = point.x;
+	e.y = point.y;
 	if (Window* r = record(w)) { const Vec2 origin = r->owner->windowClientScreenOrigin(r->handle); e.screenX = origin.x + e.x; e.screenY = origin.y + e.y; }
 	push(w, e);
 }
 Key GlfwPlatform::mapKey(int k) {
-	if (k >= GLFW_KEY_A && k <= GLFW_KEY_Z) return static_cast<Key>('A' + k - GLFW_KEY_A);
-	if (k >= GLFW_KEY_0 && k <= GLFW_KEY_9) return static_cast<Key>('0' + k - GLFW_KEY_0);
+	// GLFW's printable-key codes are the ASCII uppercase values, matching the platform
+	// Key contract, so all of Space..Grave can be mapped directly.
+	if (k >= GLFW_KEY_SPACE && k <= GLFW_KEY_GRAVE_ACCENT) return static_cast<Key>(k);
 	switch (k) {
-	case GLFW_KEY_TAB: return Key::Tab;
-	case GLFW_KEY_ENTER: return Key::Enter;
-	case GLFW_KEY_SPACE: return Key::Space;
 	case GLFW_KEY_ESCAPE: return Key::Escape;
+	case GLFW_KEY_ENTER: return Key::Enter;
+	case GLFW_KEY_TAB: return Key::Tab;
 	case GLFW_KEY_BACKSPACE: return Key::Backspace;
-	case GLFW_KEY_DELETE: return Key::Delete;
 	case GLFW_KEY_INSERT: return Key::Insert;
+	case GLFW_KEY_DELETE: return Key::Delete;
+	case GLFW_KEY_RIGHT: return Key::Right;
+	case GLFW_KEY_LEFT: return Key::Left;
+	case GLFW_KEY_DOWN: return Key::Down;
+	case GLFW_KEY_UP: return Key::Up;
+	case GLFW_KEY_PAGE_UP: return Key::PageUp;
+	case GLFW_KEY_PAGE_DOWN: return Key::PageDown;
 	case GLFW_KEY_HOME: return Key::Home;
 	case GLFW_KEY_END: return Key::End;
-	case GLFW_KEY_LEFT: return Key::Left;
-	case GLFW_KEY_RIGHT: return Key::Right;
-	case GLFW_KEY_UP: return Key::Up;
-	case GLFW_KEY_DOWN: return Key::Down;
+	case GLFW_KEY_CAPS_LOCK: return Key::CapsLock;
+	case GLFW_KEY_SCROLL_LOCK: return Key::ScrollLock;
+	case GLFW_KEY_NUM_LOCK: return Key::NumLock;
+	case GLFW_KEY_PRINT_SCREEN: return Key::PrintScreen;
+	case GLFW_KEY_PAUSE: return Key::Pause;
+	case GLFW_KEY_F1: return Key::F1;
+	case GLFW_KEY_F2: return Key::F2;
 	case GLFW_KEY_F3: return Key::F3;
 	case GLFW_KEY_F4: return Key::F4;
+	case GLFW_KEY_F5: return Key::F5;
+	case GLFW_KEY_F6: return Key::F6;
+	case GLFW_KEY_F7: return Key::F7;
+	case GLFW_KEY_F8: return Key::F8;
+	case GLFW_KEY_F9: return Key::F9;
+	case GLFW_KEY_F10: return Key::F10;
+	case GLFW_KEY_F11: return Key::F11;
+	case GLFW_KEY_F12: return Key::F12;
+	case GLFW_KEY_KP_0: return Key::Kp0;
+	case GLFW_KEY_KP_1: return Key::Kp1;
+	case GLFW_KEY_KP_2: return Key::Kp2;
+	case GLFW_KEY_KP_3: return Key::Kp3;
+	case GLFW_KEY_KP_4: return Key::Kp4;
+	case GLFW_KEY_KP_5: return Key::Kp5;
+	case GLFW_KEY_KP_6: return Key::Kp6;
+	case GLFW_KEY_KP_7: return Key::Kp7;
+	case GLFW_KEY_KP_8: return Key::Kp8;
+	case GLFW_KEY_KP_9: return Key::Kp9;
+	case GLFW_KEY_KP_DECIMAL: return Key::KpDecimal;
+	case GLFW_KEY_KP_DIVIDE: return Key::KpDivide;
+	case GLFW_KEY_KP_MULTIPLY: return Key::KpMultiply;
+	case GLFW_KEY_KP_SUBTRACT: return Key::KpSubtract;
+	case GLFW_KEY_KP_ADD: return Key::KpAdd;
+	case GLFW_KEY_KP_ENTER: return Key::KpEnter;
+	case GLFW_KEY_KP_EQUAL: return Key::KpEqual;
+	case GLFW_KEY_LEFT_SHIFT: return Key::LeftShift;
+	case GLFW_KEY_LEFT_CONTROL: return Key::LeftCtrl;
+	case GLFW_KEY_LEFT_ALT: return Key::LeftAlt;
+	case GLFW_KEY_LEFT_SUPER: return Key::LeftSuper;
+	case GLFW_KEY_RIGHT_SHIFT: return Key::RightShift;
+	case GLFW_KEY_RIGHT_CONTROL: return Key::RightCtrl;
+	case GLFW_KEY_RIGHT_ALT: return Key::RightAlt;
+	case GLFW_KEY_RIGHT_SUPER: return Key::RightSuper;
+	case GLFW_KEY_MENU: return Key::Menu;
 	default: return Key::None;
 	}
 }
 void GlfwPlatform::onKey(GLFWwindow* w, int key, int, int action, int mods) {
 	if (action != GLFW_PRESS && action != GLFW_REPEAT && action != GLFW_RELEASE) return;
 	Event e{}; e.type = action == GLFW_RELEASE ? EventType::KeyUp : EventType::KeyDown; e.key = mapKey(key); e.repeat = action == GLFW_REPEAT;
-	e.mods = (mods & GLFW_MOD_SHIFT ? static_cast<u8>(Mod::Shift) : 0) | (mods & GLFW_MOD_CONTROL ? static_cast<u8>(Mod::Ctrl) : 0); push(w, e);
+	e.mods = (mods & GLFW_MOD_SHIFT ? static_cast<u8>(Mod::Shift) : 0) | (mods & GLFW_MOD_CONTROL ? static_cast<u8>(Mod::Ctrl) : 0) |
+		(mods & GLFW_MOD_ALT ? static_cast<u8>(Mod::Alt) : 0) | (mods & GLFW_MOD_SUPER ? static_cast<u8>(Mod::Super) : 0);
+	push(w, e);
 }
 void GlfwPlatform::onChar(GLFWwindow* w, unsigned int codepoint) {
 	Event e{}; e.type = EventType::TextInput; e.codepoint = codepoint; push(w, e);
@@ -395,6 +610,13 @@ namespace {
 		case WM_NCACTIVATE:
 			// Native activation must not repaint a caption for our client-drawn frame.
 			if (window && window->customChrome) return TRUE;
+			break;
+		case WM_ERASEBKGND:
+			// The client area is a GL surface: erasing it with the class brush paints a flash of
+			// black on resize/restore/tear-off before the next frame lands. Report the erase as
+			// handled and let the renderer own every client pixel.
+			if (window && window->customChrome)
+				return 1;
 			break;
 		case WM_NCHITTEST:
 			if (window && window->customChrome) {
@@ -463,6 +685,16 @@ void GlfwPlatform::installChrome(Window& window) {
 		const DWM_WINDOW_CORNER_PREFERENCE preference = DWMWCP_ROUND;
 		window.roundedCornersApplied = SUCCEEDED(DwmSetWindowAttribute(
 			hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &preference, sizeof(preference)));
+		// DWM's 1px frame border traces the rounded arc as hard pixel steps at fractional
+		// DPI, which reads as a pixelated corner. Repaint it in the app's own background so
+		// the arc keeps DWM's antialiased clip without the stepping frame line.
+		if (window.chromeBorderColor) {
+			const COLORREF border = RGB(
+				static_cast<BYTE>((window.chromeBorderColor >> 24) & 0xFF),
+				static_cast<BYTE>((window.chromeBorderColor >> 16) & 0xFF),
+				static_cast<BYTE>((window.chromeBorderColor >> 8) & 0xFF));
+			DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &border, sizeof(border));
+		}
 	}
 }
 

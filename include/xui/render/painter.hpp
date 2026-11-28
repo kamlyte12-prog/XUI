@@ -47,7 +47,9 @@ namespace xui {
 			bool reorder = true;      ///< tile-dependency batching (false = merge only with the immediately preceding batch)
 			bool snap = true;         ///< snap rect edges / glyph origins to whole physical pixels
 		};
-		struct Stats { u32 prims = 0, culled = 0, batches = 0, drawCalls = 0, vertices = 0, indices = 0; };
+		struct Stats {
+			u32 prims = 0, culled = 0, batches = 0, drawCalls = 0, vertices = 0, indices = 0, clipShapeCapFallbacks = 0;
+		};
 		static constexpr u32 kMaxLayers = 8;
 
 		Painter() : Painter(Options{}) {}
@@ -57,7 +59,9 @@ namespace xui {
 		void begin(u32 widthPx, u32 heightPx, f32 dpiScale);
 		/// Overlays (menus, tooltips, drag previews) draw in a higher layer: always above lower layers, regardless of paint order.
 		void setLayer(u32 layer);
-		void pushClip(Rect logical);           ///< intersects with the current clip; rounded OUT to whole physical pixels
+		/// Intersects with the current clip. With @p radius, descendants are additionally masked by the rounded shape
+		/// (analytic per-fragment coverage), so child backgrounds cannot bleed past a parent's rounded corners.
+		void pushClip(Rect logical, CornerRadii radius = {});
 		void popClip();
 		void pushTransform(Mat3 logical);
 		void popTransform();
@@ -88,7 +92,19 @@ namespace xui {
 			i32 x0 = 0, y0 = 0, x1 = 0, y1 = 0; bool empty() const { return x1 <= x0 || y1 <= y0; }
 			friend bool operator==(const ClipI&, const ClipI&) = default;
 		};
-		struct Key { TextureHandle tex; ClipI clip; u32 custom = 0; friend bool operator==(const Key&, const Key&) = default; };
+		/// One level of the clip stack: the conservative scissor rect plus the rounded shapes inherited from it.
+		struct ClipState {
+			ClipI rect;
+			u8 roundCount = 0;
+			ClipRound rounds[ClipShape::kMaxRounds];
+		};
+		struct Key {
+			TextureHandle tex;
+			ClipI clip;
+			u32 clipShape = kNoClipShape;
+			u32 custom = 0;
+			friend bool operator==(const Key&, const Key&) = default;
+		};
 		struct Prim { u32 firstVert = 0, quads = 0, next = kNil; };
 		struct Batch { Key key; u32 head = kNil, tail = kNil; };
 		struct Entry { i32 x0, y0, x1, y1; u32 batch, next; };      // a placed primitive's bounds, linked per grid cell
@@ -98,6 +114,10 @@ namespace xui {
 
 		Vertex makeVertex(f32 x, f32 y) const;
 		bool admit(f32 x0, f32 y0, f32 x1, f32 y1, ClipI& bounds) const;   // bounds ∩ clip; false => cull
+		/// Build the batch key for a primitive whose physical bounds are (x0,y0)-(x1,y1). Rounded clips that
+		/// cannot touch those bounds are omitted, so interior content keeps batching with unclipped content.
+		Key keyFor(TextureHandle tex, u32 custom, f32 x0, f32 y0, f32 x1, f32 y1);
+		u32 clipShapeFor(f32 x0, f32 y0, f32 x1, f32 y1);
 		void commit(const Key& key, const ClipI& bounds, u32 firstVert, u32 quads);
 		u32 packAlpha(Color c) const;
 		void quad(const Vertex& tmpl, f32 x0, f32 y0, f32 x1, f32 y1, f32 u0, f32 v0, f32 u1, f32 v1);
@@ -108,7 +128,10 @@ namespace xui {
 		Options m_opt;
 		f32 m_dpi = 1.f; u32 m_w = 0, m_h = 0, m_cellsX = 0, m_cellsY = 0;
 		u32 m_layer = 0, m_nextCustom = 1;
-		std::vector<ClipI> m_clips; std::vector<f32> m_opacity; std::vector<Mat3> m_transforms;
+		std::vector<ClipState> m_clips;
+		std::vector<f32> m_opacity;
+		std::vector<Mat3> m_transforms;
+		std::vector<ClipShape> m_clipShapes;
 		std::vector<Vertex> m_verts; std::vector<Prim> m_prims; std::vector<u32> m_indices; std::vector<DrawCmd> m_cmds;
 		Layer m_layers[kMaxLayers];
 		Stats m_stats;

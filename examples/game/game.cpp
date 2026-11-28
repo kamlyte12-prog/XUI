@@ -70,7 +70,7 @@ namespace {
 	}
 
 	bool collides(const GameState& game, Piece piece) {
-		for (const auto [x, y] : cellsFor(piece)) {
+		for (const auto& [x, y] : cellsFor(piece)) {
 			if (x < 0 || x >= kBoardWidth || y >= kBoardHeight) return true;
 			if (y >= 0 && game.board[y][x]) return true;
 		}
@@ -94,7 +94,7 @@ namespace {
 	void updateBoard(GameState& game) {
 		std::array<std::array<bool, kBoardWidth>, kBoardHeight> visible = game.board;
 		if (game.started && !game.gameOver) {
-			for (const auto [x, y] : cellsFor(game.current))
+			for (const auto& [x, y] : cellsFor(game.current))
 				if (x >= 0 && x < kBoardWidth && y >= 0 && y < kBoardHeight) visible[y][x] = true;
 		}
 		static const auto ids = [] {
@@ -136,7 +136,7 @@ namespace {
 	}
 
 	void lockCurrent(GameState& game) {
-		for (const auto [x, y] : cellsFor(game.current)) {
+		for (const auto& [x, y] : cellsFor(game.current)) {
 			if (y < 0) { game.gameOver = true; game.active = false; break; }
 			game.board[y][x] = true;
 		}

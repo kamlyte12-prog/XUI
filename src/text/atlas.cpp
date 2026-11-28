@@ -40,6 +40,7 @@ namespace xui {
 	}
 
 	void GlyphAtlas::shutdown() {
+		++m_generation;
 		if (m_renderer && m_tex.valid()) m_renderer->destroyTexture(m_tex);
 		if (m_renderer) for (TextureHandle texture : m_retiredTextures) m_renderer->destroyTexture(texture);
 		m_retiredTextures.clear();
@@ -107,6 +108,7 @@ namespace xui {
 	/// Larger atlas: recreate the texture, re-pack and re-rasterise every cached glyph.
 	void GlyphAtlas::rebuild(u32 newSize) {
 		++m_frameStats.rebuilds;
+		++m_generation;
 		std::vector<Entry> old;
 		old.swap(m_entries);
 		TextureHandle oldTex = m_tex;
@@ -132,6 +134,7 @@ namespace xui {
 	void GlyphAtlas::evictAll() {
 		// Full reset (bitmap positions are meaningless afterwards). Only reached at kMaxSize with a
 		// working set larger than 4096x4096 coverage px — never in a normal UI.
+		++m_generation;
 		m_entries.clear();
 		m_shelves.clear();
 		m_index.assign(256, 0);
@@ -234,7 +237,7 @@ namespace xui {
 			m_renderer->updateTexture(m_tex, m_bitmap.data(), region);
 			++m_frameStats.uploads;
 		}
-		m_entries.push_back(std::move(e));
+		m_entries.push_back(e);
 		indexEntry(u32(m_entries.size() - 1));
 		return m_entries.back().g;
 	}

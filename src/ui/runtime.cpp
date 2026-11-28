@@ -1,4 +1,5 @@
 #include <xui/ui/runtime.hpp>
+#include <xui/ui/localization.hpp>
 #include <algorithm>
 #include <filesystem>
 #include <array>
@@ -6,6 +7,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <initializer_list>
+#include <regex>
+#include <sstream>
 #include <unordered_set>
 
 namespace xui {
@@ -23,6 +27,41 @@ namespace xui {
 		constexpr auto kFpsRefreshInterval = std::chrono::milliseconds(250);
 		constexpr auto kCaretBlinkInterval = std::chrono::milliseconds(530);
 		constexpr auto kAnimationFrameInterval = std::chrono::milliseconds(16);
+
+		bool clipsOverflow(const PropTable& style, const StringInterner& strings) {
+			if (!style.has(PropId::Overflow))
+				return false;
+			const StyleValue& overflow = style.get(PropId::Overflow);
+			for (u8 i = 0; i < overflow.count; ++i) {
+				const Atom& atom = overflow.atoms[i];
+				if (atom.kind != AtomKind::Ident)
+					continue;
+				const std::string_view value = strings.view(atom.str());
+				if (value == "hidden" || value == "clip" || value == "scroll" || value == "auto")
+					return true;
+			}
+			return false;
+		}
+
+		/// Builds the FpsCounter overlay label. Clip-cap fallbacks are appended only when the last
+		/// frame exceeded the rounded-clip cap, so the common label keeps its usual width.
+		void formatFpsOverlay(char* out, std::size_t size, bool fpsEnabled, bool batchCounter, f32 fps, f32 frameMs,
+							  u32 batches, u32 clipCapFallbacks, bool showFrameTime) {
+			int written = 0;
+			if (fpsEnabled && batchCounter)
+				written = std::snprintf(out, size, "FPS: %.0f | %.1f ms | Batches: %u", double(fps), double(frameMs),
+										batches);
+			else if (fpsEnabled && showFrameTime)
+				written = std::snprintf(out, size, "FPS: %.0f | %.1f ms", double(fps), double(frameMs));
+			else if (fpsEnabled)
+				written = std::snprintf(out, size, "FPS: %.0f", double(fps));
+			else if (batchCounter)
+				written = std::snprintf(out, size, "Batches: %u", batches);
+			else
+				written = std::snprintf(out, size, "FPS: %.0f", double(fps));
+			if (clipCapFallbacks > 0 && written > 0 && std::size_t(written) < size)
+				std::snprintf(out + written, size - std::size_t(written), " | ClipCaps: %u", clipCapFallbacks);
+		}
 
 		f32 easeProgress(f32 t, const Easing& easing) {
 			t = std::clamp(t, 0.f, 1.f);
@@ -131,6 +170,36 @@ namespace xui {
 			if (expression >= document.exprs.size()) return {};
 			const XExpr& e = document.exprs[expression];
 			if (e.kind == XExprKind::String || e.kind == XExprKind::Name) return strings.view(e.name);
+			return {};
+		}
+		std::string modelPathFromExpression(const Document& document, const StringInterner& strings, u32 expression) {
+			if (expression >= document.exprs.size())
+				return {};
+			const XExpr& value = document.exprs[expression];
+			if (value.kind == XExprKind::Name)
+				return std::string(strings.view(value.name));
+			if (value.kind == XExprKind::Member) {
+				std::string path = modelPathFromExpression(document, strings, value.a);
+				if (!path.empty()) {
+					path.push_back('.');
+					path.append(strings.view(value.name));
+				}
+				return path;
+			}
+			if (value.kind == XExprKind::Index && value.a < document.exprs.size()) {
+				std::string path = modelPathFromExpression(document, strings, value.a);
+				if (value.b >= document.exprs.size())
+					return {};
+				const XExpr& subscript = document.exprs[value.b];
+				if (subscript.kind == XExprKind::String)
+					path += "." + std::string(strings.view(subscript.name));
+				else if (subscript.kind == XExprKind::Number && subscript.num >= 0.f &&
+						 std::floor(subscript.num) == subscript.num)
+					path += "." + std::to_string(static_cast<u32>(subscript.num));
+				else
+					return {};
+				return path;
+			}
 			return {};
 		}
 
@@ -331,6 +400,47 @@ namespace xui {
 			while (at < value.size() && (static_cast<u8>(value[at]) & 0xC0u) == 0x80u) ++at;
 			return at;
 		}
+		bool wordByte(std::string_view text, std::size_t at) {
+			if (at >= text.size())
+				return false;
+			const u8 c = static_cast<u8>(text[at]);
+			return c >= 0x80u || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+		}
+		bool spaceByte(std::string_view text, std::size_t at) {
+			if (at >= text.size())
+				return false;
+			const u8 c = static_cast<u8>(text[at]);
+			return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
+		}
+		std::size_t previousWord(std::string_view text, std::size_t at) {
+			at = std::min(at, text.size());
+			while (at && spaceByte(text, previousUtf8(text, at)))
+				at = previousUtf8(text, at);
+			if (!at)
+				return 0;
+			const std::size_t previous = previousUtf8(text, at);
+			const bool word = wordByte(text, previous);
+			while (at) {
+				const std::size_t next = previousUtf8(text, at);
+				if (spaceByte(text, next) || wordByte(text, next) != word)
+					break;
+				at = next;
+			}
+			return at;
+		}
+		std::size_t nextWord(std::string_view text, std::size_t at) {
+			at = std::min(at, text.size());
+			while (at < text.size() && spaceByte(text, at))
+				at = nextUtf8(text, at);
+			if (at == text.size())
+				return at;
+			const bool word = wordByte(text, at);
+			while (at < text.size() && !spaceByte(text, at) && wordByte(text, at) == word)
+				at = nextUtf8(text, at);
+			while (at < text.size() && spaceByte(text, at))
+				at = nextUtf8(text, at);
+			return at;
+		}
 		std::string truncateUtf8(std::string_view value, u32 maxCodepoints) {
 			if (!maxCodepoints) return std::string(value);
 			std::size_t end = 0;
@@ -349,7 +459,12 @@ namespace xui {
 		}
 	} // namespace
 
-	std::string formatNumberText(f32 value, u32 precision) {
+	std::string formatNumberText(f32 value, u32 precision, std::string_view locale = {}) {
+		if (!locale.empty()) {
+			Localization formatting;
+			formatting.setLocale(std::string(locale));
+			return formatting.number(value, precision);
+		}
 		char text[64];
 		if (precision) std::snprintf(text, sizeof(text), "%.*f", static_cast<int>(std::min<u32>(precision, 6)), double(value));
 		else std::snprintf(text, sizeof(text), "%.6g", double(value));
@@ -368,6 +483,26 @@ namespace xui {
 			else { out += text[i]; ++i; }
 		}
 		return out;
+	}
+
+	std::size_t visualTextOffset(std::string_view text, std::size_t rawOffset) {
+		std::size_t visual = 0;
+		for (std::size_t i = 0; i < std::min(rawOffset, text.size()); ++i) {
+			visual += text[i] == ' ' ? 2u : text[i] == '\t' ? 3u : 1u;
+		}
+		return visual;
+	}
+
+	std::size_t rawTextOffset(std::string_view text, std::size_t visualOffset) {
+		std::size_t visual = 0, raw = 0;
+		while (raw < text.size() && visual < visualOffset) {
+			const std::size_t count = text[raw] == ' ' ? 2u : text[raw] == '\t' ? 3u : 1u;
+			if (visual + count > visualOffset)
+				break;
+			visual += count;
+			++raw;
+		}
+		return raw;
 	}
 
 	/// Days since 1970-01-01 for a proleptic Gregorian date (Howard Hinnant's civil-from-days inverse).
@@ -406,7 +541,12 @@ namespace xui {
 		}
 	}
 
-	std::string formatDateText(i32 year, u32 month, u32 day) {
+	std::string formatDateText(i32 year, u32 month, u32 day, std::string_view locale = {}) {
+		if (!locale.empty()) {
+			Localization formatting;
+			formatting.setLocale(std::string(locale));
+			return formatting.date(year, month, day);
+		}
 		char text[32];
 		std::snprintf(text, sizeof(text), "%04d-%02u-%02u", year, month, day);
 		return text;
@@ -456,17 +596,20 @@ namespace xui {
 	}
 
 	bool loadUiAssets(std::string_view xuiSource, std::string_view xssSource, StringInterner& strings,
-		UiAssetBundle& out, std::string& error, std::string_view xuiName, std::string_view xssName) {
+					  UiAssetBundle& out, std::string& error, std::string_view xuiName, std::string_view xssName,
+					  XuiValidationOptions validation) {
+		out.validationWarnings.clear();
 		auto document = parseXui(xuiSource, xuiName, strings);
 		if (!document) { error = document.error().format(); return false; }
 		auto styles = compileXss(xssSource, xssName, strings);
 		if (!styles) { error = styles.error().format(); return false; }
 		Program program;
 		program.files.push_back(std::move(*document));
-		auto valid = validate(program, XuiSchema::withCoreWidgets(), strings);
+		auto valid = validate(program, XuiSchema::withCoreWidgets(), strings, validation);
 		if (!valid) { error = valid.error().format(); return false; }
 		out.document = std::move(program.files.front());
 		out.styles = std::move(*styles);
+		out.validationWarnings = std::move(valid->warnings);
 		error.clear();
 		return true;
 	}
@@ -500,6 +643,7 @@ namespace xui {
 		}
 
 		m_dockHosts.clear();
+		m_dockHostByPanel.clear();
 		m_titleBars.clear();
 		m_pendingMenuAnchors.clear();
 		m_clientChrome = false;
@@ -507,6 +651,8 @@ namespace xui {
 		m_strings = &strings;
 		m_text = &text;
 		m_font = font;
+		m_modelDocument = document;
+		m_bindingNodes.clear();
 		MatchInput tooltipMatch; tooltipMatch.type = strings.intern("Tooltip");
 		m_tooltipStyleSet = styles.match(tooltipMatch);
 
@@ -531,7 +677,10 @@ namespace xui {
 		m_clientChrome = documentUsesClientChrome(document, strings);
 
 		m_layout.setLeafMeasure(&UiRuntime::measureLeaf, this);
-		if (!buildNode(document, document.roots.front(), 0xFFFFFFFFu, error)) {
+		m_nodeById.clear();
+		m_nodePayloads.clear();
+		m_textQuadCache.clear();
+		if (!buildNode(m_modelDocument, m_modelDocument.roots.front(), 0xFFFFFFFFu, error)) {
 			m_nodes.clear();
 			m_root = NodeId{};
 			return false;
@@ -551,6 +700,10 @@ namespace xui {
 			return false;
 		}
 		m_root = m_nodes.front().layout;
+		m_nodeById.reserve(m_nodes.size());
+		for (u32 i = 0; i < m_nodes.size(); ++i)
+			if (m_nodes[i].id.v)
+				m_nodeById.try_emplace(m_nodes[i].id, i);
 		// Resolve Menu anchors now that every authored id exists.
 		for (const auto& [menuIndex, anchorId] : m_pendingMenuAnchors) {
 			u32 anchor = 0xFFFFFFFFu;
@@ -639,6 +792,11 @@ namespace xui {
 			}
 			m_dockHosts.push_back(std::move(host));
 		}
+		m_dockHostByPanel.assign(m_nodes.size(), 0xFFFFFFFFu);
+		for (u32 hostIndex = 0; hostIndex < m_dockHosts.size(); ++hostIndex)
+			for (u32 panelIndex : m_dockHosts[hostIndex].panelNodes)
+				if (panelIndex < m_dockHostByPanel.size())
+					m_dockHostByPanel[panelIndex] = hostIndex;
 		// Picker editors are retained TextBox nodes owned by the picker, but laid out in its popup
 		// overlay. They use the same focus, selection, clipboard and text-input paths as authored fields.
 		const u32 authoredNodeCount = static_cast<u32>(m_nodes.size());
@@ -664,7 +822,7 @@ namespace xui {
 				editor.styleSet = m_styles->match(input);
 				m_styles->resolve(editor.styleSet, stateBit(State::Resting), m_theme, editor.style);
 				const PropId inherited[] = { PropId::Font, PropId::FontSize, PropId::FontWeight, PropId::Fg, PropId::Align, PropId::LetterSpacing };
-				for (u8 i = 0; i < std::size(inherited); ++i) {
+				for (std::size_t i = 0; i < std::size(inherited); ++i) {
 					const PropId property = inherited[i];
 					if (!editor.style.has(property) && owner.style.has(property)) {
 						editor.style.v[static_cast<int>(property)] = owner.style.get(property);
@@ -672,7 +830,7 @@ namespace xui {
 						editor.inheritedTextMask |= u8(1u << i);
 					}
 				}
-				editor.font = selectFont(editor.style);
+				updateNodeFont(editor);
 				m_interactiveNodes.push_back(static_cast<u32>(m_nodes.size()));
 				m_nodes.push_back(std::move(editor));
 			}
@@ -685,7 +843,8 @@ namespace xui {
 		if (!m_text->atlas()->ready()) { error = "initialize TextSystem's atlas with a renderer before attaching its font"; return false; }
 		m_font = font;
 		for (Node& node : m_nodes) {
-			node.font = selectFont(node.style);
+			node.fontSelectionCached = false;
+			updateNodeFont(node);
 			if (!node.text.empty()) m_layout.markContentChanged(node.layout);
 		}
 		return true;
@@ -701,7 +860,8 @@ namespace xui {
 		auto it = std::find_if(m_fontFaces.begin(), m_fontFaces.end(), [&](const FontFace& face) { return face.family == familyId && face.weight == weight; });
 		if (it == m_fontFaces.end()) m_fontFaces.push_back({ familyId, weight, font }); else it->font = font;
 		for (Node& node : m_nodes) {
-			node.font = selectFont(node.style);
+			node.fontSelectionCached = false;
+			updateNodeFont(node);
 			if (!node.text.empty()) m_layout.markContentChanged(node.layout);
 		}
 		return true;
@@ -719,11 +879,16 @@ namespace xui {
 			m_styles->resolve(node.styleSet, states, m_theme, node.style);
 			node.resolvedStates = states;
 			node.styleResolved = true;
+			// In-flight transitions captured their start and target values from the
+			// previous theme's palette. Replaying them after a theme switch would keep
+			// painting old-theme colors until the next state change (for example a
+			// hovered checked toggle staying on the dark pressed fill in light mode).
+			node.styleTweens.clear();
 			node.inheritedTextMask = 0;
 			if (node.parentIndex < i) {
 				const PropId inherited[] = { PropId::Font, PropId::FontSize, PropId::FontWeight, PropId::Fg, PropId::Align, PropId::LetterSpacing };
 				const PropTable& parentStyle = m_nodes[node.parentIndex].style;
-				for (u8 propertyIndex = 0; propertyIndex < std::size(inherited); ++propertyIndex) {
+				for (std::size_t propertyIndex = 0; propertyIndex < std::size(inherited); ++propertyIndex) {
 					const PropId property = inherited[propertyIndex];
 					if (!node.style.has(property) && parentStyle.has(property)) {
 						node.style.v[static_cast<int>(property)] = parentStyle.get(property);
@@ -732,21 +897,490 @@ namespace xui {
 					}
 				}
 			}
-			node.font = selectFont(node.style);
+			updateNodeFont(node);
 		}
 		m_layout.markAllDirty(m_root);
 		addDamage({ 0, 0, m_lastLayoutWidth, m_lastLayoutHeight });
 		return true;
 	}
 
-	bool UiRuntime::buildNode(const Document& document, u32 index, u32 parentIndex, std::string& error) {
+	void UiRuntime::setLocale(std::string_view locale) {
+		if (m_locale == locale)
+			return;
+		m_locale.assign(locale);
+		for (Node& node : m_nodes) {
+			if (node.numberField)
+				node.text = formatNumberText(node.value, node.numberPrecision, m_locale) +
+							(node.unit.empty() ? std::string{} : node.unit);
+			else if (node.datePicker)
+				node.text = formatDateText(node.dateYear, node.dateMonth, node.dateDay, m_locale);
+			else
+				continue;
+			node.caret = node.selectionAnchor = node.text.size();
+			m_layout.markContentChanged(node.layout);
+			addDamage(m_layout.absRect(node.layout));
+		}
+	}
+
+	void UiRuntime::setReducedMotion(bool reduced) {
+		if (m_reducedMotion == reduced)
+			return;
+		m_reducedMotion = reduced;
+		for (Node& node : m_nodes) {
+			node.styleTweens.clear();
+			node.keyframeActive = false;
+			if (reduced) {
+				const bool settleScroll = node.scrollAnimating;
+				node.scrollAnimating = false;
+				node.scrollVelocity = {};
+				if (settleScroll && node.scrollView)
+					m_layout.setScrollOffset(node.layout, node.scrollTarget);
+			}
+		}
+		m_animationDeadline = {};
+		addDamage({0, 0, m_lastLayoutWidth, m_lastLayoutHeight});
+	}
+
+	ModelValue UiRuntime::evaluateModelExpression(const Document& document, u32 expression,
+												  const ModelValue::Object* scope) const {
+		if (expression >= document.exprs.size())
+			return {};
+		const XExpr& e = document.exprs[expression];
+		auto number = [](const ModelValue& value) -> f64 {
+			if (const auto* v = std::get_if<f64>(&value.data))
+				return *v;
+			if (const auto* v = std::get_if<bool>(&value.data))
+				return *v ? 1.0 : 0.0;
+			if (const auto* v = std::get_if<std::string>(&value.data)) {
+				char* end = nullptr;
+				const double parsed = std::strtod(v->c_str(), &end);
+				return end && end != v->c_str() && *end == '\0' ? parsed : 0.0;
+			}
+			return 0.0;
+		};
+		auto lookupPath = [&](std::string_view path) -> ModelValue {
+			if (path.empty())
+				return {};
+			ModelValue current;
+			std::size_t offset = 0;
+			const std::size_t dot = path.find('.');
+			const std::string first(path.substr(0, dot));
+			if (scope) {
+				if (auto scopeIt = scope->find(first); scopeIt != scope->end())
+					current = scopeIt->second;
+				else if (auto modelIt = m_model.find(first); modelIt != m_model.end())
+					current = modelIt->second;
+			} else if (auto rootIt = m_model.find(first); rootIt != m_model.end())
+				current = rootIt->second;
+			offset = dot == std::string_view::npos ? path.size() : dot + 1;
+			while (offset < path.size()) {
+				const std::size_t next = path.find('.', offset);
+				const std::string part(
+					path.substr(offset, next == std::string_view::npos ? path.size() - offset : next - offset));
+				if (const auto* objectValues = std::get_if<ModelValue::Object>(&current.data)) {
+					auto memberIt = objectValues->find(part);
+					current = memberIt == objectValues->end() ? ModelValue{} : memberIt->second;
+				} else if (const auto* arrayValues = std::get_if<ModelValue::Array>(&current.data)) {
+					char* end = nullptr;
+					const unsigned long index = std::strtoul(part.c_str(), &end, 10);
+					current = end && *end == '\0' && index < arrayValues->size() ? (*arrayValues)[index] : ModelValue{};
+				} else
+					return {};
+				if (next == std::string_view::npos)
+					break;
+				offset = next + 1;
+			}
+			return current;
+		};
+		switch (e.kind) {
+		case XExprKind::Bool:
+			return ModelValue(e.bval);
+		case XExprKind::Number:
+			return ModelValue(e.num);
+		case XExprKind::String:
+			return ModelValue(std::string(m_strings->view(e.name)));
+		case XExprKind::Color:
+			return ModelValue(Color::fromRGBA8(e.color));
+		case XExprKind::Size:
+			return ModelValue(std::to_string(e.num) + "x" + std::to_string(e.num2));
+		case XExprKind::Name:
+			return lookupPath(m_strings->view(e.name));
+		case XExprKind::Member:
+			return lookupPath(modelPathFromExpression(document, *m_strings, expression));
+		case XExprKind::Index: {
+			const ModelValue container = evaluateModelExpression(document, e.a, scope);
+			const ModelValue subscript = evaluateModelExpression(document, e.b, scope);
+			if (const auto* objectValues = std::get_if<ModelValue::Object>(&container.data)) {
+				auto memberIt = objectValues->find(subscript.toString());
+				return memberIt == objectValues->end() ? ModelValue{} : memberIt->second;
+			}
+			if (const auto* array = std::get_if<ModelValue::Array>(&container.data)) {
+				const f64 raw = number(subscript);
+				return raw >= 0 && std::floor(raw) == raw && raw < array->size()
+						   ? (*array)[static_cast<std::size_t>(raw)]
+						   : ModelValue{};
+			}
+			return {};
+		}
+		case XExprKind::Interp: {
+			if (e.argCount == 1 && e.argFirst < document.parts.size() && document.parts[e.argFirst].expr != kNoExpr)
+				return evaluateModelExpression(document, document.parts[e.argFirst].expr, scope);
+			std::string output;
+			for (u32 i = 0; i < e.argCount && e.argFirst + i < document.parts.size(); ++i) {
+				const XInterpPart& part = document.parts[e.argFirst + i];
+				if (part.expr == kNoExpr)
+					output.append(m_strings->view(part.lit));
+				else
+					output += evaluateModelExpression(document, part.expr, scope).toString();
+			}
+			return ModelValue(std::move(output));
+		}
+		case XExprKind::Unary: {
+			const ModelValue value = evaluateModelExpression(document, e.a, scope);
+			return e.op == XOp::Not ? ModelValue(!value.truthy()) : ModelValue(-number(value));
+		}
+		case XExprKind::Binary: {
+			const ModelValue lhs = evaluateModelExpression(document, e.a, scope);
+			if (e.op == XOp::And && !lhs.truthy())
+				return ModelValue(false);
+			if (e.op == XOp::Or && lhs.truthy())
+				return ModelValue(true);
+			const ModelValue rhs = evaluateModelExpression(document, e.b, scope);
+			const f64 a = number(lhs), b = number(rhs);
+			if (e.op == XOp::Eq || e.op == XOp::Ne) {
+				bool equal = false;
+				if (const auto* leftText = std::get_if<std::string>(&lhs.data)) {
+					if (const auto* rightText = std::get_if<std::string>(&rhs.data))
+						equal = *leftText == *rightText;
+				} else if (const auto* leftBool = std::get_if<bool>(&lhs.data)) {
+					if (const auto* rightBool = std::get_if<bool>(&rhs.data))
+						equal = *leftBool == *rightBool;
+				} else if (std::holds_alternative<f64>(lhs.data) && std::holds_alternative<f64>(rhs.data))
+					equal = a == b;
+				return ModelValue(e.op == XOp::Eq ? equal : !equal);
+			}
+			switch (e.op) {
+			case XOp::Add:
+				if (std::holds_alternative<std::string>(lhs.data) || std::holds_alternative<std::string>(rhs.data))
+					return ModelValue(lhs.toString() + rhs.toString());
+				return ModelValue(a + b);
+			case XOp::Sub:
+				return ModelValue(a - b);
+			case XOp::Mul:
+				return ModelValue(a * b);
+			case XOp::Div:
+				return ModelValue(b == 0 ? 0.0 : a / b);
+			case XOp::Mod:
+				return ModelValue(b == 0 ? 0.0 : std::fmod(a, b));
+			case XOp::Lt:
+				return ModelValue(a < b);
+			case XOp::Le:
+				return ModelValue(a <= b);
+			case XOp::Gt:
+				return ModelValue(a > b);
+			case XOp::Ge:
+				return ModelValue(a >= b);
+			case XOp::And:
+				return ModelValue(lhs.truthy() && rhs.truthy());
+			case XOp::Or:
+				return ModelValue(lhs.truthy() || rhs.truthy());
+			default:
+				return {};
+			}
+		}
+		case XExprKind::Ternary:
+			return evaluateModelExpression(document, e.a, scope).truthy()
+					   ? evaluateModelExpression(document, e.b, scope)
+					   : evaluateModelExpression(document, e.c, scope);
+		case XExprKind::Range: {
+			const i32 first = static_cast<i32>(number(evaluateModelExpression(document, e.a, scope)));
+			const i32 last = static_cast<i32>(number(evaluateModelExpression(document, e.b, scope)));
+			ModelValue::Array values;
+			const i64 step = first <= last ? 1 : -1;
+			for (i64 n = first; n != static_cast<i64>(last) + step && values.size() < 100000; n += step)
+				values.emplace_back(static_cast<i32>(n));
+			return ModelValue(std::move(values));
+		}
+		case XExprKind::Call:
+			return {};
+		}
+		return {};
+	}
+
+	ModelValue UiRuntime::modelValue(std::string_view path) const {
+		if (path.empty() || path.front() == '.' || path.back() == '.' || path.find("..") != std::string_view::npos)
+			return {};
+		std::size_t dot = path.find('.');
+		auto root = m_model.find(std::string(path.substr(0, dot)));
+		if (root == m_model.end())
+			return {};
+		ModelValue current = root->second;
+		std::size_t offset = dot == std::string_view::npos ? path.size() : dot + 1;
+		while (offset < path.size()) {
+			const std::size_t next = path.find('.', offset);
+			const std::string key(
+				path.substr(offset, next == std::string_view::npos ? path.size() - offset : next - offset));
+			if (const auto* objectValues = std::get_if<ModelValue::Object>(&current.data)) {
+				auto memberIt = objectValues->find(key);
+				if (memberIt == objectValues->end())
+					return {};
+				current = memberIt->second;
+			} else if (const auto* array = std::get_if<ModelValue::Array>(&current.data)) {
+				char* end = nullptr;
+				const unsigned long index = std::strtoul(key.c_str(), &end, 10);
+				if (!end || *end || index >= array->size())
+					return {};
+				current = (*array)[index];
+			} else
+				return {};
+			if (next == std::string_view::npos)
+				break;
+			offset = next + 1;
+		}
+		return current;
+	}
+
+	bool UiRuntime::setListItemProvider(std::string_view id, ListItemProvider provider) {
+		if (!m_strings || !provider.rowCount || (!provider.text && !provider.cell))
+			return false;
+		bool found = false;
+		const StrId key = m_strings->find(id, &found);
+		if (!found)
+			return false;
+		auto node =
+			std::find_if(m_nodes.begin(), m_nodes.end(), [key](const Node& candidate) { return candidate.id == key; });
+		if (node == m_nodes.end() || (!node->listView && !node->table))
+			return false;
+		if ((node->listView && !provider.text) || (node->table && !provider.cell))
+			return false;
+		m_listItemProviders[key] = provider;
+		if (node->table && node->tableSelectedRow >= static_cast<i32>(listItemCount(*node)))
+			node->tableSelectedRow = -1;
+		m_layout.markContentChanged(node->layout);
+		addDamage(m_layout.absRect(node->layout));
+		return true;
+	}
+
+	u32 UiRuntime::listItemCount(const Node& node) const {
+		if (node.id.v) {
+			const auto found = m_listItemProviders.find(node.id);
+			if (found != m_listItemProviders.end())
+				return found->second.rowCount(found->second.context);
+		}
+		return static_cast<u32>(node.listView ? payload(node).options.size() : payload(node).tableRows.size());
+	}
+
+	bool UiRuntime::listItemText(const Node& node, u32 row, std::string& out) const {
+		if (node.id.v) {
+			const auto found = m_listItemProviders.find(node.id);
+			if (found != m_listItemProviders.end())
+				return found->second.text && found->second.text(found->second.context, row, out);
+		}
+		if (row >= payload(node).options.size())
+			return false;
+		out = payload(node).options[row];
+		return true;
+	}
+
+	bool UiRuntime::tableCellText(const Node& node, u32 row, u32 column, std::string& out) const {
+		if (node.id.v) {
+			const auto found = m_listItemProviders.find(node.id);
+			if (found != m_listItemProviders.end() && found->second.cell)
+				return found->second.cell(found->second.context, row, column, out);
+		}
+		if (row >= payload(node).tableRows.size() || column >= payload(node).tableRows[row].size())
+			return false;
+		out = payload(node).tableRows[row][column];
+		return true;
+	}
+
+	bool UiRuntime::setModelValue(std::string_view path, ModelValue value) {
+		if (path.empty() || path.front() == '.' || path.back() == '.' || path.find("..") != std::string_view::npos)
+			return false;
+		const std::size_t dot = path.find('.');
+		const std::string root(path.substr(0, dot));
+		if (root.empty())
+			return false;
+		if (dot == std::string_view::npos) {
+			m_model[root] = std::move(value);
+		} else {
+			ModelValue* target = &m_model[root];
+			std::size_t offset = dot + 1;
+			while (offset < path.size()) {
+				const std::size_t next = path.find('.', offset);
+				const std::string key(
+					path.substr(offset, next == std::string_view::npos ? path.size() - offset : next - offset));
+				if (key.empty())
+					return false;
+				if (next == std::string_view::npos) {
+					if (auto* objectValues = std::get_if<ModelValue::Object>(&target->data))
+						(*objectValues)[key] = std::move(value);
+					else if (std::holds_alternative<std::monostate>(target->data)) {
+						ModelValue::Object createdObject;
+						createdObject[key] = std::move(value);
+						target->data = std::move(createdObject);
+					} else
+						return false;
+					break;
+				}
+				if (auto* objectValues = std::get_if<ModelValue::Object>(&target->data))
+					target = &(*objectValues)[key];
+				else if (std::holds_alternative<std::monostate>(target->data)) {
+					target->data = ModelValue::Object{};
+					target = &std::get<ModelValue::Object>(target->data)[key];
+				} else
+					return false;
+				offset = next + 1;
+			}
+		}
+		bool updated = false;
+		for (const auto& [dependency, nodes] : m_bindingNodes) {
+			const bool overlaps =
+				dependency == path ||
+				(dependency.size() > path.size() && dependency.compare(0, path.size(), path) == 0 &&
+				 dependency[path.size()] == '.') ||
+				(path.size() > dependency.size() && path.compare(0, dependency.size(), dependency) == 0 &&
+				 path[dependency.size()] == '.');
+			if (!overlaps)
+				continue;
+			for (u32 index : nodes) {
+				reevaluateModelNode(index);
+				updated = true;
+			}
+		}
+		if (!updated)
+			addDamage({0, 0, m_lastLayoutWidth, m_lastLayoutHeight});
+		return true;
+	}
+
+	void UiRuntime::registerModelDependencies(u32 nodeIndex, const Document& document) {
+		if (nodeIndex >= m_nodes.size())
+			return;
+		Node& node = m_nodes[nodeIndex];
+		std::function<void(u32)> collect = [&](u32 expression) {
+			if (expression >= document.exprs.size())
+				return;
+			const XExpr& e = document.exprs[expression];
+			if (e.kind == XExprKind::Index && e.b < document.exprs.size() &&
+				document.exprs[e.b].kind != XExprKind::String && document.exprs[e.b].kind != XExprKind::Number) {
+				collect(e.a);
+				collect(e.b);
+				return;
+			}
+			if (e.kind == XExprKind::Name || e.kind == XExprKind::Member || e.kind == XExprKind::Index) {
+				const std::string path = modelPathFromExpression(document, *m_strings, expression);
+				if (!path.empty()) {
+					auto& nodes = m_bindingNodes[path];
+					if (std::find(nodes.begin(), nodes.end(), nodeIndex) == nodes.end())
+						nodes.push_back(nodeIndex);
+				}
+				return;
+			}
+			if (e.kind == XExprKind::Interp) {
+				for (u32 i = 0; i < e.argCount && e.argFirst + i < document.parts.size(); ++i)
+					if (document.parts[e.argFirst + i].expr != kNoExpr)
+						collect(document.parts[e.argFirst + i].expr);
+				return;
+			}
+			collect(e.a);
+			collect(e.b);
+			if (e.kind == XExprKind::Ternary)
+				collect(e.c);
+		};
+		for (const Node::ModelBinding& binding : node.modelBindings)
+			collect(binding.expression);
+		if (node.ifExpression != kNoExpr)
+			collect(node.ifExpression);
+	}
+
+	void UiRuntime::reevaluateModelNode(u32 index) {
+		if (index >= m_nodes.size())
+			return;
+		Node& node = m_nodes[index];
+		const auto* scope = node.modelScope.get();
+		if (node.ifExpression != kNoExpr) {
+			const bool conditionalVisible = evaluateModelExpression(m_modelDocument, node.ifExpression, scope).truthy();
+			if (node.ifLayoutInitialized && conditionalVisible != node.modelIfVisible) {
+				LayoutStyle layout = node.authoredIfLayout;
+				if (!conditionalVisible) {
+					layout.width = Length::px(0.f);
+					layout.height = Length::px(0.f);
+					layout.minWidth = Length::px(0.f);
+					layout.maxWidth = Length::px(0.f);
+					layout.minHeight = Length::px(0.f);
+					layout.maxHeight = Length::px(0.f);
+					layout.padding = {};
+					layout.border = {};
+					layout.margin = {};
+				}
+				m_layout.setStyle(node.layout, layout);
+				m_layout.markContentChanged(node.layout);
+			}
+			node.modelIfVisible = conditionalVisible;
+		}
+		for (const Node::ModelBinding& binding : node.modelBindings) {
+			const ModelValue value = evaluateModelExpression(m_modelDocument, binding.expression, scope);
+			const std::string_view property = m_strings->view(binding.property);
+			if (property == "visible")
+				node.modelPropertyVisible = value.truthy();
+			else if (property == "disabled")
+				node.disabled = value.truthy();
+			else if (property == "placeholder")
+				node.placeholder = value.toString();
+			else if (property == "text" || property == "label" || property == "value") {
+				const std::string next = value.toString();
+				if (node.text != next) {
+					node.text = next;
+					node.caret = std::min(node.caret, node.text.size());
+					node.selectionAnchor = std::min(node.selectionAnchor, node.text.size());
+					m_layout.markContentChanged(node.layout);
+				}
+			}
+		}
+		node.modelVisible = node.modelIfVisible && node.modelPropertyVisible;
+		addDamage(node.layout.valid() ? m_layout.absRect(node.layout)
+									  : Rect{0, 0, m_lastLayoutWidth, m_lastLayoutHeight});
+	}
+
+	void UiRuntime::publishModelValue(const Node& node, std::string_view text) {
+		if (node.modelBindPath.empty())
+			return;
+		setModelValue(node.modelBindPath, ModelValue(std::string(text)));
+	}
+
+	bool UiRuntime::buildNode(const Document& document, u32 index, u32 parentIndex, std::string& error,
+							  std::shared_ptr<const ModelValue::Object> modelScope, bool expandFor) {
 		if (index >= document.nodes.size()) { error = "invalid node index in .xui document"; return false; }
 		const XNode& source = document.nodes[index];
+		if (expandFor) {
+			for (const XProp& prop : document.propsOf(source)) {
+				if (prop.role != XPropRole::For || prop.expr >= document.exprs.size())
+					continue;
+				const ModelValue collection = evaluateModelExpression(document, prop.expr, modelScope.get());
+				const auto* items = std::get_if<ModelValue::Array>(&collection.data);
+				if (!items) {
+					error = "for: expects an array or numeric range in the current model";
+					return false;
+				}
+				for (u32 ordinal = 0; ordinal < items->size(); ++ordinal) {
+					auto scope = std::make_shared<ModelValue::Object>(modelScope ? *modelScope : ModelValue::Object{});
+					if (prop.forVar.v)
+						(*scope)[std::string(m_strings->view(prop.forVar))] = (*items)[ordinal];
+					if (prop.forIndex.v)
+						(*scope)[std::string(m_strings->view(prop.forIndex))] = ModelValue(ordinal);
+					if (!buildNode(document, index, parentIndex, error, std::move(scope), false))
+						return false;
+				}
+				return true;
+			}
+		}
 		const u32 runtimeIndex = static_cast<u32>(m_nodes.size());
 		Node node;
 		node.type = source.type;
 		node.parentIndex = parentIndex;
-		node.button = typeIs(source.type, *m_strings, "Button");
+		node.modelScope = std::move(modelScope);
+		node.button = typeIs(source.type, *m_strings, "Button") || typeIs(source.type, *m_strings, "IconButton");
+		node.iconButton = typeIs(source.type, *m_strings, "IconButton");
 		node.checkList = typeIs(source.type, *m_strings, "CheckList");
 		node.checkItem = typeIs(source.type, *m_strings, "CheckItem");
 		node.checkBox = typeIs(source.type, *m_strings, "CheckBox");
@@ -757,9 +1391,11 @@ namespace xui {
 		node.menu = typeIs(source.type, *m_strings, "Menu");
 		node.menuItem = typeIs(source.type, *m_strings, "MenuItem");
 		node.scrollView = typeIs(source.type, *m_strings, "ScrollView");
-		node.slider = typeIs(source.type, *m_strings, "Slider");
+		node.slider = typeIs(source.type, *m_strings, "Slider") || typeIs(source.type, *m_strings, "RangeSlider");
+		node.rangeSlider = typeIs(source.type, *m_strings, "RangeSlider");
 		node.progressBar = typeIs(source.type, *m_strings, "ProgressBar");
-		node.dropdown = typeIs(source.type, *m_strings, "Dropdown");
+		node.dropdown = typeIs(source.type, *m_strings, "Dropdown") || typeIs(source.type, *m_strings, "ComboBox");
+		node.comboBox = typeIs(source.type, *m_strings, "ComboBox");
 		node.colorPicker = typeIs(source.type, *m_strings, "ColorPicker");
 		node.textBox = typeIs(source.type, *m_strings, "TextBox");
 		node.textArea = typeIs(source.type, *m_strings, "TextArea");
@@ -776,16 +1412,24 @@ namespace xui {
 		node.separator = typeIs(source.type, *m_strings, "Separator") || typeIs(source.type, *m_strings, "Divider");
 		node.spinner = typeIs(source.type, *m_strings, "Spinner");
 		node.image = typeIs(source.type, *m_strings, "Image");
-		node.iconWidget = typeIs(source.type, *m_strings, "Icon");
+		node.iconWidget = typeIs(source.type, *m_strings, "Icon") || node.iconButton;
 		node.treeView = typeIs(source.type, *m_strings, "TreeView");
+		node.listView = typeIs(source.type, *m_strings, "ListView");
+		node.table = typeIs(source.type, *m_strings, "Table");
 		node.datePicker = typeIs(source.type, *m_strings, "DatePicker");
 		node.segmented = typeIs(source.type, *m_strings, "SegmentedControl");
 		node.stepper = typeIs(source.type, *m_strings, "Stepper");
 		node.rating = typeIs(source.type, *m_strings, "Rating");
 		node.breadcrumb = typeIs(source.type, *m_strings, "Breadcrumb");
 		node.keybindField = typeIs(source.type, *m_strings, "KeybindField");
+		if (node.dropdown || node.colorPicker || node.treeView || node.listView || node.table || node.radioGroup ||
+			node.datePicker || node.segmented || node.rating || node.breadcrumb) {
+			node.payloadIndex = static_cast<u32>(m_nodePayloads.size());
+			m_nodePayloads.emplace_back();
+		}
 		if (node.numberField) { node.textBox = true; node.value = 0.f; }
-		if (node.searchField) node.textBox = true;
+		if (node.searchField || node.comboBox)
+			node.textBox = true;
 		if (node.rating) { node.minValue = 0.f; node.maxValue = 5.f; }   // an authored max overrides below
 		if (node.stepper) { node.value = 0.f; node.minValue = 0.f; node.maxValue = 100.f; }
 
@@ -809,20 +1453,22 @@ namespace xui {
 		}
 		else if (node.scrollView) {
 			node.layout = m_layout.create(LayoutKind::Scroll);
-		}
-		else if (node.tabs) {
+		} else if (node.listView || node.table) {
+			node.layout = m_layout.create(LayoutKind::Scroll);
+		} else if (node.tabs) {
 			node.layout = m_layout.create(LayoutKind::Stack);
-		}
-		else if (node.button && !document.childrenOf(source).empty()) {
+		} else if (node.button && !document.childrenOf(source).empty()) {
 			node.layout = m_layout.create(LayoutKind::Column);
-		}
-		else if (node.tab) {
+		} else if (node.tab) {
 			node.layout = m_layout.create(LayoutKind::Column);
-		}
-		else if (typeIs(source.type, *m_strings, "Text") || node.button || node.checkItem || node.checkBox || node.slider || node.progressBar || node.fpsCounter || node.dropdown || node.colorPicker || node.textBox || node.textArea || node.radioGroup || node.switchToggle || node.toggleButton || node.label || node.badge || node.separator || node.spinner || node.image || node.iconWidget || node.treeView || node.datePicker || node.segmented || node.stepper || node.rating || node.breadcrumb || node.keybindField || node.menu || node.menuItem) {
+		} else if (typeIs(source.type, *m_strings, "Text") || node.button || node.checkItem || node.checkBox ||
+				   node.slider || node.progressBar || node.fpsCounter || node.dropdown || node.colorPicker ||
+				   node.textBox || node.textArea || node.radioGroup || node.switchToggle || node.toggleButton ||
+				   node.label || node.badge || node.separator || node.spinner || node.image || node.iconWidget ||
+				   node.treeView || node.listView || node.table || node.datePicker || node.segmented || node.stepper ||
+				   node.rating || node.breadcrumb || node.keybindField || node.menu || node.menuItem) {
 			node.layout = m_layout.create(LayoutKind::Leaf);
-		}
-		else {
+		} else {
 			error = "unsupported runtime widget '" + std::string(m_strings->view(source.type)) + "'";
 			return false;
 		}
@@ -849,7 +1495,15 @@ namespace xui {
 		}
 
 		if ((typeIs(source.type, *m_strings, "Text") || node.button || node.checkItem || node.checkBox || node.fpsCounter || node.label || node.badge || node.toggleButton || node.menuItem) && source.argCount) {
-			node.text.assign(literal(document, *m_strings, document.args[source.argFirst].expr));
+			const XArg* content = &document.args[source.argFirst];
+			for (const XArg& arg : document.argsOf(source))
+				if (arg.name.v && (m_strings->view(arg.name) == "value" || m_strings->view(arg.name) == "label")) {
+					content = &arg;
+					break;
+				}
+			node.text.assign(literal(document, *m_strings, content->expr));
+			if (content->expr < document.exprs.size() && document.exprs[content->expr].kind == XExprKind::Interp)
+				node.modelBindings.push_back({m_strings->intern("text"), content->expr, XPropRole::Value});
 		}
 		if (node.tab && source.argCount) node.tabTitle.assign(literal(document, *m_strings, document.args[source.argFirst].expr));
 		if (node.dockPanel) {
@@ -870,6 +1524,24 @@ namespace xui {
 		for (const XProp& prop : document.propsOf(source)) {
 			const std::string_view name = m_strings->view(prop.name);
 			const std::string_view value = literal(document, *m_strings, prop.expr);
+			if (prop.role == XPropRole::If)
+				node.ifExpression = prop.expr;
+			else if (prop.role == XPropRole::Bind) {
+				node.modelBindPath = modelPathFromExpression(document, *m_strings, prop.expr);
+				node.modelBindings.push_back({m_strings->intern("value"), prop.expr, XPropRole::Bind});
+			} else if (prop.role == XPropRole::Value && name == "visible" && prop.expr < document.exprs.size() &&
+					   document.exprs[prop.expr].kind == XExprKind::Bool)
+				node.modelPropertyVisible = document.exprs[prop.expr].bval;
+			else if (prop.role == XPropRole::Value && prop.expr < document.exprs.size() &&
+					 (name == "value" || name == "label" || name == "placeholder" || name == "visible" ||
+					  name == "disabled") &&
+					 (document.exprs[prop.expr].kind == XExprKind::Interp ||
+					  document.exprs[prop.expr].kind == XExprKind::Name ||
+					  document.exprs[prop.expr].kind == XExprKind::Member ||
+					  document.exprs[prop.expr].kind == XExprKind::Index ||
+					  document.exprs[prop.expr].kind == XExprKind::Binary ||
+					  document.exprs[prop.expr].kind == XExprKind::Ternary))
+				node.modelBindings.push_back({prop.name, prop.expr, XPropRole::Value});
 			if (node.dockHost && prop.role == XPropRole::Value && prop.expr < document.exprs.size() && document.exprs[prop.expr].kind == XExprKind::Number) {
 				if (name == "gutter") node.dockGutter = std::max(0.f, document.exprs[prop.expr].num);
 				else if (name == "headerHeight") node.dockHeaderHeight = std::clamp(document.exprs[prop.expr].num, 20.f, 64.f);
@@ -939,10 +1611,12 @@ namespace xui {
 			else if (name == "placeholder" && prop.role == XPropRole::Value) node.placeholder.assign(value);
 			else if (node.colorPicker && name == "format" && prop.role == XPropRole::Value) node.pickerFormat.assign(value);
 			else if (node.colorPicker && name == "formats" && prop.role == XPropRole::Value) {
-				node.pickerFormats.clear(); std::size_t begin = 0;
+				payload(node).pickerFormats.clear();
+				std::size_t begin = 0;
 				while (begin <= value.size()) {
 					const std::size_t end = value.find('|', begin); std::string item(value.substr(begin, end == std::string_view::npos ? value.size() - begin : end - begin));
-					if (item == "hex" || item == "rgb" || item == "hsl" || item == "hsv") node.pickerFormats.push_back(std::move(item));
+					if (item == "hex" || item == "rgb" || item == "hsl" || item == "hsv")
+						payload(node).pickerFormats.push_back(std::move(item));
 					if (end == std::string_view::npos) break;
 					begin = end + 1;
 				}
@@ -969,13 +1643,16 @@ namespace xui {
 				else if (node.colorPicker && name == "value" && expression.kind == XExprKind::Color) node.pickerColor = Color::fromRGBA8(expression.color);
 				else if (node.colorPicker && name == "value" && expression.kind == XExprKind::String) { Color parsed; if (parseColorText(value, parsed)) node.pickerColor = parsed; }
 				else if ((node.dropdown || node.radioGroup || node.segmented || node.breadcrumb) && name == "value") {
-					for (u32 i = 0; i < node.options.size(); ++i) {
-						if (node.options[i] == value) node.selectedOption = i;
+					for (u32 i = 0; i < payload(node).options.size(); ++i) {
+						if (payload(node).options[i] == value)
+							node.selectedOption = i;
 					}
 				}
 				else if (node.datePicker && name == "value") {
 					i32 year = 0; u32 month = 0, day = 0;
-					if (std::sscanf(value.data(), "%4d-%2u-%2u", &year, &month, &day) == 3 && month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth(year, month)) {
+					const std::string valueText(value);
+					if (std::sscanf(valueText.c_str(), "%4d-%2u-%2u", &year, &month, &day) == 3 && month >= 1 &&
+						month <= 12 && day >= 1 && day <= daysInMonth(year, month)) {
 						node.dateYear = year; node.dateMonth = month; node.dateDay = day;
 						node.viewYear = year; node.viewMonth = month;
 					}
@@ -1003,7 +1680,10 @@ namespace xui {
 				const bool flag = document.exprs[prop.expr].kind == XExprKind::Bool && document.exprs[prop.expr].bval;
 				if (name == "tooltipHideOnClick") node.tooltipHideOnClick = flag;
 				else node.tooltipDisabled = flag;
-			}
+			} else if (name == "tooltipFollowCursor" && prop.role == XPropRole::Value &&
+					   prop.expr < document.exprs.size())
+				node.tooltipFollowCursor =
+					document.exprs[prop.expr].kind == XExprKind::Bool && document.exprs[prop.expr].bval;
 			else if (name == "showFrameTime" && prop.role == XPropRole::Value && prop.expr < document.exprs.size())
 				node.showFrameTime = !(document.exprs[prop.expr].kind == XExprKind::Bool && !document.exprs[prop.expr].bval);
 			else if (node.image && name == "fit" && prop.role == XPropRole::Value) {
@@ -1012,7 +1692,9 @@ namespace xui {
 				else node.imageFit = 1;   // Contain is the default
 			}
 			else if (node.image && name == "source" && prop.role == XPropRole::Value) node.imageSource.assign(value);
-			else if (node.iconWidget && name == "name" && prop.role == XPropRole::Value) node.iconName.assign(value);
+			else if (node.iconWidget && (name == "name" || (node.iconButton && name == "icon")) &&
+					 prop.role == XPropRole::Value)
+				node.iconName.assign(value);
 			else if (node.treeView && name == "items" && prop.role == XPropRole::Value) {
 				auto trim = [](std::string_view text) {
 					while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front()))) text.remove_prefix(1);
@@ -1036,15 +1718,21 @@ namespace xui {
 						if (!prefix.empty()) prefix += '/';
 						prefix.append(segment);
 						u32 entryIndex = 0xFFFFFFFFu;
-						for (u32 i = 0; i < node.treeEntries.size(); ++i)
-							if (node.treeEntries[i].path == prefix) { entryIndex = i; break; }
+						for (u32 i = 0; i < payload(node).treeEntries.size(); ++i)
+							if (payload(node).treeEntries[i].path == prefix) {
+								entryIndex = i;
+								break;
+							}
 						if (entryIndex == 0xFFFFFFFFu) {
 							Node::TreeEntry entry;
 							entry.path = prefix; entry.label.assign(segment); entry.parent = parentEntry;
-							entry.depth = parentEntry < 0 ? 0u : node.treeEntries[static_cast<u32>(parentEntry)].depth + 1u;
-							entryIndex = static_cast<u32>(node.treeEntries.size());
-							node.treeEntries.push_back(std::move(entry));
-							if (parentEntry >= 0) node.treeEntries[static_cast<u32>(parentEntry)].hasChildren = true;
+							entry.depth = parentEntry < 0
+											  ? 0u
+											  : payload(node).treeEntries[static_cast<u32>(parentEntry)].depth + 1u;
+							entryIndex = static_cast<u32>(payload(node).treeEntries.size());
+							payload(node).treeEntries.push_back(std::move(entry));
+							if (parentEntry >= 0)
+								payload(node).treeEntries[static_cast<u32>(parentEntry)].hasChildren = true;
 						}
 						parentEntry = static_cast<i32>(entryIndex);
 						if (segmentEnd == std::string::npos) break;
@@ -1080,9 +1768,18 @@ namespace xui {
 			else if (name == "change" && prop.role == XPropRole::Event && prop.expr < document.exprs.size()) {
 				const XExpr& handler = document.exprs[prop.expr];
 				if (handler.kind == XExprKind::Name) node.pressHandler = handler.name;
-			}
-			else if ((name == "dock" || name == "undock" || name == "resize" || name == "tabChange" || name == "close") &&
-				prop.role == XPropRole::Event && prop.expr < document.exprs.size()) {
+			} else if ((name == "filter" || name == "validate") && prop.role == XPropRole::Event &&
+					   prop.expr < document.exprs.size()) {
+				const XExpr& handler = document.exprs[prop.expr];
+				if (handler.kind == XExprKind::Name) {
+					if (name == "filter")
+						node.filterHandler = handler.name;
+					else
+						node.validateHandler = handler.name;
+				}
+			} else if ((name == "dock" || name == "undock" || name == "resize" || name == "tabChange" ||
+						name == "close" || name == "closed") &&
+					   prop.role == XPropRole::Event && prop.expr < document.exprs.size()) {
 				const XExpr& handler = document.exprs[prop.expr];
 				if (handler.kind == XExprKind::Name) {
 					if (name == "dock") node.dockHandler.assign(m_strings->view(handler.name));
@@ -1091,21 +1788,63 @@ namespace xui {
 					else if (name == "tabChange") node.tabChangeHandler.assign(m_strings->view(handler.name));
 					else node.closeHandler.assign(m_strings->view(handler.name));
 				}
-			}
-			else if (name == "disabled" && prop.role == XPropRole::Value && prop.expr < document.exprs.size()) {
+			} else if (name == "disabled" && prop.role == XPropRole::Value && prop.expr < document.exprs.size()) {
 				node.disabled = document.exprs[prop.expr].kind == XExprKind::Bool && document.exprs[prop.expr].bval;
-			}
-			else if (name == "options" && prop.role == XPropRole::Value) {
+			} else if ((name == "options" || (node.listView && name == "items")) && prop.role == XPropRole::Value) {
 				std::size_t begin = 0;
 				while (begin <= value.size()) {
 					const std::size_t end = value.find('|', begin);
 					std::string option(value.substr(begin, end == std::string_view::npos ? value.size() - begin : end - begin));
-					if (!option.empty()) node.options.push_back(std::move(option));
+					if (!option.empty())
+						payload(node).options.push_back(std::move(option));
 					if (end == std::string_view::npos) break;
 					begin = end + 1;
 				}
-			}
-			else if ((name == "value" || name == "min" || name == "max") && prop.role == XPropRole::Value && prop.expr < document.exprs.size()) {
+			} else if (node.listView && name == "selected" && prop.role == XPropRole::Value)
+				node.treeSelection.assign(value);
+			else if (node.rangeSlider && (name == "low" || name == "high") && prop.role == XPropRole::Value &&
+					 prop.expr < document.exprs.size() && document.exprs[prop.expr].kind == XExprKind::Number) {
+				if (name == "low")
+					node.rangeLow = document.exprs[prop.expr].num;
+				else
+					node.rangeHigh = document.exprs[prop.expr].num;
+			} else if (node.table && name == "columns" && prop.role == XPropRole::Value) {
+				std::size_t start = 0;
+				while (start <= value.size()) {
+					const auto end = value.find('|', start);
+					auto cell = value.substr(start, end == std::string_view::npos ? value.size() - start : end - start);
+					if (!cell.empty())
+						payload(node).tableColumns.emplace_back(cell);
+					if (end == std::string_view::npos)
+						break;
+					start = end + 1;
+				}
+			} else if (node.table && name == "selected" && prop.role == XPropRole::Value &&
+					   prop.expr < document.exprs.size() && document.exprs[prop.expr].kind == XExprKind::Number)
+				node.tableSelectedRow = static_cast<i32>(document.exprs[prop.expr].num);
+			else if (node.table && name == "rows" && prop.role == XPropRole::Value) {
+				std::size_t start = 0;
+				while (start <= value.size()) {
+					const auto end = value.find('|', start);
+					std::string_view row =
+						value.substr(start, end == std::string_view::npos ? value.size() - start : end - start);
+					std::vector<std::string> cells;
+					std::size_t c = 0;
+					while (c <= row.size()) {
+						const auto ce = row.find('\t', c);
+						cells.emplace_back(row.substr(c, ce == std::string_view::npos ? row.size() - c : ce - c));
+						if (ce == std::string_view::npos)
+							break;
+						c = ce + 1;
+					}
+					if (!row.empty())
+						payload(node).tableRows.push_back(std::move(cells));
+					if (end == std::string_view::npos)
+						break;
+					start = end + 1;
+				}
+			} else if ((name == "value" || name == "min" || name == "max") && prop.role == XPropRole::Value &&
+					   prop.expr < document.exprs.size()) {
 				const XExpr& expression = document.exprs[prop.expr];
 				if (expression.kind == XExprKind::Number) {
 					if (name == "value") node.value = expression.num;
@@ -1115,20 +1854,21 @@ namespace xui {
 				else if (name == "value" && node.colorPicker && expression.kind == XExprKind::Color)
 					node.pickerColor = Color::fromRGBA8(expression.color);
 				else if (name == "value" && node.dropdown)
-					for (u32 i = 0; i < node.options.size(); ++i) if (node.options[i] == value) node.selectedOption = i;
-			}
-			else if (name == "checked" && prop.role == XPropRole::Value && prop.expr < document.exprs.size()) {
+					for (u32 i = 0; i < payload(node).options.size(); ++i)
+						if (payload(node).options[i] == value)
+							node.selectedOption = i;
+			} else if (name == "checked" && prop.role == XPropRole::Value && prop.expr < document.exprs.size()) {
 				node.checked = document.exprs[prop.expr].kind == XExprKind::Bool && document.exprs[prop.expr].bval;
-			}
-			else if (prop.role == XPropRole::If || prop.role == XPropRole::For) {
-				error = "runtime .xui subset does not yet evaluate if/for control-flow properties";
-				return false;
+			} else if (prop.role == XPropRole::For) { /* expanded before node materialization */
 			}
 		}
 
 		if (node.colorPicker) {
-			if (node.pickerFormats.empty()) node.pickerFormats = { "hex" };
-			if (std::find(node.pickerFormats.begin(), node.pickerFormats.end(), node.pickerFormat) == node.pickerFormats.end()) node.pickerFormat = node.pickerFormats.front();
+			if (payload(node).pickerFormats.empty())
+				payload(node).pickerFormats = {"hex"};
+			if (std::find(payload(node).pickerFormats.begin(), payload(node).pickerFormats.end(), node.pickerFormat) ==
+				payload(node).pickerFormats.end())
+				node.pickerFormat = payload(node).pickerFormats.front();
 			if (!node.pickerAlpha) node.pickerColor.a = 1.f;
 			node.text = colorText(node.pickerColor, node.pickerFormat, node.pickerAlpha, node.pickerPrecision);
 		}
@@ -1186,7 +1926,7 @@ namespace xui {
 		if (parentIndex != 0xFFFFFFFFu && parentIndex < m_nodes.size()) {
 			const PropId inherited[] = { PropId::Font, PropId::FontSize, PropId::FontWeight, PropId::Fg, PropId::Align, PropId::LetterSpacing };
 			const PropTable& parentStyle = m_nodes[parentIndex].style;
-			for (u8 i = 0; i < std::size(inherited); ++i) {
+			for (std::size_t i = 0; i < std::size(inherited); ++i) {
 				const PropId property = inherited[i];
 				if (!node.style.has(property) && parentStyle.has(property)) {
 					node.style.v[static_cast<int>(property)] = parentStyle.get(property);
@@ -1195,7 +1935,7 @@ namespace xui {
 				}
 			}
 		}
-		node.font = selectFont(node.style);
+		updateNodeFont(node);
 		applyLayoutStyle(node);
 		if (node.split) {
 			LayoutStyle splitStyle = m_layout.style(node.layout);
@@ -1381,11 +2121,43 @@ namespace xui {
 		}
 		if (node.treeView) {
 			if (!document.childrenOf(source).empty()) { error = "TreeView uses slash-separated paths in its items property and does not accept child widgets"; return false; }
-			if (node.treeEntries.empty()) { error = "TreeView requires at least one path in its items property"; return false; }
-			if (!node.treeSelection.empty() && std::none_of(node.treeEntries.begin(), node.treeEntries.end(),
-				[&](const Node::TreeEntry& entry) { return entry.path == node.treeSelection; })) {
+			if (payload(node).treeEntries.empty()) {
+				error = "TreeView requires at least one path in its items property";
+				return false;
+			}
+			if (!node.treeSelection.empty() &&
+				std::none_of(payload(node).treeEntries.begin(), payload(node).treeEntries.end(),
+							 [&](const Node::TreeEntry& entry) { return entry.path == node.treeSelection; })) {
 				error = "TreeView selected value must match an item path"; return false;
 			}
+		}
+		if (node.listView && !document.childrenOf(source).empty()) {
+			error = "ListView items are supplied with its items property; child widgets are not accepted";
+			return false;
+		}
+		if (node.listView && !node.treeSelection.empty() &&
+			std::find(payload(node).options.begin(), payload(node).options.end(), node.treeSelection) ==
+				payload(node).options.end()) {
+			error = "ListView selected value must match an item";
+			return false;
+		}
+		if (node.table && !document.childrenOf(source).empty()) {
+			error = "Table uses columns and rows properties and does not accept child widgets";
+			return false;
+		}
+		if (node.table && payload(node).tableColumns.empty()) {
+			error = "Table requires columns";
+			return false;
+		}
+		if (node.table && node.tableSelectedRow < -1) {
+			error = "Table selected row is out of range";
+			return false;
+		}
+		if (node.table)
+			payload(node).tableColumnWidths.assign(payload(node).tableColumns.size(), 120.f);
+		if (node.rangeSlider) {
+			node.rangeLow = std::clamp(node.rangeLow, node.minValue, node.maxValue);
+			node.rangeHigh = std::clamp(node.rangeHigh, node.rangeLow, node.maxValue);
 		}
 		if (node.iconWidget) {
 			static constexpr std::string_view icons[] = { "add", "check", "chevron-down", "chevron-right", "close", "file", "folder", "home", "menu", "minus", "search" };
@@ -1405,21 +2177,28 @@ namespace xui {
 			authoredLayout.top = Length::px(0.f);
 		}
 		m_layout.setStyle(node.layout, authoredLayout);
+		if (node.ifExpression != kNoExpr) {
+			node.ifLayoutInitialized = true;
+			node.authoredIfLayout = authoredLayout;
+		}
 		m_nodes.push_back(std::move(node));
 		if (m_nodes[runtimeIndex].dropdown || m_nodes[runtimeIndex].colorPicker) {
 			Node& control = m_nodes[runtimeIndex];
 			if (control.dropdown) {
-				if (control.options.empty()) control.options = { "Option 1", "Option 2", "Option 3" };
-				if (control.selectedOption < control.options.size()) control.text = control.options[control.selectedOption];
+				if (payload(control).options.empty())
+					payload(control).options = {"Option 1", "Option 2", "Option 3"};
+				if (control.selectedOption < payload(control).options.size())
+					control.text = payload(control).options[control.selectedOption];
 			}
 			else { control.text = colorText(control.pickerColor, control.pickerFormat, control.pickerAlpha, control.pickerPrecision); }
 		}
 		if (Node& group = m_nodes[runtimeIndex]; group.radioGroup || group.segmented || group.breadcrumb) {
-			if (group.options.empty()) group.options = { "Option 1", "Option 2", "Option 3" };
-			group.selectedOption = std::min(group.selectedOption, static_cast<u32>(group.options.size() - 1));
+			if (payload(group).options.empty())
+				payload(group).options = {"Option 1", "Option 2", "Option 3"};
+			group.selectedOption = std::min(group.selectedOption, static_cast<u32>(payload(group).options.size() - 1));
 		}
 		if (Node& picker = m_nodes[runtimeIndex]; picker.datePicker)
-			picker.text = formatDateText(picker.dateYear, picker.dateMonth, picker.dateDay);
+			picker.text = formatDateText(picker.dateYear, picker.dateMonth, picker.dateDay, m_locale);
 		if (m_nodes[runtimeIndex].textBox || m_nodes[runtimeIndex].textArea) {
 			Node& field = m_nodes[runtimeIndex];
 			field.text = truncateUtf8(field.text, field.maxLength);
@@ -1427,17 +2206,26 @@ namespace xui {
 		}
 		if (Node& field = m_nodes[runtimeIndex]; field.numberField || field.stepper) {
 			if (field.numberBounded || field.stepper) field.value = std::clamp(field.value, std::min(field.minValue, field.maxValue), std::max(field.minValue, field.maxValue));
-			field.text = formatNumberText(field.value, field.numberPrecision);
+			field.text = formatNumberText(field.value, field.numberPrecision, m_locale);
 			if (!field.unit.empty()) { field.text += " "; field.text += field.unit; }
 			field.caret = field.text.size();
 		}
-		if (m_nodes[runtimeIndex].button || m_nodes[runtimeIndex].checkItem || m_nodes[runtimeIndex].checkBox || m_nodes[runtimeIndex].scrollView || m_nodes[runtimeIndex].slider || m_nodes[runtimeIndex].dropdown || m_nodes[runtimeIndex].colorPicker || m_nodes[runtimeIndex].textBox || m_nodes[runtimeIndex].textArea || m_nodes[runtimeIndex].tabs || m_nodes[runtimeIndex].treeView ||
-			m_nodes[runtimeIndex].switchToggle || m_nodes[runtimeIndex].toggleButton || m_nodes[runtimeIndex].radioGroup ||
-			m_nodes[runtimeIndex].segmented || m_nodes[runtimeIndex].stepper || m_nodes[runtimeIndex].rating || m_nodes[runtimeIndex].breadcrumb || m_nodes[runtimeIndex].keybindField || m_nodes[runtimeIndex].datePicker) m_interactiveNodes.push_back(runtimeIndex);
+		reevaluateModelNode(runtimeIndex);
+		registerModelDependencies(runtimeIndex, document);
+		if (m_nodes[runtimeIndex].button || m_nodes[runtimeIndex].checkItem || m_nodes[runtimeIndex].checkBox ||
+			m_nodes[runtimeIndex].scrollView || m_nodes[runtimeIndex].slider || m_nodes[runtimeIndex].dropdown ||
+			m_nodes[runtimeIndex].colorPicker || m_nodes[runtimeIndex].textBox || m_nodes[runtimeIndex].textArea ||
+			m_nodes[runtimeIndex].tabs || m_nodes[runtimeIndex].treeView || m_nodes[runtimeIndex].listView ||
+			m_nodes[runtimeIndex].table || m_nodes[runtimeIndex].switchToggle || m_nodes[runtimeIndex].toggleButton ||
+			m_nodes[runtimeIndex].radioGroup || m_nodes[runtimeIndex].segmented || m_nodes[runtimeIndex].stepper ||
+			m_nodes[runtimeIndex].rating || m_nodes[runtimeIndex].breadcrumb || m_nodes[runtimeIndex].keybindField ||
+			m_nodes[runtimeIndex].datePicker)
+			m_interactiveNodes.push_back(runtimeIndex);
 		if (m_nodes[runtimeIndex].split) m_splitNodes.push_back(runtimeIndex);
 
 		for (u32 child : document.childrenOf(source))
-			if (!buildNode(document, child, runtimeIndex, error)) return false;
+			if (!buildNode(document, child, runtimeIndex, error, m_nodes[runtimeIndex].modelScope))
+				return false;
 		if (m_nodes[runtimeIndex].button && m_layout.childCount(m_nodes[runtimeIndex].layout) != 0)
 			m_nodes[runtimeIndex].text.clear(); // composed buttons paint their authored child content instead of a second label.
 		if (m_nodes[runtimeIndex].tabs) {
@@ -1450,16 +2238,21 @@ namespace xui {
 			m_nodes[runtimeIndex].selectedTab = std::min(m_nodes[runtimeIndex].selectedTab, pageCount - 1);
 			LayoutStyle tabsStyle = m_layout.style(m_nodes[runtimeIndex].layout);
 			tabsStyle.padding.t += 34.f;
+			// Pages always fill the tab content box. Alignment is inherited through the style
+			// cascade (`Tab { align: Center }` centers header labels), and applying that to the
+			// Stack would center an intrinsic-width page and let its content spill outside the
+			// control once text or nested tabs are wider than the workspace.
+			tabsStyle.alignItems = Align::Stretch;
 			m_layout.setStyle(m_nodes[runtimeIndex].layout, tabsStyle);
 		}
-		if (node.titleBar && node.titleBarButtons) {
+		if (m_nodes[runtimeIndex].titleBar && m_nodes[runtimeIndex].titleBarButtons) {
 			// Reserve the caption zone (minimize/maximize/close) so authored children cannot
 			// underlap the framework-drawn buttons; the Tabs header reserve uses the same trick.
 			LayoutStyle barStyle = m_layout.style(m_nodes[runtimeIndex].layout);
 			barStyle.padding.r += kCaptionZoneWidth;
 			m_layout.setStyle(m_nodes[runtimeIndex].layout, barStyle);
 		}
-		if (node.split) {
+		if (m_nodes[runtimeIndex].split) {
 			Node& splitNode = m_nodes[runtimeIndex];
 			NodeId child = m_layout.firstChild(splitNode.layout);
 			u32 ordinal = 0;
@@ -1542,8 +2335,11 @@ namespace xui {
 			host.appliedBounds[ordinal] = bounds;
 			LayoutStyle style = m_layout.style(m_nodes[panelIndex].layout);
 			style.position = Position::Absolute;
-			style.left = Length::px(bounds.x);
-			style.top = Length::px(bounds.y);
+			// The dock tree works in content-box coordinates. Absolute children are
+			// placed against the host's border box, so add the content inset here to
+			// keep panel bodies aligned with the tree-derived chrome and hit tests.
+			style.left = Length::px(borderLeft + hostStyle.padding.l + bounds.x);
+			style.top = Length::px(borderTop + hostStyle.padding.t + bounds.y);
 			style.right = Length::autoLen();
 			style.bottom = Length::autoLen();
 			style.width = Length::px(bounds.w);
@@ -1556,15 +2352,17 @@ namespace xui {
 	}
 
 	UiRuntime::DockHostState* UiRuntime::dockHostForPanel(u32 panelNode) {
-		for (DockHostState& host : m_dockHosts)
-			if (std::find(host.panelNodes.begin(), host.panelNodes.end(), panelNode) != host.panelNodes.end()) return &host;
-		return nullptr;
+		if (panelNode >= m_dockHostByPanel.size())
+			return nullptr;
+		const u32 index = m_dockHostByPanel[panelNode];
+		return index < m_dockHosts.size() ? &m_dockHosts[index] : nullptr;
 	}
 
 	const UiRuntime::DockHostState* UiRuntime::dockHostForPanel(u32 panelNode) const {
-		for (const DockHostState& host : m_dockHosts)
-			if (std::find(host.panelNodes.begin(), host.panelNodes.end(), panelNode) != host.panelNodes.end()) return &host;
-		return nullptr;
+		if (panelNode >= m_dockHostByPanel.size())
+			return nullptr;
+		const u32 index = m_dockHostByPanel[panelNode];
+		return index < m_dockHosts.size() ? &m_dockHosts[index] : nullptr;
 	}
 
 	UiRuntime::DockHostState* UiRuntime::dockHostAt(Vec2 point) {
@@ -1596,6 +2394,37 @@ namespace xui {
 	}
 
 	bool UiRuntime::dockPointerDown(Vec2 point) {
+		// Floating panels paint above docked content and its chrome, so they own hit testing
+		// first: pressing a floating body must not start a splitter drag behind it.
+		u32 floatingPanel = 0xFFFFFFFFu;
+		u32 floatingHost = 0xFFFFFFFFu;
+		u32 floatingZ = 0;
+		for (u32 hostIndex = 0; hostIndex < m_dockHosts.size(); ++hostIndex) {
+			DockHostState& candidate = m_dockHosts[hostIndex];
+			if (!isNodeVisible(candidate.node) || m_nodes[candidate.node].disabled)
+				continue;
+			const Rect rect = m_layout.absRect(m_nodes[candidate.node].layout);
+			const LayoutStyle& style = m_layout.style(m_nodes[candidate.node].layout);
+			const Vec2 local{point.x - (rect.x + style.border.l + style.padding.l),
+							 point.y - (rect.y + style.border.t + style.padding.t)};
+			for (const DockPanelLayout& panel : candidate.tree.panels()) {
+				if (!panel.floating || panel.bounds.empty() || !panel.bounds.contains(local))
+					continue;
+				if (floatingPanel == 0xFFFFFFFFu || panel.zOrder > floatingZ) {
+					floatingPanel = panel.panel;
+					floatingHost = hostIndex;
+					floatingZ = panel.zOrder;
+				}
+			}
+		}
+		if (floatingPanel != 0xFFFFFFFFu) {
+			DockHostState& host = m_dockHosts[floatingHost];
+			// Any press on a floating panel raises it, not just its title bar.
+			if (host.tree.raiseFloating(floatingPanel)) {
+				updateDockHostLayout(host);
+				addDockDamage(host);
+			}
+		}
 		for (std::size_t hostIndex = m_dockHosts.size(); hostIndex > 0; --hostIndex) {
 			DockHostState& host = m_dockHosts[hostIndex - 1];
 			if (!isNodeVisible(host.node)) continue;
@@ -1606,9 +2435,17 @@ namespace xui {
 			const Vec2 origin{ rect.x + style.border.l + style.padding.l, rect.y + style.border.t + style.padding.t };
 			const Vec2 local{ point.x - origin.x, point.y - origin.y };
 			const Rect area{ 0, 0, host.contentArea.w, host.contentArea.h };
-			if (area.contains(local)) {
+			if (area.contains(local))
+				m_focusedDockHost = static_cast<u32>(hostIndex - 1);
+			u32 panel = 0xFFFFFFFFu;
+			if (floatingPanel != 0xFFFFFFFFu) {
+				// The front floating panel covers every other host and its splitters.
+				if (floatingHost != hostIndex - 1)
+					continue;
+				panel = floatingPanel;
+			} else {
 				bool horizontal = true;
-				const u32 split = host.tree.splitAt(local, &horizontal);
+				const u32 split = area.contains(local) ? host.tree.splitAt(local, &horizontal) : 0xFFFFFFFFu;
 				if (split != 0xFFFFFFFFu) {
 					const Rect bounds = host.tree.splitBounds(split);
 					m_dockDragHost = static_cast<u32>(hostIndex - 1);
@@ -1621,17 +2458,14 @@ namespace xui {
 					addDockDamage(host);
 					return true;
 				}
+				u32 active = host.tree.panelAt(local);
+				if (active != 0xFFFFFFFFu)
+					panel = dockTabAt(host, active, local);
+				if (panel == 0xFFFFFFFFu)
+					panel = active;
 			}
-			u32 panel = 0xFFFFFFFFu;
-			u32 active = host.tree.panelAt(local);
-			if (active != 0xFFFFFFFFu) panel = dockTabAt(host, active, local);
-			if (panel == 0xFFFFFFFFu) panel = active;
 			if (panel >= m_nodes.size() || !m_nodes[panel].dockPanel || m_nodes[panel].disabled || m_nodes[panel].dockClosed) continue;
 			const Rect panelBounds = host.tree.panelBounds(panel);
-			if (host.tree.floating(panel) && host.tree.raiseFloating(panel)) {
-				updateDockHostLayout(host);
-				addDockDamage(host);
-			}
 			const f32 headerHeight = std::min(panelBounds.h, hostNode.dockHeaderHeight);
 			const Rect header{ panelBounds.x, panelBounds.y, panelBounds.w, headerHeight };
 			if (!header.contains(local)) continue;
@@ -2270,7 +3104,10 @@ namespace xui {
 	bool UiRuntime::pointInsideScrollAncestors(u32 index, Vec2 point) const {
 		if (index >= m_nodes.size()) return false;
 		for (u32 parent = m_nodes[index].parentIndex; parent != 0xFFFFFFFFu && parent < m_nodes.size(); parent = m_nodes[parent].parentIndex)
-			if (m_nodes[parent].scrollView && !m_layout.absRect(m_nodes[parent].layout).contains(inverseTransformPoint(m_nodes[parent].paintTransform, point))) return false;
+			if ((m_nodes[parent].scrollView || clipsOverflow(m_nodes[parent].style, *m_strings)) &&
+				!m_layout.absRect(m_nodes[parent].layout)
+					 .contains(inverseTransformPoint(m_nodes[parent].paintTransform, point)))
+				return false;
 			else if (m_nodes[parent].dockPanel) {
 				const DockHostState* host = dockHostForPanel(parent);
 				if (!host || host->node >= m_nodes.size()) return false;
@@ -2287,7 +3124,7 @@ namespace xui {
 		if (index >= m_nodes.size() || !m_nodes[index].scrollView) return false;
 		Node& node = m_nodes[index];
 		const Vec2 before = m_layout.scrollOffset(node.layout);
-		if (smooth) {
+		if (smooth && !m_reducedMotion) {
 			const Vec2 content = m_layout.contentSize(node.layout);
 			const Rect rect = m_layout.rect(node.layout);
 			node.scrollTarget = { std::clamp(offset.x, 0.f, std::max(0.f, content.x - rect.w)), std::clamp(offset.y, 0.f, std::max(0.f, content.y - rect.h)) };
@@ -2344,10 +3181,23 @@ namespace xui {
 
 	void UiRuntime::addDamage(Rect rect) {
 		if (rect.empty()) return;
+		if (m_updateDepth)
+			m_updateChanged = true;
 		if (!m_hasDamage) { m_damage = rect; m_hasDamage = true; return; }
 		const f32 left = std::min(m_damage.x, rect.x), top = std::min(m_damage.y, rect.y);
 		const f32 right = std::max(m_damage.right(), rect.right()), bottom = std::max(m_damage.bottom(), rect.bottom());
 		m_damage = { left, top, right - left, bottom - top };
+	}
+
+	bool UiRuntime::endUpdate() {
+		if (!m_updateDepth)
+			return false;
+		--m_updateDepth;
+		if (m_updateDepth)
+			return false;
+		const bool changed = m_updateChanged || m_hasDamage;
+		m_updateChanged = false;
+		return changed;
 	}
 
 	void UiRuntime::applyLayoutStyle(Node& node) {
@@ -2390,26 +3240,32 @@ namespace xui {
 		}
 		if (node.style.has(PropId::Grow)) layoutStyle.grow = number(node.style.get(PropId::Grow), 0);
 		if (node.style.has(PropId::Shrink)) layoutStyle.shrink = number(node.style.get(PropId::Shrink), 0, 1);
-		if (node.style.has(PropId::Align)) layoutStyle.alignItems = align(node.style.get(PropId::Align).atoms[0]);
+		// `align` doubles as the inherited text alignment, so a container may carry an
+		// ancestor's value in its style table. Layout alignment is not inherited: applying
+		// that copy here would make a Grid nested under `Column.page { align: Start }`
+		// start-align its cells instead of stretching them across their tracks.
+		constexpr u8 kInheritedAlign = u8{1} << 4; // index in the inherited text-prop list
+		if (node.style.has(PropId::Align) && !(node.inheritedTextMask & kInheritedAlign))
+			layoutStyle.alignItems = align(node.style.get(PropId::Align).atoms[0]);
 		if (node.style.has(PropId::Justify)) layoutStyle.justify = justify(node.style.get(PropId::Justify).atoms[0]);
 		m_layout.setStyle(node.layout, layoutStyle);
 	}
 
 	void UiRuntime::paint(Painter& painter, f32 dpiScale) {
-		m_paintDockPanelScope = false; m_paintDockPanel = 0xFFFFFFFFu;
-		paintImpl(painter, dpiScale);
+		paintImpl(painter, dpiScale, {});
 	}
 
 	void UiRuntime::paintDockPanel(Painter& painter, f32 dpiScale, std::string_view panelId) {
-		m_paintDockPanel = 0xFFFFFFFFu;
+		PaintScope scope;
 		for (u32 i = 0; i < m_nodes.size(); ++i)
-			if (m_nodes[i].dockPanel && m_nodes[i].id.v && m_strings->view(m_nodes[i].id) == panelId) { m_paintDockPanel = i; break; }
-		m_paintDockPanelScope = m_paintDockPanel != 0xFFFFFFFFu;
-		paintImpl(painter, dpiScale);
-		m_paintDockPanelScope = false; m_paintDockPanel = 0xFFFFFFFFu;
+			if (m_nodes[i].dockPanel && m_nodes[i].id.v && m_strings->view(m_nodes[i].id) == panelId) {
+				scope.dockPanel = i;
+				break;
+			}
+		paintImpl(painter, dpiScale, scope);
 	}
 
-	void UiRuntime::paintImpl(Painter& painter, f32 dpiScale) {
+	void UiRuntime::paintImpl(Painter& painter, f32 dpiScale, PaintScope scope) {
 		if (!m_root.valid()) return;
 		const f32 requestedDpiScale = std::max(0.25f, dpiScale);
 		if (requestedDpiScale != m_dpiScale) {
@@ -2426,16 +3282,13 @@ namespace xui {
 				m_fpsValue = static_cast<f32>(m_fpsFrames / m_fpsElapsed);
 				m_frameTimeMs = m_fpsFrames ? static_cast<f32>(m_fpsElapsed * 1000.0 / m_fpsFrames) : 0.f;
 				for (Node& fps : m_nodes) if (fps.fpsCounter) {
-					char value[80];
-					if (m_drawBatchCounterEnabled && m_fpsEnabled)
-						std::snprintf(value, sizeof(value), "FPS: %.0f | %.1f ms | Batches: %u", double(m_fpsValue), double(m_frameTimeMs), m_drawBatchCount);
-					else if (m_drawBatchCounterEnabled)
-						std::snprintf(value, sizeof(value), "Batches: %u", m_drawBatchCount);
-					else if (fps.showFrameTime) std::snprintf(value, sizeof(value), "FPS: %.0f | %.1f ms", double(m_fpsValue), double(m_frameTimeMs));
-					else std::snprintf(value, sizeof(value), "FPS: %.0f", double(m_fpsValue));
-					if (fps.text == value) continue;
-					fps.text = value;
-					m_layout.markContentChanged(fps.layout);
+						char value[96];
+						formatFpsOverlay(value, sizeof(value), m_fpsEnabled, m_drawBatchCounterEnabled, m_fpsValue,
+										 m_frameTimeMs, m_drawBatchCount, m_clipShapeCapFallbacks, fps.showFrameTime);
+						if (fps.text == value)
+							continue;
+						fps.text = value;
+						m_layout.markContentChanged(fps.layout);
 				}
 				m_fpsElapsed = 0;
 				m_fpsFrames = 0;
@@ -2444,10 +3297,13 @@ namespace xui {
 		m_fpsLastFrame = now;
 		if (m_drawBatchCounterEnabled) {
 			for (Node& fps : m_nodes) if (fps.fpsCounter) {
-				char value[80];
-				if (m_fpsEnabled) std::snprintf(value, sizeof(value), "FPS: %.0f | %.1f ms | Batches: %u", double(m_fpsValue), double(m_frameTimeMs), m_drawBatchCount);
-				else std::snprintf(value, sizeof(value), "Batches: %u", m_drawBatchCount);
-				if (fps.text != value) { fps.text = value; m_layout.markContentChanged(fps.layout); }
+					char value[96];
+					formatFpsOverlay(value, sizeof(value), m_fpsEnabled, m_drawBatchCounterEnabled, m_fpsValue,
+									 m_frameTimeMs, m_drawBatchCount, m_clipShapeCapFallbacks, fps.showFrameTime);
+					if (fps.text != value) {
+						fps.text = value;
+						m_layout.markContentChanged(fps.layout);
+					}
 			}
 		}
 		auto drawLabel = [&](std::string_view text, Rect rect, FontHandle fontHandle, const PropTable& style,
@@ -2458,7 +3314,11 @@ namespace xui {
 				const Font* font = m_text->font(fontHandle); if (!font || run.glyphs.empty()) return;
 				m_glyphScratch.clear();
 				for (const ShapedGlyph& shaped : run.glyphs) {
-					const AtlasGlyph glyph = m_text->atlas()->glyph(*font, shaped.glyph, static_cast<u16>(std::clamp(std::lround(size), 1l, 65535l)));
+					const Font* glyphFont = m_text->font(shaped.font.valid() ? shaped.font : fontHandle);
+					if (!glyphFont)
+						continue;
+					const AtlasGlyph glyph = m_text->atlas()->glyph(
+						*glyphFont, shaped.glyph, static_cast<u16>(std::clamp(std::lround(size), 1l, 65535l)));
 					const f32 scale = 1.f / m_dpiScale;
 					m_glyphScratch.push_back({ {shaped.x * scale + glyph.offset.x * scale, shaped.y * scale + glyph.offset.y * scale, glyph.width * scale, glyph.height * scale}, glyph.uv });
 				}
@@ -2472,6 +3332,247 @@ namespace xui {
 					{ x - run.inkLeft / m_dpiScale, y + font->baselineAt(size) / m_dpiScale }, color(style, PropId::Fg, fallback));
 				painter.popClip();
 			};
+		auto dockHostOrigin = [&](const DockHostState& host) {
+			const Rect rect = m_layout.absRect(m_nodes[host.node].layout);
+			const LayoutStyle& style = m_layout.style(m_nodes[host.node].layout);
+			return Vec2{rect.x + style.border.l + style.padding.l, rect.y + style.border.t + style.padding.t};
+		};
+		// Corner radii of a node's resolved style. Used both when painting its own background and
+		// when clipping descendants: a child may never paint past a rounded parent boundary.
+		auto nodeRadii = [&](const Node& node) {
+			if (!node.style.has(PropId::Radius))
+				return CornerRadii{};
+			const StyleValue& radius = node.style.get(PropId::Radius);
+			return CornerRadii{number(radius, 0), number(radius, 1), number(radius, 2), number(radius, 3)};
+		};
+		auto drawDockChrome = [&](const Node& owner, StyleSetId set, Rect bounds, StateMask states,
+								  std::string_view label, f32 inset) {
+			PropTable style;
+			m_styles->resolve(set, states, m_theme, style);
+			const Color background = color(style, PropId::Bg, Color{});
+			const CornerRadii radius =
+				style.has(PropId::Radius)
+					? CornerRadii{number(style.get(PropId::Radius), 0), number(style.get(PropId::Radius), 1),
+								  number(style.get(PropId::Radius), 2), number(style.get(PropId::Radius), 3)}
+					: CornerRadii{};
+			const f32 opacity =
+				style.has(PropId::Opacity) ? std::clamp(number(style.get(PropId::Opacity), 0, 1.f), 0.f, 1.f) : 1.f;
+			const f32 textInset = style.has(PropId::Pad) ? number(style.get(PropId::Pad), 3, inset) : inset;
+			const Color foreground = color(style, PropId::Fg, color(owner.style, PropId::Fg, Color{}));
+			painter.pushOpacity(opacity);
+			if (background.a > 0.f)
+				painter.fillRect(bounds, background, radius);
+			if (style.has(PropId::Border) && style.get(PropId::Border).count >= 3) {
+				const StyleValue& border = style.get(PropId::Border);
+				const Color edge =
+					border.atoms[2].kind == AtomKind::Color ? Color::fromRGBA8(border.atoms[2].bits) : Color{};
+				painter.roundRect(bounds, RectStyle{Color{0, 0, 0, 0}, edge, number(border, 0), radius});
+			}
+			const FontHandle styledFont = selectFont(style);
+			drawLabel(label, bounds, styledFont.valid() ? styledFont : owner.font, style, foreground, textInset, false);
+			painter.popOpacity();
+		};
+		auto paintDockPanelChrome = [&](const DockHostState& host, const DockPanelLayout& panelLayout, Vec2 origin) {
+			const u32 panelIndex = panelLayout.panel;
+			if (panelIndex >= m_nodes.size())
+				return;
+			if (scope.active() && panelIndex != scope.dockPanel)
+				return;
+			const Node& panel = m_nodes[panelIndex];
+			if (!scope.active() && panel.dockNativeSurface)
+				return;
+			if (!panelLayout.active || panelLayout.bounds.empty())
+				return;
+			const Rect group = panelLayout.bounds;
+			// Pointer tracking exists only for the main window. Inside a native tear-off surface
+			// the stored position lives in a different coordinate space, so testing it would
+			// light up whatever chrome happens to sit under the main window's cursor.
+			auto pointerOver = [&](const Rect& rect) {
+				return !scope.active() && !panel.disabled && rect.contains(m_pointerPosition);
+			};
+			// The header/tab chrome is opaque, so without a rounded clip it paints square pixels
+			// over the panel body's rounded top corners.
+			painter.pushClip({origin.x + group.x, origin.y + group.y, group.w, group.h}, nodeRadii(panel));
+			const u32 count = host.tree.panelCount(panelIndex);
+			if (panelLayout.floating || count <= 1) {
+				const Rect header{origin.x + group.x, origin.y + group.y, group.w,
+								  std::min(group.h, panel.dockHeaderHeight)};
+				StateMask states =
+					stateBit(State::Resting) | (panel.disabled ? stateBit(State::Disabled) : stateBit(State::Enabled));
+				if (panelLayout.active)
+					states |= stateBit(State::Selected);
+				if (panelLayout.floating)
+					states |= stateBit(State::Floating);
+				if (pointerOver(header))
+					states |= stateBit(State::Hover);
+				if (m_dockCandidate == panelIndex)
+					states |= stateBit(State::Pressed) | stateBit(State::Dragging);
+				drawDockChrome(panel, panel.dockHeaderStyleSet, header, states, panel.text, 10.f);
+				if (panel.dockClosable || (panel.dockNativeSurface && !panel.dockNativeTitleBar)) {
+					const f32 side = header.h;
+					const Rect close{header.right() - side, header.y, side, side};
+					StateMask closeStates = stateBit(State::Resting) |
+											(panel.disabled ? stateBit(State::Disabled) : stateBit(State::Enabled));
+					if (pointerOver(close))
+						closeStates |= stateBit(State::Hover);
+					drawDockChrome(panel, panel.dockCloseStyleSet, close, closeStates, "×", 0.f);
+				}
+			} else {
+				const f32 tabWidth = group.w / f32(count);
+				for (u32 order = 0; order < count; ++order) {
+					u32 tabNode = 0xFFFFFFFFu;
+					for (u32 candidate : host.panelNodes)
+						if (host.tree.groupOf(candidate) == panelLayout.group &&
+							host.tree.panelOrder(candidate) == order) {
+							tabNode = candidate;
+							break;
+						}
+					if (tabNode >= m_nodes.size())
+						continue;
+					const Node& tab = m_nodes[tabNode];
+					const Rect bounds{origin.x + group.x + tabWidth * f32(order), origin.y + group.y, tabWidth,
+									  std::min(group.h, tab.dockHeaderHeight)};
+					StateMask states = stateBit(State::Resting) |
+									   (tab.disabled ? stateBit(State::Disabled) : stateBit(State::Enabled));
+					if (order == panelLayout.order)
+						states |= stateBit(State::Selected);
+					if (!tab.disabled && bounds.contains(m_pointerPosition))
+						states |= stateBit(State::Hover);
+					if (m_dockCandidate == tabNode)
+						states |= stateBit(State::Pressed);
+					drawDockChrome(tab, tab.dockTabStyleSet, bounds, states, tab.text,
+								   tab.dockIcon.empty() ? 8.f : 28.f);
+					if (!tab.dockIcon.empty()) {
+						PropTable iconStyle;
+						m_styles->resolve(tab.dockTabStyleSet, states, m_theme, iconStyle);
+						const FontHandle iconFont = selectFont(iconStyle);
+						drawLabel(tab.dockIcon, bounds, iconFont.valid() ? iconFont : tab.font, iconStyle,
+								  color(iconStyle, PropId::Fg, Color{}), 8.f, false);
+					}
+					if (tab.dockClosable || (tab.dockNativeSurface && !tab.dockNativeTitleBar)) {
+						const Rect close{bounds.right() - bounds.h, bounds.y, bounds.h, bounds.h};
+						StateMask closeStates = stateBit(State::Resting) |
+												(tab.disabled ? stateBit(State::Disabled) : stateBit(State::Enabled));
+						if (!tab.disabled && close.contains(m_pointerPosition))
+							closeStates |= stateBit(State::Hover);
+						drawDockChrome(tab, tab.dockCloseStyleSet, close, closeStates, "×", 0.f);
+					}
+				}
+			}
+			painter.popClip();
+		};
+		auto paintScrollBarNode = [&](u32 index) {
+			Node& node = m_nodes[index];
+			if (!node.scrollView || !isNodeVisible(index) || node.scrollBarVisibility == 2)
+				return;
+			struct ScrollbarClipScope {
+				Painter& painter;
+				u32 count = 0;
+				~ScrollbarClipScope() {
+					while (count--)
+						painter.popClip();
+				}
+			} scrollbarClips{painter};
+			for (u32 parent = node.parentIndex; parent != 0xFFFFFFFFu && parent < m_nodes.size();
+				 parent = m_nodes[parent].parentIndex)
+				if (m_nodes[parent].scrollView) {
+					painter.pushClip(m_layout.absRect(m_nodes[parent].layout), nodeRadii(m_nodes[parent]));
+					++scrollbarClips.count;
+				}
+			// Keep the track/thumb inside the scroll view's own rounded corners.
+			const Rect scrollRect = m_layout.absRect(node.layout);
+			const CornerRadii scrollRadii = nodeRadii(node);
+			if (scrollRadii.any()) {
+				painter.pushClip(scrollRect, scrollRadii);
+				++scrollbarClips.count;
+			}
+			const bool always = node.scrollBarVisibility == 1;
+			bool pointerOverTrack = false;
+			for (bool horizontal : {false, true}) {
+				Rect track;
+				(void)scrollBarRect(index, horizontal, &track);
+				pointerOverTrack |= track.contains(m_pointerPosition);
+			}
+			const f32 opacity = always || node.hovered || node.focused || m_dragScroll == index || pointerOverTrack
+									? 1.f
+									: node.scrollBarOpacity;
+			if (opacity <= 0.f)
+				return;
+			painter.pushOpacity(opacity);
+			const f32 radius = node.style.has(PropId::Radius)
+								   ? number(node.style.get(PropId::Radius), 0, node.scrollBarSize * 0.5f)
+								   : node.scrollBarSize * 0.5f;
+			for (bool horizontal : {false, true}) {
+				Rect track;
+				const Rect thumb = scrollBarRect(index, horizontal, &track);
+				if (thumb.empty())
+					continue;
+				const Color trackColor = color(node.style, PropId::ScrollTrack, Color::fromRGBA8(0x00000030u));
+				const Color thumbColor = color(node.style, PropId::ScrollThumb, Color::fromRGBA8(0xA0A0A0C0u));
+				painter.fillRect(track, trackColor, CornerRadii::all(radius));
+				painter.fillRect(thumb, thumbColor, CornerRadii::all(radius));
+			}
+			painter.popOpacity();
+		};
+		auto paintTabsHeader = [&](u32 tabsIndex) {
+			Node& tabs = m_nodes[tabsIndex];
+			if (!tabs.tabs || !isNodeVisible(tabsIndex))
+				return;
+			const Rect bounds = m_layout.absRect(tabs.layout);
+			const u32 count = m_layout.childCount(tabs.layout);
+			if (!count)
+				return;
+			PainterTransformScope transformScope{painter, tabs.paintTransform};
+			painter.pushClip(bounds, nodeRadii(tabs));
+			u32 ordinal = 0;
+			for (NodeId child = m_layout.firstChild(tabs.layout); child.valid();
+				 child = m_layout.nextSibling(child), ++ordinal) {
+				Node& tab = m_nodes[child.index];
+				const Rect header{bounds.x + bounds.w * f32(ordinal) / f32(count), bounds.y,
+								  bounds.w * f32(ordinal + 1) / f32(count) - bounds.w * f32(ordinal) / f32(count),
+								  34.f};
+				PropTable tabStyle;
+				const StateMask state = stateBit(State::Resting) |
+										(ordinal == tabs.selectedTab ? stateBit(State::Selected) : 0) |
+										(static_cast<i32>(ordinal) == tabs.hoveredTab ? stateBit(State::Hover) : 0) |
+										(tabs.disabled ? stateBit(State::Disabled) : 0);
+				m_styles->resolve(tab.styleSet, state, m_theme, tabStyle);
+				const Color background =
+					color(tabStyle, PropId::Bg,
+						  ordinal == tabs.selectedTab ? Color::fromRGBA8(0x24334FFFu) : Color::fromRGBA8(0x151E32FFu));
+				const f32 radius = tabStyle.has(PropId::Radius) ? number(tabStyle.get(PropId::Radius), 0, 0.f) : 0.f;
+				painter.fillRect(header, background, CornerRadii::all(radius));
+				if (tabStyle.has(PropId::Border) && tabStyle.get(PropId::Border).count >= 3) {
+					const auto& border = tabStyle.get(PropId::Border);
+					const Color edge =
+						border.atoms[2].kind == AtomKind::Color ? Color::fromRGBA8(border.atoms[2].bits) : Color{};
+					painter.roundRect(header,
+									  RectStyle{Color{0, 0, 0, 0}, edge, number(border, 0), CornerRadii::all(radius)});
+				}
+				drawLabel(tab.tabTitle, header, tab.font, tabStyle, Color::fromRGBA8(0xDDE7F8FFu), 8.f, false);
+			}
+			painter.popClip();
+		};
+		// Floating panels paint as one unit: body, then their own title bar, close button,
+		// scrollbars and tabs. Emitting the chrome per group keeps it above its own body while
+		// letting a panel further front hide the title bar of the panel behind it.
+		auto paintFloatingDockOverlay = [&](u32 groupIndex) {
+			if (groupIndex >= m_dockPaintGroups.size())
+				return;
+			const DockPaintGroup& group = m_dockPaintGroups[groupIndex];
+			if (group.hostIndex >= m_dockHosts.size())
+				return;
+			const DockHostState& host = m_dockHosts[group.hostIndex];
+			const std::span<const DockPanelLayout> panels = host.tree.panels();
+			if (group.panelOrder >= panels.size())
+				return;
+			painter.setLayer(2);
+			paintDockPanelChrome(host, panels[group.panelOrder], dockHostOrigin(host));
+			for (u32 i = group.begin; i < group.end && i < m_nodes.size(); ++i) {
+				paintScrollBarNode(i);
+				paintTabsHeader(i);
+			}
+		};
 		bool spinnerActive = false;
 		for (u32 i = 0; i < m_nodes.size(); ++i)
 			if ((m_nodes[i].spinner || (m_nodes[i].progressBar && m_nodes[i].indeterminate)) && !m_nodes[i].disabled && isNodeVisible(i)) { spinnerActive = true; break; }
@@ -2518,15 +3619,93 @@ namespace xui {
 				if (m_nodes[current].dockPanel && dockPanelIsFloating(current)) return current;
 			return 0xFFFFFFFFu;
 		};
+		// Build a stable, parent-before-child paint sequence. z-index is accumulated through
+		// ancestors so a child remains in its parent's elevated stack; hit testing reuses this
+		// same sequence in reverse after the frame has painted.
+		constexpr u32 noPaintNode = 0xFFFFFFFFu;
+		const u32 nodeCount = static_cast<u32>(m_nodes.size());
+		bool paintOrderDirty = m_paintStackZScratch.size() != nodeCount || m_basePaintOrderScratch.size() != nodeCount;
+		bool treeOrderDirty = m_paintParentScratch.size() != nodeCount;
+		if (!treeOrderDirty) {
+			for (u32 index = 0; index < nodeCount; ++index)
+				if (m_paintParentScratch[index] != m_nodes[index].parentIndex) {
+					treeOrderDirty = true;
+					break;
+				}
+		}
+		paintOrderDirty |= treeOrderDirty;
+		if (treeOrderDirty) {
+			m_paintParentScratch.resize(nodeCount);
+			m_paintFirstChildScratch.assign(nodeCount, noPaintNode);
+			m_paintLastChildScratch.assign(nodeCount, noPaintNode);
+			m_paintNextSiblingScratch.assign(nodeCount, noPaintNode);
+			for (u32 index = 0; index < nodeCount; ++index) {
+				const u32 parent = m_nodes[index].parentIndex;
+				m_paintParentScratch[index] = parent;
+				if (parent >= nodeCount)
+					continue;
+				if (m_paintFirstChildScratch[parent] == noPaintNode)
+					m_paintFirstChildScratch[parent] = index;
+				else
+					m_paintNextSiblingScratch[m_paintLastChildScratch[parent]] = index;
+				m_paintLastChildScratch[parent] = index;
+			}
+		}
+		if (m_paintStackZScratch.size() != nodeCount)
+			m_paintStackZScratch.resize(nodeCount);
+		for (u32 index = 0; index < nodeCount; ++index) {
+			const Node& node = m_nodes[index];
+			const StateMask states = activeStates(node);
+			PropTable prospectiveStyle;
+			const PropTable* style = &node.style;
+			if (!node.styleResolved || node.resolvedStates != states) {
+				m_styles->resolve(node.styleSet, states, m_theme, prospectiveStyle);
+				style = &prospectiveStyle;
+			}
+			i32 localZ = style->has(PropId::ZIndex)
+							 ? static_cast<i32>(
+								   std::clamp(std::lround(number(style->get(PropId::ZIndex), 0)), -100000l, 100000l))
+							 : 0;
+			const i32 parentZ = node.parentIndex < nodeCount ? m_paintStackZScratch[node.parentIndex] : 0;
+			const i32 stackZ = std::clamp(parentZ + localZ, -1000000, 1000000);
+			if (m_paintStackZScratch[index] != stackZ)
+				paintOrderDirty = true;
+			m_paintStackZScratch[index] = stackZ;
+		}
+		if (paintOrderDirty) {
+			auto readyOrder = [](const std::pair<i32, u32>& a, const std::pair<i32, u32>& b) { return a > b; };
+			m_paintReadyScratch.clear();
+			m_basePaintOrderScratch.clear();
+			for (u32 index = 0; index < nodeCount; ++index)
+				if (m_nodes[index].parentIndex >= nodeCount) {
+					m_paintReadyScratch.emplace_back(m_paintStackZScratch[index], index);
+					std::push_heap(m_paintReadyScratch.begin(), m_paintReadyScratch.end(), readyOrder);
+				}
+			while (!m_paintReadyScratch.empty()) {
+				std::pop_heap(m_paintReadyScratch.begin(), m_paintReadyScratch.end(), readyOrder);
+				const u32 index = m_paintReadyScratch.back().second;
+				m_paintReadyScratch.pop_back();
+				m_basePaintOrderScratch.push_back(index);
+				for (u32 child = m_paintFirstChildScratch[index]; child != noPaintNode;
+					 child = m_paintNextSiblingScratch[child]) {
+					m_paintReadyScratch.emplace_back(m_paintStackZScratch[child], child);
+					std::push_heap(m_paintReadyScratch.begin(), m_paintReadyScratch.end(), readyOrder);
+				}
+			}
+		}
 		bool hasFloatingDockPanel = false;
-		if (!m_paintDockPanelScope) for (const DockHostState& host : m_dockHosts)
-			for (const DockPanelLayout& panel : host.tree.panels()) hasFloatingDockPanel |= panel.floating;
+		if (!scope.active())
+			for (const DockHostState& host : m_dockHosts)
+				for (const DockPanelLayout& panel : host.tree.panels())
+					hasFloatingDockPanel |= panel.floating;
 		const bool useDockOverlay = hasFloatingDockPanel;
+		m_dockPaintGroups.clear();
 		if (useDockOverlay) {
 			m_paintOrderScratch.clear();
-			for (u32 index = 0; index < m_nodes.size(); ++index)
+			for (u32 index : m_basePaintOrderScratch)
 				if (floatingDockPanelAncestor(index) == 0xFFFFFFFFu) m_paintOrderScratch.push_back(index);
-			for (const DockHostState& host : m_dockHosts) {
+			for (std::size_t hostIndex = 0; hostIndex < m_dockHosts.size(); ++hostIndex) {
+				const DockHostState& host = m_dockHosts[hostIndex];
 				const std::span<const DockPanelLayout> panels = host.tree.panels();
 				m_dockOrderScratch.resize(panels.size());
 				for (u32 i = 0; i < panels.size(); ++i) m_dockOrderScratch[i] = i;
@@ -2548,50 +3727,95 @@ namespace xui {
 				for (u32 panelOrder : m_dockOrderScratch) {
 					const u32 panelNode = panels[panelOrder].panel;
 					if (panelNode >= m_nodes.size() || !panels[panelOrder].floating) continue;
-					for (u32 index = panelNode; index < m_nodes.size() && floatingDockPanelAncestor(index) == panelNode; ++index)
-						m_paintOrderScratch.push_back(index);
+					const u32 begin = static_cast<u32>(m_paintOrderScratch.size());
+					for (u32 index : m_basePaintOrderScratch)
+						if (floatingDockPanelAncestor(index) == panelNode)
+							m_paintOrderScratch.push_back(index);
+					m_dockPaintGroups.push_back(
+						{static_cast<u32>(hostIndex), panelOrder, begin, static_cast<u32>(m_paintOrderScratch.size())});
 				}
 			}
 		}
-		const u32 paintCount = useDockOverlay ? static_cast<u32>(m_paintOrderScratch.size()) : static_cast<u32>(m_nodes.size());
+		if (!useDockOverlay)
+			m_paintOrderScratch = m_basePaintOrderScratch;
+		const u32 paintCount = static_cast<u32>(m_paintOrderScratch.size());
 		auto inDockPanelPaintScope = [&](u32 index) {
-			if (!m_paintDockPanelScope) return true;
+			if (!scope.active())
+				return true;
 			for (u32 current = index; current != 0xFFFFFFFFu && current < m_nodes.size(); current = m_nodes[current].parentIndex)
-				if (current == m_paintDockPanel) return true;
+				if (current == scope.dockPanel)
+					return true;
 			return false;
 		};
+		u32 nextPaintGroup = 0;
 		for (u32 paintPosition = 0; paintPosition < paintCount; ++paintPosition) {
-			const u32 nodeIndex = useDockOverlay ? m_paintOrderScratch[paintPosition] : paintPosition;
+			// A floating group's chrome is due right before the next panel body starts painting,
+			// so the body in front covers it exactly like a real window stack.
+			while (useDockOverlay && nextPaintGroup < m_dockPaintGroups.size() &&
+				   paintPosition >= m_dockPaintGroups[nextPaintGroup].begin) {
+				if (nextPaintGroup)
+					paintFloatingDockOverlay(nextPaintGroup - 1);
+				++nextPaintGroup;
+			}
+			const u32 nodeIndex = m_paintOrderScratch[paintPosition];
 			Node& node = m_nodes[nodeIndex];
-			if (!inDockPanelPaintScope(nodeIndex) || (node.fpsCounter && !m_fpsEnabled && !m_drawBatchCounterEnabled) || !isNodeVisible(nodeIndex)) continue;
+			if (!inDockPanelPaintScope(nodeIndex) || (node.fpsCounter && !m_fpsEnabled && !m_drawBatchCounterEnabled) ||
+				!isNodeVisible(nodeIndex, scope))
+				continue;
 			// Menu nodes and their virtual rows never paint in the retained pass.
 			if (node.menu || node.menuItem || (node.separator && node.parentIndex != 0xFFFFFFFFu
 				&& (m_nodes[node.parentIndex].menu || m_nodes[node.parentIndex].menuItem))) continue;
 			struct ScrollClipScope { Painter& painter; u32 count = 0; ~ScrollClipScope() { while (count--) painter.popClip(); } } scrollClips{ painter };
-			const u32 overlayPanel = m_paintDockPanelScope ? m_paintDockPanel
-				: useDockOverlay ? floatingDockPanelAncestor(nodeIndex) : 0xFFFFFFFFu;
+			const u32 overlayPanel = scope.active()	  ? scope.dockPanel
+									 : useDockOverlay ? floatingDockPanelAncestor(nodeIndex)
+													  : 0xFFFFFFFFu;
+			// Floating panel bodies live above docked content and its chrome.
+			painter.setLayer(useDockOverlay && overlayPanel != 0xFFFFFFFFu ? 2u : 0u);
 			if (overlayPanel != 0xFFFFFFFFu) {
-				painter.pushClip(m_paintDockPanelScope ? m_layout.absRect(m_nodes[overlayPanel].layout)
-					: Rect{ 0.f, 0.f, m_lastLayoutWidth, m_lastLayoutHeight });
+				// The scope itself stays a plain rect: the panel's own body is the rounded shape,
+				// so masking it again would square/darken its anti-aliased border.
+				Rect scopeClip{0.f, 0.f, m_lastLayoutWidth, m_lastLayoutHeight};
+				if (scope.active())
+					scopeClip = m_layout.absRect(m_nodes[overlayPanel].layout);
+				painter.pushClip(scopeClip);
 				++scrollClips.count;
-				for (u32 parent = node.parentIndex; parent != 0xFFFFFFFFu && parent < m_nodes.size(); parent = m_nodes[parent].parentIndex) {
-					if (parent == overlayPanel) {
-						if (nodeIndex != overlayPanel) {
-							painter.pushClip(m_layout.absRect(m_nodes[overlayPanel].layout));
-							++scrollClips.count;
-						}
-						break;
-					}
-					if (m_nodes[parent].scrollView) {
-						painter.pushClip(m_layout.absRect(m_nodes[parent].layout));
+				if (scope.active()) {
+					// A native tear-off surface contains this panel and nothing else: its ancestors
+					// live in the main window, so their scroll/rounded clips must not cut the panel.
+					if (nodeIndex != overlayPanel) {
+						const Rect panelClip = m_layout.absRect(m_nodes[overlayPanel].layout);
+						painter.pushClip(panelClip, nodeRadii(m_nodes[overlayPanel]));
 						++scrollClips.count;
 					}
+				} else {
+					for (u32 parent = node.parentIndex; parent != 0xFFFFFFFFu && parent < m_nodes.size();
+						 parent = m_nodes[parent].parentIndex) {
+						if (parent == overlayPanel) {
+							if (nodeIndex != overlayPanel) {
+								const Rect panelClip = m_layout.absRect(m_nodes[overlayPanel].layout);
+								painter.pushClip(panelClip, nodeRadii(m_nodes[overlayPanel]));
+								++scrollClips.count;
+							}
+							break;
+						}
+						const Node& ancestor = m_nodes[parent];
+						const CornerRadii radii = nodeRadii(ancestor);
+						if (ancestor.scrollView || clipsOverflow(ancestor.style, *m_strings) || radii.any()) {
+							painter.pushClip(m_layout.absRect(ancestor.layout), radii);
+							++scrollClips.count;
+						}
+					}
 				}
-			}
-			else {
+			} else {
 				for (u32 parent = node.parentIndex; parent != 0xFFFFFFFFu && parent < m_nodes.size(); parent = m_nodes[parent].parentIndex) {
-					if (m_nodes[parent].scrollView || m_nodes[parent].dockPanel) {
-						painter.pushClip(m_layout.absRect(m_nodes[parent].layout));
+					const Node& ancestor = m_nodes[parent];
+					const CornerRadii radii = nodeRadii(ancestor);
+					// Scroll containers and dock panels clip their content in both axes; any other
+					// rounded ancestor additionally masks the rounded corners so a child background
+					// can never paint past them.
+					if (ancestor.scrollView || ancestor.dockPanel || clipsOverflow(ancestor.style, *m_strings) ||
+						radii.any()) {
+						painter.pushClip(m_layout.absRect(ancestor.layout), radii);
 						++scrollClips.count;
 					}
 				}
@@ -2627,7 +3851,7 @@ namespace xui {
 			if (node.parentIndex != 0xFFFFFFFFu && node.parentIndex < nodeIndex) {
 				const PropId inherited[] = { PropId::Font, PropId::FontSize, PropId::FontWeight, PropId::Fg, PropId::Align, PropId::LetterSpacing };
 				const PropTable& parentStyle = m_nodes[node.parentIndex].style;
-				for (u8 i = 0; i < std::size(inherited); ++i) {
+				for (std::size_t i = 0; i < std::size(inherited); ++i) {
 					const PropId property = inherited[i];
 					const u64 bit = u64{ 1 } << static_cast<int>(property);
 					const bool wasInherited = (node.inheritedTextMask & u8(1u << i)) != 0;
@@ -2644,10 +3868,18 @@ namespace xui {
 			}
 			if (stateChanged) {
 				node.styleTweens.clear();
-				constexpr PropId animatable[] = { PropId::Bg, PropId::Fg, PropId::Border, PropId::Radius, PropId::Opacity, PropId::Glow, PropId::Gradient, PropId::Transform, PropId::Value };
+				// Keep this list aligned with properties whose paint path samples the resolved
+				// style every frame. Layout metrics remain excluded until tween samples can
+				// participate in retained-layout recalculation without causing stale geometry.
+				constexpr PropId animatable[] = {
+					PropId::Bg,		  PropId::Fg,		  PropId::Border,		 PropId::Outline,	PropId::Radius,
+					PropId::Opacity,  PropId::Shadow,	  PropId::Glow,			 PropId::Gradient,	PropId::Transform,
+					PropId::FontSize, PropId::FontWeight, PropId::LetterSpacing, PropId::ImageTint, PropId::Value};
 				for (const Transition& transition : m_styles->transitions(node.styleSet)) {
 					if (!(previousStates & stateBit(transition.from)) || !(states & stateBit(transition.to)) || transition.durationMs <= 0.f) continue;
 					auto addTween = [&](PropId property) {
+						if (m_reducedMotion)
+							return;
 						const u64 bit = u64{ 1 } << static_cast<int>(property);
 						if (!(previousStyle.mask & bit) || !(node.style.mask & bit)) return;
 					StyleTween tween; tween.property = property;
@@ -2657,8 +3889,10 @@ namespace xui {
 						if (!interpolateStyle(tween.from, tween.to, 0.f, probe)) return;
 						tween.start = now; tween.durationMs = transition.durationMs; tween.delayMs = transition.delayMs; tween.easing = transition.ease;
 						auto existing = std::find_if(node.styleTweens.begin(), node.styleTweens.end(), [&](const StyleTween& item) { return item.property == property; });
-						if (existing == node.styleTweens.end()) node.styleTweens.push_back(std::move(tween));
-						else *existing = std::move(tween);
+						if (existing == node.styleTweens.end())
+							node.styleTweens.push_back(tween);
+						else
+							*existing = tween;
 					};
 					if (transition.allProps) for (PropId property : animatable) addTween(property);
 					else addTween(transition.prop);
@@ -2667,8 +3901,8 @@ namespace xui {
 				// values instead of snapping when the state exits before the tween finished. The
 				// first declared transition supplies timing for properties without a matching pair.
 				const StyleValue& keep = node.style.get(PropId::AnimationKeep);
-				if (node.style.has(PropId::AnimationKeep) && keep.count && keep.atoms[0].kind == AtomKind::Ident
-					&& m_strings->view(keep.atoms[0].str()) == "until-done") {
+				if (node.style.has(PropId::AnimationKeep) && keep.count && keep.atoms[0].kind == AtomKind::Ident &&
+					m_strings->view(keep.atoms[0].str()) == "until-done" && !m_reducedMotion) {
 					const auto& declared = m_styles->transitions(node.styleSet);
 					if (!declared.empty() && declared.front().durationMs > 0.f) {
 						const Transition& timing = declared.front();
@@ -2684,7 +3918,7 @@ namespace xui {
 							StyleValue probe;
 							if (!interpolateStyle(tween.from, tween.to, 0.f, probe)) continue;
 							tween.start = now; tween.durationMs = timing.durationMs; tween.delayMs = timing.delayMs; tween.easing = timing.ease;
-							node.styleTweens.push_back(std::move(tween));
+							node.styleTweens.push_back(tween);
 						}
 					}
 				}
@@ -2692,7 +3926,7 @@ namespace xui {
 			// Declarative keyframes are sampled only while the named animation is active. Static
 			// state styles are resolved first, then animated paint properties are overlaid.
 			node.keyframeActive = false;
-			if (node.style.has(PropId::Animation) && !node.animationCancelled) {
+			if (node.style.has(PropId::Animation) && !node.animationCancelled && !m_reducedMotion) {
 				const StyleValue& animation = node.style.get(PropId::Animation);
 				if (animation.count >= 2 && animation.atoms[0].kind == AtomKind::Ident) {
 					node.keyframeCancelOverride = -1;
@@ -2794,7 +4028,7 @@ namespace xui {
 				if (interpolateStyle(it->from, it->to, t, value)) node.style.v[static_cast<int>(it->property)] = value;
 				++it;
 			}
-			node.font = selectFont(node.style);
+			updateNodeFont(node);
 			if (node.pickerEditor) continue; // picker editors paint in the popup overlay pass below
 			const Rect rect = m_layout.absRect(node.layout);
 			if (rect.empty()) continue;
@@ -2824,7 +4058,7 @@ namespace xui {
 				if (gradient.count >= 4 && gradient.atoms[0].kind == AtomKind::Ident) {
 					const std::string_view fn = m_strings->view(gradient.atoms[0].str());
 					shape.gradientKind = fn == "radial-gradient" ? 1 : fn == "conic-gradient" ? 2 : 0;
-					shape.gradientAngle = number(gradient, 1) * (shape.gradientKind == 2 ? 1.f : 1.f);
+					shape.gradientAngle = number(gradient, 1);
 					shape.gradientStopCount = static_cast<u8>(std::clamp<int>(gradient.count - 2, 2, 4));
 					for (u8 stop = 0; stop < shape.gradientStopCount; ++stop)
 						if (gradient.atoms[2 + stop].kind == AtomKind::Color) shape.gradientStops[stop] = Color::fromRGBA8(gradient.atoms[2 + stop].bits);
@@ -2937,8 +4171,21 @@ namespace xui {
 					else {
 						painter.fillRect({ trackRect.x, trackRect.y, trackRect.w * fraction, trackRect.h }, fill, CornerRadii::all(thickness * 0.5f));
 					}
-				}
-				else {
+				} else if (node.rangeSlider) {
+					const f32 thickness = std::max(3.f, rect.h * 0.16f), cy = rect.y + rect.h * .5f;
+					const f32 span = std::max(.0001f, node.maxValue - node.minValue);
+					const f32 low = std::clamp((node.rangeLow - node.minValue) / span, 0.f, 1.f),
+							  high = std::clamp((node.rangeHigh - node.minValue) / span, 0.f, 1.f);
+					painter.fillRect({rect.x, cy - thickness * .5f, rect.w, thickness}, track,
+									 CornerRadii::all(thickness * .5f));
+					painter.fillRect({rect.x + rect.w * low, cy - thickness * .5f, rect.w * (high - low), thickness},
+									 fill, CornerRadii::all(thickness * .5f));
+					const f32 diameter = std::min(rect.h, 22.f);
+					painter.fillRect({rect.x + rect.w * low - diameter * .5f, cy - diameter * .5f, diameter, diameter},
+									 fill, CornerRadii::all(diameter * .5f));
+					painter.fillRect({rect.x + rect.w * high - diameter * .5f, cy - diameter * .5f, diameter, diameter},
+									 fill, CornerRadii::all(diameter * .5f));
+				} else {
 					const f32 thickness = std::max(3.f, rect.h * 0.16f);
 					const f32 centerY = rect.y + rect.h * 0.5f;
 					painter.fillRect({ rect.x, centerY - thickness * 0.5f, rect.w, thickness }, track, CornerRadii::all(thickness * 0.5f));
@@ -3028,8 +4275,9 @@ namespace xui {
 				visibleTreeEntries(node, m_treeRowsScratch);
 				painter.pushClip(rect);
 				for (u32 row = 0; row < m_treeRowsScratch.size(); ++row) {
-					const Node::TreeEntry& entry = node.treeEntries[m_treeRowsScratch[row]];
-					const Rect rowRect{ left, top + rowHeight * f32(row), std::max(0.f, right - left), rowHeight };
+					const Node::TreeEntry& entry = payload(node).treeEntries[m_treeRowsScratch[row]];
+					const Rect rowRect{left, top + rowHeight * f32(row) - m_layout.scrollOffset(node.layout).y,
+									   std::max(0.f, right - left), rowHeight};
 					const bool selected = entry.path == node.treeSelection;
 					const bool hovered = static_cast<i32>(row) == node.treeHover;
 					if (selected || hovered) painter.fillRect(rowRect, ink.withAlpha(selected ? 0.14f : 0.07f), CornerRadii::all(3.f));
@@ -3049,6 +4297,80 @@ namespace xui {
 				}
 				painter.popClip();
 				painter.popOpacity(); continue;
+			}
+			if (node.table) {
+				const LayoutStyle& layout = m_layout.style(node.layout);
+				const f32 left = rect.x + layout.border.l + layout.padding.l,
+						  top = rect.y + layout.border.t + layout.padding.t;
+				const f32 width =
+					std::max(0.f, rect.w - layout.border.l - layout.border.r - layout.padding.l - layout.padding.r);
+				const f32 headerH = 30.f, rowH = 26.f;
+				const auto& columns = payload(node).tableColumns;
+				const u32 rowCount = listItemCount(node);
+				const f32 scale = 1.f;
+				const Color ink = color(node.style, PropId::Fg, Color::fromRGBA8(0x242424FFu));
+				const Color accent = color(node.style, PropId::Border, Color::fromRGBA8(0x60A5FAFFu));
+				painter.pushClip(rect);
+				painter.fillRect({left, top, width, headerH}, ink.withAlpha(.08f));
+				f32 x = left;
+				for (u32 col = 0; col < columns.size(); ++col) {
+					const f32 colW = payload(node).tableColumnWidths[col] * scale;
+					drawLabel(columns[col], {x + 8.f, top, colW - 12.f, headerH}, node.font, node.style, ink, 0.f,
+							  false);
+					painter.line({x + colW, top + 4.f}, {x + colW, top + headerH - 4.f}, 2.f, accent.withAlpha(.5f));
+					x += colW;
+				}
+				const i32 first = std::max(0, static_cast<i32>(std::floor(node.tableScrollY / rowH)));
+				const i32 last =
+					std::min<i32>(static_cast<i32>(rowCount),
+								  first + static_cast<i32>(std::ceil(std::max(0.f, rect.h - headerH) / rowH)) + 1);
+				for (i32 row = first; row < last; ++row) {
+					const f32 y = top + headerH + rowH * f32(row) - node.tableScrollY;
+					if (row == node.tableSelectedRow || row == node.treeHover)
+						painter.fillRect({left, y, width, rowH},
+										 ink.withAlpha(row == node.tableSelectedRow ? .14f : .07f));
+					x = left;
+					for (u32 col = 0; col < columns.size(); ++col) {
+						const f32 colW = payload(node).tableColumnWidths[col] * scale;
+						std::string value;
+						if (tableCellText(node, static_cast<u32>(row), col, value))
+							drawLabel(value, {x + 8.f, y, colW - 12.f, rowH}, node.font, node.style, ink, 0.f, false);
+						x += colW;
+					}
+				}
+				painter.popClip();
+				painter.popOpacity();
+				continue;
+			}
+			if (node.listView) {
+				const LayoutStyle& layout = m_layout.style(node.layout);
+				const f32 rowHeight =
+					std::max(24.f, (node.style.has(PropId::FontSize) ? number(node.style.get(PropId::FontSize), 0, 14.f)
+																	 : 14.f) *
+									   1.8f);
+				const f32 left = rect.x + layout.border.l + layout.padding.l,
+						  top = rect.y + layout.border.t + layout.padding.t;
+				const f32 right = rect.right() - layout.border.r - layout.padding.r;
+				const Color ink = color(node.style, PropId::Fg, Color::fromRGBA8(0x242424FFu));
+				const i32 first = std::max(0, static_cast<i32>(std::floor(node.listScrollY / rowHeight)));
+				const i32 last = std::min<i32>(static_cast<i32>(listItemCount(node)),
+											   first + static_cast<i32>(std::ceil(rect.h / rowHeight)) + 1);
+				painter.pushClip(rect);
+				for (i32 row = first; row < last; ++row) {
+					const Rect rowRect{left, top + rowHeight * f32(row) - node.listScrollY, std::max(0.f, right - left),
+									   rowHeight};
+					std::string itemText;
+					if (!listItemText(node, static_cast<u32>(row), itemText))
+						continue;
+					const bool providerBacked = node.id.v && m_listItemProviders.contains(node.id);
+					const bool selected = providerBacked ? row == node.listSelectedRow : itemText == node.treeSelection;
+					if (selected || node.treeHover == row)
+						painter.fillRect(rowRect, ink.withAlpha(selected ? 0.14f : 0.07f), CornerRadii::all(3.f));
+					drawLabel(itemText, rowRect, node.font, node.style, ink, 8.f, false);
+				}
+				painter.popClip();
+				painter.popOpacity();
+				continue;
 			}
 			if (node.spinner) {
 				const Color tick = color(node.style, PropId::Fg, Color::fromRGBA8(0x60A5FAFFu));
@@ -3141,7 +4463,8 @@ namespace xui {
 					}
 					const f32 radius = node.style.has(PropId::Radius) ? number(node.style.get(PropId::Radius), 0) : 0.f;
 					painter.pushClip(rect);
-					painter.image(node.imageTexture, dst, uv, Color{ 1, 1, 1, 1 }, CornerRadii::all(radius));
+					const Color tint = color(node.style, PropId::ImageTint, Color{1, 1, 1, 1});
+					painter.image(node.imageTexture, dst, uv, tint, CornerRadii::all(radius));
 					painter.popClip();
 				}
 				else {
@@ -3161,8 +4484,9 @@ namespace xui {
 			}
 			if (node.radioGroup) {
 				const Color accent = color(node.style, PropId::Fg, Color::fromRGBA8(0x60A5FAFFu));
-				const f32 rowHeight = node.options.empty() ? rect.h : rect.h / f32(node.options.size());
-				for (u32 i = 0; i < node.options.size(); ++i) {
+				const f32 rowHeight =
+					payload(node).options.empty() ? rect.h : rect.h / f32(payload(node).options.size());
+				for (u32 i = 0; i < payload(node).options.size(); ++i) {
 					// Row-local hover highlight; the control's own :hover style still applies to the whole group.
 					if (static_cast<i32>(i) == node.hoveredOption && !node.disabled)
 						painter.fillRect({ rect.x, rect.y + rowHeight * f32(i), rect.w, rowHeight }, accent.withAlpha(0.08f), CornerRadii::all(2.f));
@@ -3178,21 +4502,23 @@ namespace xui {
 						const f32 dot = diameter * 0.45f;
 						painter.fillRect({ ring.x + (diameter - dot) * 0.5f, cy - dot * 0.5f, dot, dot }, accent, CornerRadii::all(dot * 0.5f));
 					}
-					drawLabel(node.options[i], { rect.x, rect.y + rowHeight * f32(i), rect.w, rowHeight }, node.font, node.style, accent, 26.f, false);
+					drawLabel(payload(node).options[i], {rect.x, rect.y + rowHeight * f32(i), rect.w, rowHeight},
+							  node.font, node.style, accent, 26.f, false);
 				}
 				painter.popOpacity(); continue;
 			}
 			if (node.segmented) {
 				const Color accent = color(node.style, PropId::Fg, Color::fromRGBA8(0x4772B3FFu));
-				const f32 segmentWidth = node.options.empty() ? rect.w : rect.w / f32(node.options.size());
-				for (u32 i = 0; i < node.options.size(); ++i) {
+				const f32 segmentWidth =
+					payload(node).options.empty() ? rect.w : rect.w / f32(payload(node).options.size());
+				for (u32 i = 0; i < payload(node).options.size(); ++i) {
 					const Rect cell{ rect.x + segmentWidth * f32(i), rect.y, segmentWidth, rect.h };
 					RectStyle cellStyle;
 					cellStyle.radius = CornerRadii::all(4.f);
 					if (i == node.selectedOption) { cellStyle.fill = accent; cellStyle.border = accent; cellStyle.borderWidth = 1.f; }
 					else if (static_cast<i32>(i) == node.hoveredOption && !node.disabled) { cellStyle.fill = accent.withAlpha(0.2f); }
 					if (cellStyle.fill.a > 0 || cellStyle.borderWidth > 0) painter.roundRect(cell, cellStyle);
-					drawLabel(node.options[i], cell, node.font, node.style,
+					drawLabel(payload(node).options[i], cell, node.font, node.style,
 						i == node.selectedOption ? Color::fromRGBA8(0xFFFFFFFFu) : accent, 6.f, false);
 				}
 				painter.popOpacity(); continue;
@@ -3238,14 +4564,19 @@ namespace xui {
 				const Color accent = color(node.style, PropId::Fg, Color::fromRGBA8(0xD1D1D1FFu));
 				const f32 fontSize = node.style.has(PropId::FontSize) ? number(node.style.get(PropId::FontSize), 0, 14) : 14.f;
 				f32 x = rect.x;
-				for (u32 i = 0; i < node.options.size(); ++i) {
-					const f32 width = m_text && node.font.valid() ? m_text->layout(node.font, node.options[i], fontSize * m_dpiScale, 0.f).width / m_dpiScale : 0.f;
+				for (u32 i = 0; i < payload(node).options.size(); ++i) {
+					const f32 width =
+						m_text && node.font.valid()
+							? m_text->layout(node.font, payload(node).options[i], fontSize * m_dpiScale, 0.f).width /
+								  m_dpiScale
+							: 0.f;
 					if (static_cast<i32>(i) == node.hoveredOption && !node.disabled)
 						painter.fillRect({ x, rect.y, width + 8.f, rect.h }, accent.withAlpha(0.1f), CornerRadii::all(3.f));
-					drawLabel(node.options[i], { x, rect.y, width + 12.f, rect.h }, node.font, node.style,
-						i == node.selectedOption ? color(node.style, PropId::Border, accent) : accent, 0.f, false);
+					drawLabel(payload(node).options[i], {x, rect.y, width + 12.f, rect.h}, node.font, node.style,
+							  i == node.selectedOption ? color(node.style, PropId::Border, accent) : accent, 0.f,
+							  false);
 					x += width + 8.f;
-					if (i + 1 < node.options.size()) {
+					if (i + 1 < payload(node).options.size()) {
 						drawLabel("›", { x, rect.y, 12.f, rect.h }, node.font, node.style, accent.withAlpha(0.55f), 0.f, false);
 						x += 14.f;
 					}
@@ -3311,12 +4642,18 @@ namespace xui {
 				visualText = visualizeWhitespace(node.text);
 				displayText = visualText;
 			}
-			// Caret and selection prefixes must be measured through the same substitution as the
-			// displayed glyphs, or the caret would drift from the drawn characters.
-			auto caretPrefixText = [&](std::size_t byteOffset) {
-				const std::string raw(node.text.data(), std::min(byteOffset, node.text.size()));
-				return (m_showWhitespace && (node.textBox || node.textArea) && !node.password) ? visualizeWhitespace(raw) : raw;
-				};
+			std::string composingText;
+			if (!node.imePreedit.empty() && (node.textBox || node.textArea || node.pickerEditor) && node.focused &&
+				!node.password) {
+				const std::size_t begin = std::min(node.caret, node.selectionAnchor);
+				const std::size_t end = std::max(node.caret, node.selectionAnchor);
+				composingText.assign(node.text.data(), begin);
+				composingText += node.imePreedit;
+				composingText.append(node.text.data() + end, node.text.size() - end);
+				if (m_showWhitespace && !node.pickerEditor)
+					composingText = visualizeWhitespace(composingText);
+				displayText = composingText;
+			}
 			const bool drawCaret = (node.textBox || node.textArea) && node.focused && !node.disabled && !node.readOnly;
 			if (displayText.empty() && !drawCaret) { painter.popOpacity(); continue; }
 
@@ -3339,26 +4676,64 @@ namespace xui {
 			const f32 contentWidth = std::max(0.f, rect.w - textLeft - textRight - checkOffset);
 			const f32 wrapWidth = node.textBox ? 0.f : contentWidth * m_dpiScale;
 			const TextLayout& run = m_text->layout(node.font, displayText, rasterSize, wrapWidth);
+			const bool visualEditorText =
+				m_showWhitespace && (node.textBox || node.textArea) && !placeholderText && node.imePreedit.empty();
+			const std::string_view editorText = visualEditorText ? displayText : std::string_view(node.text);
+			const TextLayout& editorLayout =
+				(node.textBox || node.textArea)
+					? m_text->layout(node.font, editorText, rasterSize, node.textArea ? wrapWidth : 0.f)
+					: run;
+			auto editorOffset = [&](std::size_t byteOffset) {
+				return visualEditorText ? visualTextOffset(node.text, byteOffset) : byteOffset;
+			};
 			const Font* font = m_text->font(node.font);
 			GlyphAtlas* atlas = m_text->atlas();
 			if (!font || !atlas->ready() || (run.glyphs.empty() && !drawCaret)) { painter.popOpacity(); continue; }
 
-			m_glyphScratch.clear();
-			if (m_glyphScratch.capacity() < run.glyphs.size()) m_glyphScratch.reserve(run.glyphs.size());
-			for (std::size_t glyphIndex = 0; glyphIndex < run.glyphs.size(); ++glyphIndex) {
-				const ShapedGlyph& shaped = run.glyphs[glyphIndex];
-				const AtlasGlyph glyph = atlas->glyph(*font, shaped.glyph, static_cast<u16>(std::clamp(std::lround(rasterSize), 1l, 65535l)));
-				const f32 scale = 1.f / m_dpiScale;
-				m_glyphScratch.push_back({ Rect{(shaped.x + glyph.offset.x) * scale + letterSpacing * static_cast<f32>(glyphIndex), (shaped.y + glyph.offset.y) * scale, glyph.width * scale, glyph.height * scale}, glyph.uv });
+			const u16 rasterSizeKey = static_cast<u16>(std::clamp(std::lround(rasterSize), 1l, 65535l));
+			const i32 wrapWidthKey = static_cast<i32>(std::lround(wrapWidth));
+			TextQuadCache& quadCache = m_textQuadCache[nodeIndex];
+			const bool cacheHit = quadCache.text == displayText && quadCache.font == node.font &&
+								  quadCache.rasterSize == rasterSizeKey && quadCache.wrapWidth == wrapWidthKey &&
+								  quadCache.dpiScale == m_dpiScale && quadCache.letterSpacing == letterSpacing &&
+								  quadCache.atlasGeneration == atlas->generation() &&
+								  quadCache.fallbackGeneration == m_text->fallbackGeneration();
+			if (!cacheHit) {
+				quadCache.text.assign(displayText);
+				quadCache.font = node.font;
+				quadCache.rasterSize = rasterSizeKey;
+				quadCache.wrapWidth = wrapWidthKey;
+				quadCache.dpiScale = m_dpiScale;
+				quadCache.letterSpacing = letterSpacing;
+				quadCache.atlasGeneration = atlas->generation();
+				quadCache.fallbackGeneration = m_text->fallbackGeneration();
+				quadCache.quads.clear();
+				if (quadCache.quads.capacity() < run.glyphs.size())
+					quadCache.quads.reserve(run.glyphs.size());
+				for (std::size_t glyphIndex = 0; glyphIndex < run.glyphs.size(); ++glyphIndex) {
+					const ShapedGlyph& shaped = run.glyphs[glyphIndex];
+					const Font* glyphFont = m_text->font(shaped.font.valid() ? shaped.font : node.font);
+					if (!glyphFont)
+						continue;
+					const AtlasGlyph glyph = atlas->glyph(*glyphFont, shaped.glyph, rasterSizeKey);
+					const f32 scale = 1.f / m_dpiScale;
+					quadCache.quads.push_back(
+						{Rect{(shaped.x + glyph.offset.x) * scale + letterSpacing * static_cast<f32>(glyphIndex),
+							  (shaped.y + glyph.offset.y) * scale, glyph.width * scale, glyph.height * scale},
+						 glyph.uv});
+				}
+				quadCache.atlasGeneration = atlas->generation();
 			}
 			f32 x = rect.x;
 			const f32 padLeft = textPadding.l;
 			const f32 padRight = textPadding.r;
-			const f32 spacingWidth = letterSpacing * static_cast<f32>(run.glyphs.size() > 0 ? run.glyphs.size() - 1 : 0);
+			const f32 spacingWidth = letterSpacing * static_cast<f32>(!run.glyphs.empty() ? run.glyphs.size() - 1 : 0);
 			const f32 runWidth = run.width / m_dpiScale + spacingWidth;
 			const f32 advanceWidth = run.advanceWidth / m_dpiScale + spacingWidth;
 			const f32 runHeight = run.height / m_dpiScale;
-			const f32 baseline = rect.y + padTop + std::max(0.f, (rect.h - padTop - padBottom - runHeight) * 0.5f) + font->baselineAt(rasterSize) / m_dpiScale;
+			const f32 textScrollOffsetY = node.textArea ? node.textScrollY : 0.f;
+			const f32 baseline = rect.y + padTop + std::max(0.f, (rect.h - padTop - padBottom - runHeight) * 0.5f) +
+								 font->baselineAt(rasterSize) / m_dpiScale - textScrollOffsetY;
 			const Align textAlign = node.style.has(PropId::Align) ? align(node.style.get(PropId::Align).atoms[0]) : Align::Start;
 			const bool textCenter = node.button || node.toggleButton || (!node.checkItem && textAlign == Align::Center);
 			if (node.checkItem || node.checkBox || node.switchToggle) x += textLeft + checkOffset;
@@ -3368,8 +4743,8 @@ namespace xui {
 			else if (!node.checkItem && textAlign == Align::End) x += rect.w - runWidth - padRight;
 			else x += padLeft;
 			if (node.textBox && !placeholderText && node.focused) {
-				const TextLayout& caretRun = m_text->layout(node.font, caretPrefixText(node.caret), rasterSize, 0.f);
-				const f32 caretPosition = caretRun.advanceWidth / m_dpiScale;
+				const f32 caretPosition =
+					editorLayout.caretAt(static_cast<u32>(editorOffset(node.caret))).x / m_dpiScale;
 				x = rect.x + textLeft - std::clamp(caretPosition - contentWidth, 0.f, std::max(0.f, advanceWidth - contentWidth));
 			}
 			else if (node.textArea || node.textBox) x = rect.x + textLeft;
@@ -3379,27 +4754,24 @@ namespace xui {
 			if ((node.textBox || node.textArea) && node.focused && node.caret != node.selectionAnchor && !placeholderText) {
 				const std::size_t begin = std::min(node.caret, node.selectionAnchor);
 				const std::size_t end = std::max(node.caret, node.selectionAnchor);
-				auto caretAt = [&](std::size_t byteOffset) {
-					const std::string prefixText = caretPrefixText(byteOffset);
-					const TextLayout& prefix = m_text->layout(node.font, prefixText, rasterSize, node.textArea ? contentWidth * m_dpiScale : 0.f);
-					const u32 line = prefix.lineStarts.empty() ? 0u : static_cast<u32>(prefix.lineStarts.size() - 1);
-					const u32 lineFirst = prefix.lineStarts.empty() ? 0u : prefix.lineStarts.back();
-					const f32 cx = prefix.lineWidths.empty() ? 0.f : prefix.lineWidths.back() / m_dpiScale;
-					(void)lineFirst;
-					return std::pair<u32, f32>{line, cx};
-					};
-				const auto [firstLine, firstX] = caretAt(begin);
-				const auto [lastLine, lastX] = caretAt(end);
+				const TextCaretStop first = editorLayout.caretAt(static_cast<u32>(editorOffset(begin)));
+				const TextCaretStop last = editorLayout.caretAt(static_cast<u32>(editorOffset(end)));
+				const u32 firstLine = first.line, lastLine = last.line;
+				const f32 firstX = first.x / m_dpiScale, lastX = last.x / m_dpiScale;
 				const f32 lineHeight = std::max(fontSize, font->lineHeight(rasterSize) / m_dpiScale);
-				const f32 textTop = rect.y + padTop + std::max(0.f, (rect.h - padTop - padBottom - runHeight) * 0.5f);
+				const f32 textTop = rect.y + padTop + std::max(0.f, (rect.h - padTop - padBottom - runHeight) * 0.5f) -
+									textScrollOffsetY;
 				for (u32 line = firstLine; line <= lastLine; ++line) {
-					const f32 left = line == firstLine ? firstX : 0.f;
-					const f32 right = line == lastLine ? lastX : contentWidth;
+					const f32 left = firstLine == lastLine ? std::min(firstX, lastX) : line == firstLine ? firstX : 0.f;
+					const f32 right = firstLine == lastLine ? std::max(firstX, lastX)
+									  : line == lastLine	? lastX
+															: contentWidth;
 					painter.fillRect({ glyphOriginX + left, textTop + f32(line) * lineHeight, std::max(2.f, right - left), lineHeight }, fg.withAlpha(0.28f));
 				}
 			}
-			if (!m_glyphScratch.empty())
-				painter.glyphRun(atlas->texture(), m_glyphScratch.data(), static_cast<u32>(m_glyphScratch.size()), { glyphOriginX, baseline }, fg);
+			if (!quadCache.quads.empty())
+				painter.glyphRun(atlas->texture(), quadCache.quads.data(), static_cast<u32>(quadCache.quads.size()),
+								 {glyphOriginX, baseline}, fg);
 			if (node.searchField && !node.text.empty()) {
 				const Rect clearRect = searchClearRect(node);
 				const Color mark = fg.withAlpha(0.7f);
@@ -3408,208 +4780,91 @@ namespace xui {
 				painter.line({ clearRect.right() - inset, clearRect.y + inset }, { clearRect.x + inset, clearRect.bottom() - inset }, 1.2f, mark);
 			}
 			if ((node.textBox || node.textArea) && node.focused && !node.disabled && !node.readOnly && m_caretVisible) {
-				const std::string prefix = caretPrefixText(node.caret);
-				const TextLayout& caretRun = m_text->layout(node.font, prefix, rasterSize, node.textArea ? contentWidth * m_dpiScale : 0.f);
-				f32 caretX = 0.f, caretY = 0.f;
-				if (!caretRun.lineWidths.empty()) caretX = caretRun.lineWidths.back() / m_dpiScale;
-				if (!caretRun.lineStarts.empty()) caretY = f32(caretRun.lineStarts.size() - 1) * caretRun.lineHeight / m_dpiScale;
+				const TextCaretStop caret = editorLayout.caretAt(static_cast<u32>(editorOffset(node.caret)));
+				f32 caretX = caret.x / m_dpiScale, caretY = f32(caret.line) * editorLayout.lineHeight / m_dpiScale;
 				if (node.textBox) {
-					const f32 caretPosition = caretRun.advanceWidth / m_dpiScale;
+					const f32 caretPosition = caret.x / m_dpiScale;
 					const f32 offset = std::clamp(caretPosition - contentWidth, 0.f, std::max(0.f, advanceWidth - contentWidth));
 					caretX = caretPosition - offset;
 				}
-				const f32 y = rect.y + padTop + std::max(0.f, (rect.h - padTop - padBottom - runHeight) * 0.5f) + caretY;
+				const f32 y = rect.y + padTop + std::max(0.f, (rect.h - padTop - padBottom - runHeight) * 0.5f) +
+							  caretY - textScrollOffsetY;
 				painter.line({ glyphOriginX + caretX, y + 1.f }, { glyphOriginX + caretX, y + std::max(2.f, fontSize - 1.f) }, 1.f, fg);
 			}
 			painter.popClip();
 			painter.popOpacity();
 		}
 
-		// Tabs and popups render after the retained tree, so their chrome stays above page content.
+		// Finish any floating panel whose body ended the retained pass (the last group).
+		if (useDockOverlay)
+			for (u32 group = nextPaintGroup ? nextPaintGroup - 1 : 0; group < m_dockPaintGroups.size(); ++group)
+				paintFloatingDockOverlay(group);
+		// Docked overlays render after the retained tree, so their chrome stays above page content.
 		painter.setLayer(1);
 		for (u32 i = 0; i < m_nodes.size(); ++i) {
-			Node& node = m_nodes[i];
-			if (!node.scrollView || !isNodeVisible(i) || node.scrollBarVisibility == 2) continue;
-			struct ScrollbarClipScope { Painter& painter; u32 count = 0; ~ScrollbarClipScope() { while (count--) painter.popClip(); } } scrollbarClips{ painter };
-			for (u32 parent = node.parentIndex; parent != 0xFFFFFFFFu && parent < m_nodes.size(); parent = m_nodes[parent].parentIndex)
-				if (m_nodes[parent].scrollView) { painter.pushClip(m_layout.absRect(m_nodes[parent].layout)); ++scrollbarClips.count; }
-			const bool always = node.scrollBarVisibility == 1;
-			const f32 radius = node.style.has(PropId::Radius) ? number(node.style.get(PropId::Radius), 0, node.scrollBarSize * 0.5f) : node.scrollBarSize * 0.5f;
-			for (bool horizontal : { false, true }) {
-				Rect track;
-				const Rect thumb = scrollBarRect(i, horizontal, &track);
-				if (thumb.empty()) continue;
-				if (!always && !node.hovered && !node.focused) continue;
-				const Color trackColor = color(node.style, PropId::ScrollTrack, Color::fromRGBA8(0x00000030u));
-				const Color thumbColor = color(node.style, PropId::ScrollThumb, Color::fromRGBA8(0xA0A0A0C0u));
-				painter.fillRect(track, trackColor, CornerRadii::all(radius));
-				painter.fillRect(thumb, thumbColor, CornerRadii::all(radius));
-			}
+			if (useDockOverlay && floatingDockPanelAncestor(i) != 0xFFFFFFFFu)
+				continue;
+			paintScrollBarNode(i);
 		}
 		for (u32 tabsIndex = 0; tabsIndex < m_nodes.size(); ++tabsIndex) {
-			Node& tabs = m_nodes[tabsIndex];
-			if (!tabs.tabs || !isNodeVisible(tabsIndex)) continue;
-			const Rect bounds = m_layout.absRect(tabs.layout);
-			const u32 count = m_layout.childCount(tabs.layout);
-			if (!count) continue;
-			u32 ordinal = 0;
-			for (NodeId child = m_layout.firstChild(tabs.layout); child.valid(); child = m_layout.nextSibling(child), ++ordinal) {
-				Node& tab = m_nodes[child.index];
-				const Rect header{ bounds.x + bounds.w * f32(ordinal) / f32(count), bounds.y,
-								  bounds.w * f32(ordinal + 1) / f32(count) - bounds.w * f32(ordinal) / f32(count), 34.f };
-				PropTable tabStyle;
-				const StateMask state = stateBit(State::Resting) |
-					(ordinal == tabs.selectedTab ? stateBit(State::Selected) : 0) |
-					(header.contains(m_pointerPosition) ? stateBit(State::Hover) : 0) |
-					(tabs.disabled ? stateBit(State::Disabled) : 0);
-				m_styles->resolve(tab.styleSet, state, m_theme, tabStyle);
-				const Color background = color(tabStyle, PropId::Bg,
-					ordinal == tabs.selectedTab ? Color::fromRGBA8(0x24334FFFu) : Color::fromRGBA8(0x151E32FFu));
-				painter.fillRect(header, background);
-				if (tabStyle.has(PropId::Border) && tabStyle.get(PropId::Border).count >= 3) {
-					const auto& border = tabStyle.get(PropId::Border);
-					const Color edge = border.atoms[2].kind == AtomKind::Color ? Color::fromRGBA8(border.atoms[2].bits) : Color{};
-					painter.roundRect(header, RectStyle{ Color{0,0,0,0}, edge, number(border, 0), CornerRadii{} });
-				}
-				drawLabel(tab.tabTitle, header, tab.font, tabStyle, Color::fromRGBA8(0xDDE7F8FFu), 8.f, false);
-			}
+			if (useDockOverlay && floatingDockPanelAncestor(tabsIndex) != 0xFFFFFFFFu)
+				continue;
+			paintTabsHeader(tabsIndex);
 		}
-		// Dock chrome is a backend-neutral overlay. Every visual part resolves through .xss selectors.
-		for (const DockHostState& host : m_dockHosts) {
+		// Docked chrome is a backend-neutral overlay above page content but below floating
+		// panels. Floating chrome was emitted together with its own body in the retained pass.
+		for (u32 hostIndex = 0; hostIndex < m_dockHosts.size(); ++hostIndex) {
+			const DockHostState& host = m_dockHosts[hostIndex];
 			if (host.node >= m_nodes.size() || !isNodeVisible(host.node)) continue;
 			const Node& hostNode = m_nodes[host.node];
-			const Rect hostRect = m_layout.absRect(hostNode.layout);
-			const LayoutStyle& hostLayout = m_layout.style(hostNode.layout);
-			const Vec2 origin{ hostRect.x + hostLayout.border.l + hostLayout.padding.l,
-				hostRect.y + hostLayout.border.t + hostLayout.padding.t };
-			const auto resolvePart = [&](StyleSetId set, StateMask states, PropTable& table) {
-				m_styles->resolve(set, states, m_theme, table);
-			};
-			const auto drawChrome = [&](const Node& owner, StyleSetId set, Rect bounds, StateMask states,
-				std::string_view label, f32 inset) {
-				PropTable style;
-				resolvePart(set, states, style);
-				const Color background = color(style, PropId::Bg, Color{});
-				const CornerRadii radius = style.has(PropId::Radius)
-					? CornerRadii{ number(style.get(PropId::Radius), 0), number(style.get(PropId::Radius), 1),
-						number(style.get(PropId::Radius), 2), number(style.get(PropId::Radius), 3) }
-					: CornerRadii{};
-				const f32 opacity = style.has(PropId::Opacity) ? std::clamp(number(style.get(PropId::Opacity), 0, 1.f), 0.f, 1.f) : 1.f;
-				const f32 textInset = style.has(PropId::Pad) ? number(style.get(PropId::Pad), 3, inset) : inset;
-				const Color foreground = color(style, PropId::Fg, color(owner.style, PropId::Fg, Color{}));
-				painter.pushOpacity(opacity);
-				if (background.a > 0.f) painter.fillRect(bounds, background, radius);
-				if (style.has(PropId::Border) && style.get(PropId::Border).count >= 3) {
-					const StyleValue& border = style.get(PropId::Border);
-					const Color edge = border.atoms[2].kind == AtomKind::Color ? Color::fromRGBA8(border.atoms[2].bits) : Color{};
-					painter.roundRect(bounds, RectStyle{ Color{0,0,0,0}, edge, number(border, 0), radius });
-				}
-				const FontHandle styledFont = selectFont(style);
-				drawLabel(label, bounds, styledFont.valid() ? styledFont : owner.font, style, foreground, textInset, false);
-				painter.popOpacity();
-			};
-			const std::span<const DockPanelLayout> panels = host.tree.panels();
-			m_dockOrderScratch.resize(panels.size());
-			for (u32 i = 0; i < panels.size(); ++i) m_dockOrderScratch[i] = i;
-			auto isAfter = [&](u32 a, u32 b) {
-				const DockPanelLayout& left = panels[a];
-				const DockPanelLayout& right = panels[b];
-				if (left.floating != right.floating) return left.floating;
-					return left.floating && left.zOrder > right.zOrder;
-			};
-			for (u32 i = 1; i < m_dockOrderScratch.size(); ++i) {
-				const u32 value = m_dockOrderScratch[i];
-				u32 position = i;
-				while (position && isAfter(m_dockOrderScratch[position - 1], value)) {
-					m_dockOrderScratch[position] = m_dockOrderScratch[position - 1];
-					--position;
-				}
-				m_dockOrderScratch[position] = value;
+			const Vec2 origin = dockHostOrigin(host);
+			for (const DockPanelLayout& panelLayout : host.tree.panels()) {
+				if (panelLayout.floating && !scope.active())
+					continue;
+				paintDockPanelChrome(host, panelLayout, origin);
 			}
-			for (u32 panelOrder : m_dockOrderScratch) {
-				const DockPanelLayout& panelLayout = panels[panelOrder];
-				const u32 panelIndex = panelLayout.panel;
-				if (m_paintDockPanelScope && panelIndex != m_paintDockPanel) continue;
-				if (!m_paintDockPanelScope && panelIndex < m_nodes.size() && m_nodes[panelIndex].dockNativeSurface) continue;
-				if (!panelLayout.active || panelIndex >= m_nodes.size() || panelLayout.bounds.empty()) continue;
-				const Node& panel = m_nodes[panelIndex];
-				const Rect group = panelLayout.bounds;
-				const u32 count = host.tree.panelCount(panelIndex);
-				if (panelLayout.floating || count <= 1) {
-					const Rect header{ origin.x + group.x, origin.y + group.y, group.w,
-						std::min(group.h, panel.dockHeaderHeight) };
-					StateMask states = stateBit(State::Resting) | (panel.disabled ? stateBit(State::Disabled) : stateBit(State::Enabled));
-					if (panelLayout.active) states |= stateBit(State::Selected);
-					if (panelLayout.floating) states |= stateBit(State::Floating);
-					if (!panel.disabled && header.contains(m_pointerPosition)) states |= stateBit(State::Hover);
-					if (m_dockCandidate == panelIndex) states |= stateBit(State::Pressed) | stateBit(State::Dragging);
-					drawChrome(panel, panel.dockHeaderStyleSet, header, states, panel.text, 10.f);
-					if (panel.dockClosable || (panel.dockNativeSurface && !panel.dockNativeTitleBar)) {
-						const f32 side = header.h;
-						const Rect close{ header.right() - side, header.y, side, side };
-						StateMask closeStates = stateBit(State::Resting) | (panel.disabled ? stateBit(State::Disabled) : stateBit(State::Enabled));
-						if (!panel.disabled && close.contains(m_pointerPosition)) closeStates |= stateBit(State::Hover);
-						drawChrome(panel, panel.dockCloseStyleSet, close, closeStates, "×", 0.f);
-					}
-				}
-				else {
-					const f32 tabWidth = group.w / f32(count);
-					for (u32 order = 0; order < count; ++order) {
-						u32 tabNode = 0xFFFFFFFFu;
-						for (u32 candidate : host.panelNodes)
-							if (host.tree.groupOf(candidate) == panelLayout.group && host.tree.panelOrder(candidate) == order) { tabNode = candidate; break; }
-						if (tabNode >= m_nodes.size()) continue;
-						const Node& tab = m_nodes[tabNode];
-						const Rect bounds{ origin.x + group.x + tabWidth * f32(order), origin.y + group.y,
-							tabWidth, std::min(group.h, tab.dockHeaderHeight) };
-						StateMask states = stateBit(State::Resting) | (tab.disabled ? stateBit(State::Disabled) : stateBit(State::Enabled));
-						if (order == panelLayout.order) states |= stateBit(State::Selected);
-						if (!tab.disabled && bounds.contains(m_pointerPosition)) states |= stateBit(State::Hover);
-						if (m_dockCandidate == tabNode) states |= stateBit(State::Pressed);
-						drawChrome(tab, tab.dockTabStyleSet, bounds, states, tab.text, tab.dockIcon.empty() ? 8.f : 28.f);
-						if (!tab.dockIcon.empty()) {
-							PropTable iconStyle;
-							resolvePart(tab.dockTabStyleSet, states, iconStyle);
-							const FontHandle iconFont = selectFont(iconStyle);
-							drawLabel(tab.dockIcon, bounds, iconFont.valid() ? iconFont : tab.font, iconStyle,
-								color(iconStyle, PropId::Fg, Color{}), 8.f, false);
-						}
-						if (tab.dockClosable || (tab.dockNativeSurface && !tab.dockNativeTitleBar)) {
-							const Rect close{ bounds.right() - bounds.h, bounds.y, bounds.h, bounds.h };
-						StateMask closeStates = stateBit(State::Resting) | (tab.disabled ? stateBit(State::Disabled) : stateBit(State::Enabled));
-						if (!tab.disabled && close.contains(m_pointerPosition)) closeStates |= stateBit(State::Hover);
-						drawChrome(tab, tab.dockCloseStyleSet, close, closeStates, "×", 0.f);
-					}
-					}
-				}
-			}
-			for (u32 ordinal = 0; !m_paintDockPanelScope && ordinal < host.tree.splitterCount(); ++ordinal) {
+			for (u32 ordinal = 0; !scope.active() && ordinal < host.tree.splitterCount(); ++ordinal) {
 				const DockSplitterLayout split = host.tree.splitterAt(ordinal);
 				Rect bounds = split.bounds;
 				bounds.x += origin.x; bounds.y += origin.y;
 				StateMask states = stateBit(State::Resting) | stateBit(State::Enabled);
 				if (bounds.contains(m_pointerPosition)) states |= stateBit(State::Hover);
-				if (m_dockSplitDragging && m_dockDragHost == static_cast<u32>(&host - m_dockHosts.data()) &&
-					m_dockDragSplit == split.node) states |= stateBit(State::Pressed) | stateBit(State::Dragging);
-				drawChrome(hostNode, hostNode.dockSplitterStyleSet, bounds, states, {}, 0.f);
-			}
-			if (!m_paintDockPanelScope && m_dockPreview.valid && m_dockDragHost == static_cast<u32>(&host - m_dockHosts.data())) {
-				Rect preview = m_dockPreview.bounds;
-				preview.x += origin.x; preview.y += origin.y;
-				PropTable style;
-				resolvePart(hostNode.dockPreviewStyleSet, stateBit(State::Resting) | stateBit(State::Dragging), style);
-				const f32 radius = style.has(PropId::Radius) ? number(style.get(PropId::Radius), 0, 4.f) : 4.f;
-				const f32 opacity = style.has(PropId::Opacity) ? std::clamp(number(style.get(PropId::Opacity), 0, 1.f), 0.f, 1.f) : 1.f;
-				painter.pushOpacity(opacity);
-				painter.fillRect(preview, color(style, PropId::Bg, Color::fromRGBA8(0x5386D866u)), CornerRadii::all(radius));
-				if (style.has(PropId::Border) && style.get(PropId::Border).count >= 3) {
-					const StyleValue& border = style.get(PropId::Border);
-					const Color edge = border.atoms[2].kind == AtomKind::Color ? Color::fromRGBA8(border.atoms[2].bits) : Color{};
-					painter.roundRect(preview, RectStyle{ Color{0,0,0,0}, edge, number(border, 0, 1.f), CornerRadii::all(radius) });
-				}
-				painter.popOpacity();
+				if (m_dockSplitDragging && m_dockDragHost == hostIndex && m_dockDragSplit == split.node)
+					states |= stateBit(State::Pressed) | stateBit(State::Dragging);
+				drawDockChrome(hostNode, hostNode.dockSplitterStyleSet, bounds, states, {}, 0.f);
 			}
 		}
+		// The dock preview marks the drop target, so it stays above in-window floating panels.
+		painter.setLayer(2);
+		for (u32 hostIndex = 0; hostIndex < m_dockHosts.size(); ++hostIndex) {
+			const DockHostState& host = m_dockHosts[hostIndex];
+			if (host.node >= m_nodes.size() || !isNodeVisible(host.node))
+				continue;
+			if (!m_dockPreview.valid || m_dockDragHost != hostIndex)
+				continue;
+			const Vec2 origin = dockHostOrigin(host);
+			Rect preview = m_dockPreview.bounds;
+			preview.x += origin.x;
+			preview.y += origin.y;
+			PropTable style;
+			m_styles->resolve(m_nodes[host.node].dockPreviewStyleSet,
+							  stateBit(State::Resting) | stateBit(State::Dragging), m_theme, style);
+			const f32 radius = style.has(PropId::Radius) ? number(style.get(PropId::Radius), 0, 4.f) : 4.f;
+			const f32 opacity =
+				style.has(PropId::Opacity) ? std::clamp(number(style.get(PropId::Opacity), 0, 1.f), 0.f, 1.f) : 1.f;
+			painter.pushOpacity(opacity);
+			painter.fillRect(preview, color(style, PropId::Bg, Color::fromRGBA8(0x5386D866u)),
+							 CornerRadii::all(radius));
+			if (style.has(PropId::Border) && style.get(PropId::Border).count >= 3) {
+				const StyleValue& border = style.get(PropId::Border);
+				const Color edge =
+					border.atoms[2].kind == AtomKind::Color ? Color::fromRGBA8(border.atoms[2].bits) : Color{};
+				painter.roundRect(preview,
+								  RectStyle{Color{0, 0, 0, 0}, edge, number(border, 0, 1.f), CornerRadii::all(radius)});
+			}
+			painter.popOpacity();
+		}
+		painter.setLayer(1);
 		// TitleBar caption buttons are framework chrome: the bar and its authored children paint
 		// through the normal widget path; the three caption zones paint on top of the bar's tail.
 		for (u32 barIndex : m_titleBars) {
@@ -3655,12 +4910,15 @@ namespace xui {
 			paintCaption(maximize, 2);
 			paintCaption(close, 3);
 		}
+		// Popups, menus and tooltips are transient surfaces above every dock layer.
+		painter.setLayer(3);
 		// Popups render after the retained tree, so they always remain on top of later siblings.
 		for (Node& node : m_nodes) {
 			if (!node.popupOpen || (!node.dropdown && !node.colorPicker && !node.datePicker)) continue;
 			const Rect anchor = m_layout.absRect(node.layout);
-			const Rect popup = popupBounds(anchor, node.dropdown, node.options.size(), m_lastLayoutHeight,
-				node.datePicker ? 224.f : node.pickerWidth, node.datePicker ? 208.f : node.pickerHeight);
+			const Rect popup =
+				popupBounds(anchor, node.dropdown, payload(node).options.size(), m_lastLayoutHeight,
+							node.datePicker ? 224.f : node.pickerWidth, node.datePicker ? 208.f : node.pickerHeight);
 			const Color panel = color(node.style, PropId::Bg, Color::fromRGBA8(0x151E32FFu));
 			const Color foreground = color(node.style, PropId::Fg, Color::fromRGBA8(0xF2F6FFFFu));
 			painter.fillRect(popup, panel, CornerRadii::all(5.f));
@@ -3670,7 +4928,7 @@ namespace xui {
 				painter.roundRect(popup, RectStyle{ Color{0,0,0,0}, edge, number(border, 0), CornerRadii::all(5.f) });
 			}
 			if (node.dropdown) {
-				for (u32 i = 0; i < node.options.size(); ++i) {
+				for (u32 i = 0; i < payload(node).options.size(); ++i) {
 					const Rect row{ popup.x, popup.y + 28.f * i, popup.w, 28.f };
 					if (i == node.selectedOption) painter.fillRect(row, foreground.withAlpha(0.12f), CornerRadii::all(2.f));
 					if (static_cast<i32>(i) == node.hoveredOption) {
@@ -3678,7 +4936,7 @@ namespace xui {
 						// Use a row-local highlight so the header's :hover style cannot leak here.
 						painter.fillRect(row, foreground.withAlpha(0.16f), CornerRadii::all(2.f));
 					}
-					drawLabel(node.options[i], row, node.font, node.style, foreground, 8.f, false);
+					drawLabel(payload(node).options[i], row, node.font, node.style, foreground, 8.f, false);
 				}
 			}
 			else if (node.datePicker) {
@@ -3796,7 +5054,8 @@ namespace xui {
 				const std::size_t begin = std::min(editor.caret, editor.selectionAnchor), end = std::max(editor.caret, editor.selectionAnchor);
 				const f32 x1 = m_text->layout(editor.font, std::string_view(editor.text).substr(0, begin), fontSize * m_dpiScale).advanceWidth / m_dpiScale;
 				const f32 x2 = m_text->layout(editor.font, std::string_view(editor.text).substr(0, end), fontSize * m_dpiScale).advanceWidth / m_dpiScale;
-				painter.fillRect({ rect.x + 5.f + x1,rect.y + 3.f,std::max(1.f,x2 - x1),rect.h - 6.f }, foreground.withAlpha(0.28f));
+				painter.fillRect({rect.x + 5.f + x1, rect.y + 3.f, std::max(1.f, x2 - x1), rect.h - 6.f},
+								 Color::fromRGBA8(0x3478D4C8u));
 			}
 			drawLabel(editor.text, rect, editor.font, editor.style, foreground, 5.f, false);
 			if (editor.focused && !editor.disabled && !editor.readOnly && m_caretVisible && m_text && editor.font.valid()) {
@@ -3894,8 +5153,12 @@ namespace xui {
 			const f32 width = std::min(maxWidth, measured.width / m_dpiScale + padding * 2.f);
 			const f32 height = measured.height / m_dpiScale + padding * 2.f;
 			const Rect anchor = m_layout.absRect(owner.layout);
-			Rect bubble{ anchor.x, anchor.bottom() + 6.f, width, height };
-			if (bubble.bottom() > m_lastLayoutHeight) bubble.y = anchor.y - height - 6.f;
+			const Vec2 origin = owner.tooltipFollowCursor ? m_pointerPosition : Vec2{anchor.x, anchor.bottom()};
+			Rect bubble{origin.x + (owner.tooltipFollowCursor ? 14.f : 0.f), origin.y + 6.f, width, height};
+			if (!owner.tooltipFollowCursor && bubble.bottom() > m_lastLayoutHeight)
+				bubble.y = anchor.y - height - 6.f;
+			else if (owner.tooltipFollowCursor && bubble.bottom() > m_lastLayoutHeight)
+				bubble.y = origin.y - height - 6.f;
 			bubble.x = std::clamp(bubble.x, 4.f, std::max(4.f, m_lastLayoutWidth - width - 4.f));
 			bubble.y = std::clamp(bubble.y, 4.f, std::max(4.f, m_lastLayoutHeight - height - 4.f));
 			painter.fillRect(bubble, color(tooltipStyle, PropId::Bg, Color::fromRGBA8(0x202A40F5u)),
@@ -3908,6 +5171,81 @@ namespace xui {
 	bool UiRuntime::pointerMove(Vec2 point) {
 		m_pointerPosition = point;
 		bool changed = dockPointerMove(point);
+		for (u32 i = 0; i < m_nodes.size(); ++i) {
+			Node& node = m_nodes[i];
+			if (!node.scrollView || node.disabled || !pointInsideScrollAncestors(i, point))
+				continue;
+			bool overTrack = false;
+			for (bool horizontal : {false, true}) {
+				Rect track;
+				(void)scrollBarRect(i, horizontal, &track);
+				overTrack |= track.contains(point);
+			}
+			if (overTrack && node.scrollBarOpacity < 1.f) {
+				node.scrollBarOpacity = 1.f;
+				node.scrollActivity = std::chrono::steady_clock::now();
+				addDamage(m_layout.absRect(node.layout));
+				changed = true;
+			}
+		}
+		if (m_tooltipVisible && m_tooltipOwner < m_nodes.size() && m_nodes[m_tooltipOwner].tooltipFollowCursor) {
+			addDamage({0, 0, m_lastLayoutWidth, m_lastLayoutHeight});
+			changed = true;
+		}
+		if (m_textSelectDrag < m_nodes.size()) {
+			Node& field = m_nodes[m_textSelectDrag];
+			m_textAutoScrollVelocity = 0.f;
+			if (field.textArea && m_text && field.font.valid()) {
+				const Rect rect = m_layout.absRect(field.layout);
+				const Vec2 local = inverseTransformPoint(field.paintTransform, point);
+				const f32 fontSize =
+					field.style.has(PropId::FontSize) ? number(field.style.get(PropId::FontSize), 0, 16.f) : 16.f;
+				const f32 border = field.style.has(PropId::Border) ? number(field.style.get(PropId::Border), 0) : 0.f;
+				const f32 pad = field.style.has(PropId::Pad) ? number(field.style.get(PropId::Pad), 0) : 0.f;
+				const f32 top = rect.y + pad + border;
+				const f32 bottom = rect.bottom() - pad - border;
+				const f32 contentWidth = std::max(1.f, rect.w - 2.f * (pad + border));
+				const Font* textFont = m_text->font(field.font);
+				const f32 lineHeight =
+					textFont ? std::max(fontSize, textFont->lineHeight(fontSize * m_dpiScale) / m_dpiScale) : fontSize;
+				const f32 outside = local.y < top ? local.y - top : local.y > bottom ? local.y - bottom : 0.f;
+				if (outside != 0.f) {
+					const f32 speed = lineHeight * std::clamp(12.f + std::abs(outside) * 2.f, 12.f, 180.f);
+					m_textAutoScrollVelocity = std::copysign(speed, outside);
+					const auto now = std::chrono::steady_clock::now();
+					if (m_textAutoScrollLast.time_since_epoch().count() == 0)
+						m_textAutoScrollLast = now;
+					if (m_textAutoScrollDeadline.time_since_epoch().count() == 0)
+						m_textAutoScrollDeadline = now + std::chrono::milliseconds(16);
+				} else {
+					m_textAutoScrollDeadline = {};
+					m_textAutoScrollLast = {};
+				}
+				const f32 wrap = contentWidth * m_dpiScale;
+				const f32 contentHeight = std::max(0.f, bottom - top);
+				const f32 maxScroll = std::max(
+					0.f, m_text->layout(field.font, field.text, fontSize * m_dpiScale, wrap).height / m_dpiScale -
+							 contentHeight);
+				f32 scroll = field.textScrollY;
+				if (local.y < top)
+					scroll -= lineHeight * std::clamp(1.f + (top - local.y) / lineHeight, 1.f, 4.f);
+				else if (local.y > bottom)
+					scroll += lineHeight * std::clamp(1.f + (local.y - bottom) / lineHeight, 1.f, 4.f);
+				scroll = std::clamp(scroll, 0.f, maxScroll);
+				if (scroll != field.textScrollY) {
+					field.textScrollY = scroll;
+					addDamage(rect);
+					changed = true;
+				}
+			}
+			const std::size_t caret = textIndexAtPoint(field, point);
+			if (caret != field.caret) {
+				field.caret = caret;
+				resetCaretBlink();
+				addDamage(field.pickerEditor ? pickerEditorRect(field) : m_layout.absRect(field.layout));
+				changed = true;
+			}
+		}
 		changed |= titlePointerMove(point);
 		changed |= menuPointerMove(point);
 		if (m_dragScroll < m_nodes.size()) {
@@ -3925,6 +5263,8 @@ namespace xui {
 			const f32 value = m_dragScrollStart + (pointer - m_dragPointerStart) * range / travel;
 			if (m_dragScrollX) offset.x = value; else offset.y = value;
 			const bool moved = setScrollOffset(index, offset, false);
+			m_nodes[index].scrollBarOpacity = 1.f;
+			m_nodes[index].scrollActivity = std::chrono::steady_clock::now();
 			changed |= moved;
 			if (moved && m_nodes[index].pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(m_nodes[index].pressHandler));
 			return changed;
@@ -3935,8 +5275,10 @@ namespace xui {
 			const u32 index = static_cast<u32>(i - 1);
 			const Node& node = m_nodes[index];
 			if (!node.popupOpen || (!node.dropdown && !node.colorPicker && !node.datePicker) || !isNodeVisible(index)) continue;
-			if (popupBounds(m_layout.absRect(node.layout), node.dropdown, node.options.size(), m_lastLayoutHeight,
-				node.datePicker ? 224.f : node.pickerWidth, node.datePicker ? 208.f : node.pickerHeight).contains(point)) {
+			if (popupBounds(m_layout.absRect(node.layout), node.dropdown, payload(node).options.size(),
+							m_lastLayoutHeight, node.datePicker ? 224.f : node.pickerWidth,
+							node.datePicker ? 208.f : node.pickerHeight)
+					.contains(point)) {
 				popupTarget = index;
 				break;
 			}
@@ -3951,6 +5293,57 @@ namespace xui {
 				if (!node.hovered && !node.focused) node.tooltipDismissed = false;
 				changed = true;
 				addDamage(node.pickerEditor ? pickerEditorRect(node) : m_layout.absRect(node.layout));
+			}
+			if (node.tabs) {
+				i32 hoveredTab = -1;
+				const Rect rect = m_layout.absRect(node.layout);
+				const Vec2 localPoint = inverseTransformPoint(node.paintTransform, point);
+				const u32 count = m_layout.childCount(node.layout);
+				if (visible && !node.disabled && target == i && count && rect.w > 0.f && rect.contains(localPoint) &&
+					localPoint.y < rect.y + 34.f) {
+					hoveredTab = std::min<i32>(static_cast<i32>((localPoint.x - rect.x) / rect.w * count),
+											   static_cast<i32>(count) - 1);
+				}
+				if (hoveredTab != node.hoveredTab) {
+					node.hoveredTab = hoveredTab;
+					changed = true;
+					addDamage(rect);
+				}
+			}
+			if (node.listView) {
+				i32 row = -1;
+				const Rect rect = m_layout.absRect(node.layout);
+				if (visible && target == i && rect.contains(point)) {
+					const LayoutStyle& layout = m_layout.style(node.layout);
+					const f32 fontSize =
+						node.style.has(PropId::FontSize) ? number(node.style.get(PropId::FontSize), 0, 14.f) : 14.f;
+					const f32 rowHeight = std::max(24.f, fontSize * 1.8f);
+					const f32 top = rect.y + layout.border.t + layout.padding.t - node.listScrollY;
+					const i32 candidate = static_cast<i32>((point.y - top) / rowHeight);
+					if (candidate >= 0 && static_cast<u32>(candidate) < listItemCount(node))
+						row = candidate;
+				}
+				if (row != node.treeHover) {
+					node.treeHover = row;
+					changed = true;
+					addDamage(rect);
+				}
+			}
+			if (node.table) {
+				i32 row = -1;
+				const Rect rect = m_layout.absRect(node.layout);
+				if (visible && target == i && rect.contains(point)) {
+					const LayoutStyle& layout = m_layout.style(node.layout);
+					const f32 top = rect.y + layout.border.t + layout.padding.t + 30.f - node.tableScrollY;
+					const i32 candidate = static_cast<i32>((point.y - top) / 26.f);
+					if (candidate >= 0 && static_cast<u32>(candidate) < listItemCount(node))
+						row = candidate;
+				}
+				if (row != node.treeHover) {
+					node.treeHover = row;
+					changed = true;
+					addDamage(rect);
+				}
 			}
 		}
 		for (u32 i = 0; i < m_nodes.size(); ++i) {
@@ -3971,10 +5364,24 @@ namespace xui {
 		}
 		for (u32 index : m_interactiveNodes) {
 			Node& node = m_nodes[index];
+			if (node.table && node.tableResizeColumn >= 0 && node.pressed && !node.disabled && isNodeVisible(index)) {
+				auto& widths = payload(node).tableColumnWidths;
+				const u32 column = static_cast<u32>(node.tableResizeColumn);
+				if (column < widths.size()) {
+					const f32 next = std::max(36.f, node.tableResizeStartWidth + point.x - node.tableResizeStartX);
+					if (widths[column] != next) {
+						widths[column] = next;
+						changed = true;
+						addDamage(m_layout.absRect(node.layout));
+					}
+				}
+			}
 			if (node.slider && node.pressed && !node.disabled && isNodeVisible(index)) {
-				const f32 before = node.value;
+				const f32 before =
+					node.rangeSlider ? (node.rangeDraggingHigh ? node.rangeHigh : node.rangeLow) : node.value;
 				updateSlider(node, point);
-				if (node.value != before) {
+				if ((node.rangeSlider ? (node.rangeDraggingHigh ? node.rangeHigh : node.rangeLow) : node.value) !=
+					before) {
 					changed = true; addDamage(m_layout.absRect(node.layout));
 					if (node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
 				}
@@ -3986,10 +5393,12 @@ namespace xui {
 		for (u32 i = 0; i < m_nodes.size(); ++i) {
 			Node& node = m_nodes[i];
 			if (!node.popupOpen || !node.dropdown) continue;
-			const Rect popup = popupBounds(m_layout.absRect(node.layout), true, node.options.size(), m_lastLayoutHeight, node.pickerWidth, node.pickerHeight);
-			const i32 over = i == popupTarget && popup.contains(point) && !node.options.empty()
-				? std::clamp<i32>(static_cast<i32>((point.y - popup.y) / 28.f), 0, static_cast<i32>(node.options.size()) - 1)
-				: -1;
+			const Rect popup = popupBounds(m_layout.absRect(node.layout), true, payload(node).options.size(),
+										   m_lastLayoutHeight, node.pickerWidth, node.pickerHeight);
+			const i32 over = i == popupTarget && popup.contains(point) && !payload(node).options.empty()
+								 ? std::clamp<i32>(static_cast<i32>((point.y - popup.y) / 28.f), 0,
+												   static_cast<i32>(payload(node).options.size()) - 1)
+								 : -1;
 			if (over != node.hoveredOption) { node.hoveredOption = over; changed = true; addDamage(popup); }
 		}
 		if (m_splitDrag.active) {
@@ -4001,16 +5410,21 @@ namespace xui {
 		}
 		for (u32 i = 0; i < m_nodes.size(); ++i) {
 			Node& node = m_nodes[i];
-			if (!(node.radioGroup || node.segmented || node.rating || node.breadcrumb) || node.disabled || !isNodeVisible(i) || node.options.empty()) continue;
+			if (!(node.radioGroup || node.segmented || node.rating || node.breadcrumb) || node.disabled ||
+				!isNodeVisible(i) || payload(node).options.empty())
+				continue;
 			const Rect rect = m_layout.absRect(node.layout);
 			i32 over = -1;
 			if (rect.contains(point)) {
 				if (node.radioGroup) {
-					const f32 rowHeight = rect.h / f32(node.options.size());
-					over = std::clamp<i32>(static_cast<i32>((point.y - rect.y) / std::max(1.f, rowHeight)), 0, static_cast<i32>(node.options.size()) - 1);
+					const f32 rowHeight = rect.h / f32(payload(node).options.size());
+					over = std::clamp<i32>(static_cast<i32>((point.y - rect.y) / std::max(1.f, rowHeight)), 0,
+										   static_cast<i32>(payload(node).options.size()) - 1);
 				}
 				else if (node.segmented) {
-					over = std::clamp<i32>(static_cast<i32>((point.x - rect.x) / std::max(1.f, rect.w / f32(node.options.size()))), 0, static_cast<i32>(node.options.size()) - 1);
+					over = std::clamp<i32>(static_cast<i32>((point.x - rect.x) /
+															std::max(1.f, rect.w / f32(payload(node).options.size()))),
+										   0, static_cast<i32>(payload(node).options.size()) - 1);
 				}
 				else if (node.rating) {
 					const i32 pips = static_cast<i32>(std::clamp(node.maxValue, 1.f, 10.f));
@@ -4019,8 +5433,13 @@ namespace xui {
 				else {   // breadcrumb: segments have per-label widths
 					const f32 fontSize = node.style.has(PropId::FontSize) ? number(node.style.get(PropId::FontSize), 0, 14) : 14.f;
 					f32 x = rect.x;
-					for (u32 segment = 0; segment < node.options.size(); ++segment) {
-						const f32 width = m_text && node.font.valid() ? m_text->layout(node.font, node.options[segment], fontSize * m_dpiScale, 0.f).width / m_dpiScale : 0.f;
+					for (u32 segment = 0; segment < payload(node).options.size(); ++segment) {
+						const f32 width =
+							m_text && node.font.valid()
+								? m_text->layout(node.font, payload(node).options[segment], fontSize * m_dpiScale, 0.f)
+										  .width /
+									  m_dpiScale
+								: 0.f;
 						if (point.x < x + width + 10.f) { over = static_cast<i32>(segment); break; }
 						x += width + 22.f;
 					}
@@ -4037,6 +5456,11 @@ namespace xui {
 		for (u32 i = 0; i < m_nodes.size(); ++i) {
 			Node& node = m_nodes[i];
 			if (node.treeView && node.treeHover >= 0) { node.treeHover = -1; addDamage(m_layout.absRect(node.layout)); changed = true; }
+			if (node.hoveredTab >= 0) {
+				node.hoveredTab = -1;
+				addDamage(m_layout.absRect(node.layout));
+				changed = true;
+			}
 			if (node.hovered) {
 				node.hovered = false;
 				if (!node.focused) node.tooltipDismissed = false;
@@ -4046,7 +5470,8 @@ namespace xui {
 			if (node.hoveredOption >= 0) {
 				node.hoveredOption = -1;
 				if (node.dropdown && node.popupOpen)
-					addDamage(popupBounds(m_layout.absRect(node.layout), true, node.options.size(), m_lastLayoutHeight, node.pickerWidth, node.pickerHeight));
+					addDamage(popupBounds(m_layout.absRect(node.layout), true, payload(node).options.size(),
+										  m_lastLayoutHeight, node.pickerWidth, node.pickerHeight));
 				else addDamage(m_layout.absRect(node.layout));
 				changed = true;
 			}
@@ -4056,20 +5481,43 @@ namespace xui {
 	}
 
 	CursorShape UiRuntime::cursorAt(Vec2 point) const {
-		for (auto it = m_dockHosts.rbegin(); it != m_dockHosts.rend(); ++it) {
+		// Floating panels cover docked chrome and gutters, so they resolve first: a pointer over
+		// a floating body must not advertise a splitter resize hidden behind it.
+		bool overFloatingBody = false;
+		for (auto it = m_dockHosts.rbegin(); it != m_dockHosts.rend() && !overFloatingBody; ++it) {
 			const DockHostState& host = *it;
-			if (host.node >= m_nodes.size() || !isNodeVisible(host.node)) continue;
+			if (host.node >= m_nodes.size() || !isNodeVisible(host.node))
+				continue;
 			const Rect rect = m_layout.absRect(m_nodes[host.node].layout);
 			const LayoutStyle& style = m_layout.style(m_nodes[host.node].layout);
-			const Vec2 origin{ rect.x + style.border.l + style.padding.l, rect.y + style.border.t + style.padding.t };
-			const Vec2 local{ point.x - origin.x, point.y - origin.y };
-			bool horizontal = true;
-			if (host.tree.splitAt(local, &horizontal) != 0xFFFFFFFFu)
-				return horizontal ? CursorShape::ResizeEW : CursorShape::ResizeNS;
-			const u32 panel = host.tree.panelAt(local);
-			if (panel < m_nodes.size() && host.tree.panelBounds(panel).contains(local) &&
-				local.y < host.tree.panelBounds(panel).y + m_nodes[panel].dockHeaderHeight) return CursorShape::Hand;
+			const Vec2 local{point.x - (rect.x + style.border.l + style.padding.l),
+							 point.y - (rect.y + style.border.t + style.padding.t)};
+			for (const DockPanelLayout& panel : host.tree.panels()) {
+				if (!panel.floating || panel.bounds.empty() || !panel.bounds.contains(local))
+					continue;
+				if (panel.panel < m_nodes.size() && local.y < panel.bounds.y + m_nodes[panel.panel].dockHeaderHeight)
+					return CursorShape::Hand;
+				overFloatingBody = true;
+				break;
+			}
 		}
+		if (!overFloatingBody)
+			for (auto it = m_dockHosts.rbegin(); it != m_dockHosts.rend(); ++it) {
+				const DockHostState& host = *it;
+				if (host.node >= m_nodes.size() || !isNodeVisible(host.node))
+					continue;
+				const Rect rect = m_layout.absRect(m_nodes[host.node].layout);
+				const LayoutStyle& style = m_layout.style(m_nodes[host.node].layout);
+				const Vec2 origin{rect.x + style.border.l + style.padding.l, rect.y + style.border.t + style.padding.t};
+				const Vec2 local{point.x - origin.x, point.y - origin.y};
+				bool horizontal = true;
+				if (host.tree.splitAt(local, &horizontal) != 0xFFFFFFFFu)
+					return horizontal ? CursorShape::ResizeEW : CursorShape::ResizeNS;
+				const u32 panel = host.tree.panelAt(local);
+				if (panel < m_nodes.size() && host.tree.panelBounds(panel).contains(local) &&
+					local.y < host.tree.panelBounds(panel).y + m_nodes[panel].dockHeaderHeight)
+					return CursorShape::Hand;
+			}
 		for (std::size_t i = m_nodes.size(); i > 0; --i) {
 			const u32 index = static_cast<u32>(i - 1);
 			if (m_nodes[index].scrollView && pointInsideScrollAncestors(index, point)) {
@@ -4104,6 +5552,19 @@ namespace xui {
 			}
 			// Disabled controls do not advertise interaction unless styled explicitly above.
 			if (node.disabled) return CursorShape::Arrow;
+			if (node.table) {
+				const Rect rect = m_layout.absRect(node.layout);
+				const LayoutStyle& layout = m_layout.style(node.layout);
+				const f32 top = rect.y + layout.border.t + layout.padding.t;
+				if (point.y >= top && point.y < top + 30.f) {
+					f32 x = rect.x + layout.border.l + layout.padding.l;
+					for (f32 width : payload(node).tableColumnWidths) {
+						x += width;
+						if (std::abs(point.x - x) <= 5.f)
+							return CursorShape::ResizeEW;
+					}
+				}
+			}
 			// Split gutters resize along the drag axis, matching the drag handling in pointerDown().
 			if (node.split) {
 				const Rect bounds = m_layout.absRect(node.layout);
@@ -4133,12 +5594,64 @@ namespace xui {
 		const u32 target = hitTestNode(point);
 		for (u32 index = target; index != 0xFFFFFFFFu && index < m_nodes.size(); index = m_nodes[index].parentIndex) {
 			Node& node = m_nodes[index];
+			if (node.textArea && !node.disabled && m_text && node.font.valid()) {
+				const Rect rect = m_layout.absRect(node.layout);
+				const f32 fontSize =
+					node.style.has(PropId::FontSize) ? number(node.style.get(PropId::FontSize), 0, 16.f) : 16.f;
+				const f32 border = node.style.has(PropId::Border) ? number(node.style.get(PropId::Border), 0) : 0.f;
+				const f32 pad = node.style.has(PropId::Pad) ? number(node.style.get(PropId::Pad), 0) : 0.f;
+				const f32 contentWidth = std::max(1.f, rect.w - 2.f * (pad + border));
+				const f32 contentHeight = std::max(0.f, rect.h - 2.f * (pad + border));
+				const f32 maxScroll = std::max(
+					0.f, m_text->layout(node.font, node.text, fontSize * m_dpiScale, contentWidth * m_dpiScale).height /
+								 m_dpiScale -
+							 contentHeight);
+				const f32 next = std::clamp(node.textScrollY - delta.y * node.scrollSpeed, 0.f, maxScroll);
+				if (next != node.textScrollY) {
+					node.textScrollY = next;
+					addDamage(rect);
+					return true;
+				}
+			}
+			if (node.listView && !node.disabled) {
+				const Rect rect = m_layout.absRect(node.layout);
+				const f32 fontSize =
+					node.style.has(PropId::FontSize) ? number(node.style.get(PropId::FontSize), 0, 14.f) : 14.f;
+				const f32 rowHeight = std::max(24.f, fontSize * 1.8f);
+				const f32 maxOffset = std::max(0.f, rowHeight * f32(listItemCount(node)) - rect.h);
+				const f32 next = std::clamp(node.listScrollY - delta.y * node.scrollSpeed, 0.f, maxOffset);
+				if (next != node.listScrollY) {
+					node.listScrollY = next;
+					addDamage(rect);
+					return true;
+				}
+			}
+			if (node.table && !node.disabled) {
+				const Rect rect = m_layout.absRect(node.layout);
+				const f32 maxOffset = std::max(0.f, 26.f * f32(listItemCount(node)) - std::max(0.f, rect.h - 30.f));
+				const f32 next = std::clamp(node.tableScrollY - delta.y * node.scrollSpeed, 0.f, maxOffset);
+				if (next != node.tableScrollY) {
+					node.tableScrollY = next;
+					addDamage(rect);
+					return true;
+				}
+			}
 			if (!node.scrollView || node.disabled) continue;
 			const LayoutStyle& style = m_layout.style(node.layout);
 			Vec2 before = m_layout.scrollOffset(node.layout), next = before;
 			if (style.scrollY && delta.y != 0.f) next.y -= delta.y * node.scrollSpeed;
 			if (style.scrollX && delta.x != 0.f) next.x -= delta.x * node.scrollSpeed;
 			if (next != before && setScrollOffset(index, next, node.scrollSmooth)) {
+				const auto now = std::chrono::steady_clock::now();
+				node.scrollBarOpacity = 1.f;
+				node.scrollActivity = now;
+				node.scrollLastTick = now;
+				if (!node.scrollSmooth) {
+					if (style.scrollX)
+						node.scrollVelocity.x += -delta.x * node.scrollSpeed * 3.f;
+					if (style.scrollY)
+						node.scrollVelocity.y += -delta.y * node.scrollSpeed * 3.f;
+				}
 				if (node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
 				return true;
 			}
@@ -4155,8 +5668,10 @@ namespace xui {
 		for (u32 i = 0; i < m_nodes.size(); ++i) {
 			const Node& node = m_nodes[i];
 			if (node.popupOpen && (node.dropdown || node.colorPicker || node.datePicker) && isNodeVisible(i) &&
-				popupBounds(m_layout.absRect(node.layout), node.dropdown, node.options.size(), m_lastLayoutHeight,
-					node.datePicker ? 224.f : node.pickerWidth, node.datePicker ? 208.f : node.pickerHeight).contains(point)) {
+				popupBounds(m_layout.absRect(node.layout), node.dropdown, payload(node).options.size(),
+							m_lastLayoutHeight, node.datePicker ? 224.f : node.pickerWidth,
+							node.datePicker ? 208.f : node.pickerHeight)
+					.contains(point)) {
 				popupCoversPoint = true; break;
 			}
 		}
@@ -4180,12 +5695,35 @@ namespace xui {
 			for (bool horizontal : { false, true }) {
 				Rect track;
 				const Rect thumb = scrollBarRect(index, horizontal, &track);
-				if (!thumb.contains(point)) continue;
+				if (!track.contains(point))
+					continue;
+				const bool thumbHit = thumb.contains(point);
 				m_dragScroll = index; m_dragScrollX = horizontal;
 				m_nodes[index].pressed = true;
-				m_dragPointerStart = horizontal ? point.x : point.y;
-				const Vec2 offset = m_layout.scrollOffset(m_nodes[index].layout);
-				m_dragScrollStart = horizontal ? offset.x : offset.y;
+				m_nodes[index].scrollBarOpacity = 1.f;
+				m_nodes[index].scrollActivity = m_nodes[index].scrollLastTick = std::chrono::steady_clock::now();
+				m_nodes[index].scrollVelocity = {};
+				const f32 pointer = horizontal ? point.x : point.y;
+				Vec2 offset = m_layout.scrollOffset(m_nodes[index].layout);
+				if (!thumbHit) {
+					const Vec2 content = m_layout.contentSize(m_nodes[index].layout);
+					const Rect view = m_layout.rect(m_nodes[index].layout);
+					const f32 trackStart = horizontal ? track.x : track.y;
+					const f32 trackLength = horizontal ? track.w : track.h;
+					const f32 thumbLength = horizontal ? thumb.w : thumb.h;
+					const f32 range = horizontal ? content.x - view.w : content.y - view.h;
+					const f32 travel = std::max(1.f, trackLength - thumbLength);
+					const f32 next = std::clamp((pointer - trackStart - thumbLength * 0.5f) / travel, 0.f, 1.f) *
+									 std::max(0.f, range);
+					if (horizontal)
+						offset.x = next;
+					else
+						offset.y = next;
+					setScrollOffset(index, offset, false);
+				}
+				m_dragPointerStart = pointer;
+				const Vec2 after = m_layout.scrollOffset(m_nodes[index].layout);
+				m_dragScrollStart = horizontal ? after.x : after.y;
 				addDamage(m_layout.absRect(m_nodes[index].layout));
 				return true;
 			}
@@ -4207,8 +5745,9 @@ namespace xui {
 			Node& node = m_nodes[index];
 			if (!node.popupOpen || (!node.dropdown && !node.colorPicker && !node.datePicker) || !isNodeVisible(index)) continue;
 			const Rect anchor = m_layout.absRect(node.layout);
-			const Rect popup = popupBounds(anchor, node.dropdown, node.options.size(), m_lastLayoutHeight,
-				node.datePicker ? 224.f : node.pickerWidth, node.datePicker ? 208.f : node.pickerHeight);
+			const Rect popup =
+				popupBounds(anchor, node.dropdown, payload(node).options.size(), m_lastLayoutHeight,
+							node.datePicker ? 224.f : node.pickerWidth, node.datePicker ? 208.f : node.pickerHeight);
 			if (!popup.contains(point)) continue;
 			if (node.datePicker) {
 				const f32 localY = point.y - popup.y;
@@ -4227,7 +5766,7 @@ namespace xui {
 						node.dateYear = node.viewYear;
 						node.dateMonth = node.viewMonth;
 						node.dateDay = static_cast<u32>(day);
-						node.text = formatDateText(node.dateYear, node.dateMonth, node.dateDay);
+						node.text = formatDateText(node.dateYear, node.dateMonth, node.dateDay, m_locale);
 						m_layout.markContentChanged(node.layout);
 						node.popupOpen = false;
 						if (node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
@@ -4237,10 +5776,12 @@ namespace xui {
 				return true;
 			}
 			if (node.dropdown) {
-				if (node.options.empty()) return true;
-				const u32 selected = std::min<u32>(static_cast<u32>((point.y - popup.y) / 28.f), static_cast<u32>(node.options.size() - 1));
+				if (payload(node).options.empty())
+					return true;
+				const u32 selected = std::min<u32>(static_cast<u32>((point.y - popup.y) / 28.f),
+												   static_cast<u32>(payload(node).options.size() - 1));
 				node.selectedOption = selected;
-				node.text = node.options[selected];
+				node.text = payload(node).options[selected];
 				node.popupOpen = false;
 				m_layout.markContentChanged(node.layout);
 				addDamage(anchor); addDamage(popup);
@@ -4249,10 +5790,17 @@ namespace xui {
 			else {
 				const PickerGeometry geometry = pickerGeometry(node);
 				if (geometry.format.contains(point)) {
-					if (node.pickerShowFormatSwitcher && !node.pickerFormats.empty()) {
-						auto format = std::find(node.pickerFormats.begin(), node.pickerFormats.end(), node.pickerFormat);
-						const std::size_t next = format == node.pickerFormats.end() ? 0 : (static_cast<std::size_t>(format - node.pickerFormats.begin()) + 1) % node.pickerFormats.size();
-						node.pickerFormat = node.pickerFormats[next]; node.text = colorText(node.pickerColor, node.pickerFormat, node.pickerAlpha, node.pickerPrecision);
+					if (node.pickerShowFormatSwitcher && !payload(node).pickerFormats.empty()) {
+						auto format = std::find(payload(node).pickerFormats.begin(), payload(node).pickerFormats.end(),
+												node.pickerFormat);
+						const std::size_t next =
+							format == payload(node).pickerFormats.end()
+								? 0
+								: (static_cast<std::size_t>(format - payload(node).pickerFormats.begin()) + 1) %
+									  payload(node).pickerFormats.size();
+						node.pickerFormat = payload(node).pickerFormats[next];
+						node.text =
+							colorText(node.pickerColor, node.pickerFormat, node.pickerAlpha, node.pickerPrecision);
 						syncPickerEditors(index); addDamage(popup); addDamage(anchor);
 					}
 				}
@@ -4301,7 +5849,8 @@ namespace xui {
 		// An outside click dismisses the popup, then may activate the newly exposed target.
 		for (Node& node : m_nodes) if (node.popupOpen && (node.dropdown || node.colorPicker || node.datePicker)) {
 			const Rect anchor = m_layout.absRect(node.layout);
-			const Rect popup = popupBounds(anchor, node.dropdown, node.options.size(), m_lastLayoutHeight, node.pickerWidth, node.pickerHeight);
+			const Rect popup = popupBounds(anchor, node.dropdown, payload(node).options.size(), m_lastLayoutHeight,
+										   node.pickerWidth, node.pickerHeight);
 			node.popupOpen = false;
 			node.pressed = false;
 			node.hoveredOption = -1;
@@ -4309,15 +5858,47 @@ namespace xui {
 			addDamage(anchor); addDamage(popup);
 		}
 		// Tab headers are a dedicated layer above normal widget content.
+		auto tabHeaderClipsContain = [&](u32 index) {
+			u32 floatingPanel = 0xFFFFFFFFu;
+			for (u32 ancestor = index; ancestor < m_nodes.size(); ancestor = m_nodes[ancestor].parentIndex) {
+				for (const DockHostState& host : m_dockHosts) {
+					if (host.node >= m_nodes.size() || !host.tree.contains(ancestor) || !host.tree.floating(ancestor))
+						continue;
+					floatingPanel = ancestor;
+					const Rect hostRect = m_layout.absRect(m_nodes[host.node].layout);
+					const LayoutStyle& hostStyle = m_layout.style(m_nodes[host.node].layout);
+					const Vec2 origin{hostRect.x + hostStyle.border.l + hostStyle.padding.l,
+									  hostRect.y + hostStyle.border.t + hostStyle.padding.t};
+					const Vec2 local{point.x - origin.x, point.y - origin.y};
+					if (!host.tree.panelBounds(ancestor).contains(local))
+						return false;
+					break;
+				}
+				if (floatingPanel != 0xFFFFFFFFu || m_nodes[ancestor].parentIndex == 0xFFFFFFFFu)
+					break;
+			}
+			if (floatingPanel == 0xFFFFFFFFu)
+				return pointInsideScrollAncestors(index, point);
+			for (u32 parent = m_nodes[index].parentIndex;
+				 parent != 0xFFFFFFFFu && parent < m_nodes.size() && parent != floatingPanel;
+				 parent = m_nodes[parent].parentIndex)
+				if (m_nodes[parent].scrollView &&
+					!m_layout.absRect(m_nodes[parent].layout)
+						 .contains(inverseTransformPoint(m_nodes[parent].paintTransform, point)))
+					return false;
+			return true;
+		};
 		for (std::size_t i = m_nodes.size(); i > 0; --i) {
 			const u32 index = static_cast<u32>(i - 1);
 			Node& tabs = m_nodes[index];
 			if (!tabs.tabs || tabs.disabled || !isNodeVisible(index)) continue;
 			const Rect rect = m_layout.absRect(tabs.layout);
-			if (!rect.contains(point) || point.y >= rect.y + 34.f) continue;
+			const Vec2 localPoint = inverseTransformPoint(tabs.paintTransform, point);
+			if (!tabHeaderClipsContain(index) || !rect.contains(localPoint) || localPoint.y >= rect.y + 34.f)
+				continue;
 			const u32 count = m_layout.childCount(tabs.layout);
 			if (!count || rect.w <= 0.f) return true;
-			const u32 ordinal = std::min<u32>(static_cast<u32>((point.x - rect.x) / rect.w * count), count - 1);
+			const u32 ordinal = std::min<u32>(static_cast<u32>((localPoint.x - rect.x) / rect.w * count), count - 1);
 			if (tabs.selectedTab != ordinal) {
 				tabs.selectedTab = ordinal;
 				addDamage(rect);
@@ -4336,6 +5917,9 @@ namespace xui {
 
 		const u32 targetIndex = hitTestNode(point);
 		Node* target = targetIndex < m_nodes.size() ? &m_nodes[targetIndex] : nullptr;
+		m_textSelectDrag = 0xFFFFFFFFu;
+		m_textAutoScrollVelocity = 0.f;
+		m_textAutoScrollDeadline = m_textAutoScrollLast = {};
 		if (target && target->tooltipHideOnClick) target->tooltipDismissed = true;
 		for (u32 index : m_interactiveNodes) {
 			Node& node = m_nodes[index];
@@ -4345,17 +5929,75 @@ namespace xui {
 			if (!focus && node.focused && node.numberField && !node.disabled) {
 				// Blur commits; text that never parsed reverts to the last valid value.
 				if (!commitNumberText(node) && node.inputInvalid) {
-					node.text = formatNumberText(node.value, node.numberPrecision);
+					node.text = formatNumberText(node.value, node.numberPrecision, m_locale);
 					if (!node.unit.empty()) { node.text += " "; node.text += node.unit; }
 					node.inputInvalid = false;
 					m_layout.markContentChanged(node.layout);
 				}
 			}
 			node.focused = focus;
-			if (focus && (node.textBox || node.textArea)) resetCaretBlink();
+			if (!focus && !node.imePreedit.empty()) {
+				node.imePreedit.clear();
+				node.imeSelectionStart = node.imeSelectionEnd = -1;
+			}
+			if (focus && (node.textBox || node.textArea || node.pickerEditor))
+				resetCaretBlink();
 			if (!node.hovered && !node.focused) node.tooltipDismissed = false;
-			if ((node.textBox || node.textArea) && focus) node.caret = node.text.size();
-			if ((node.textBox || node.textArea) && focus) node.selectionAnchor = node.caret;
+			if ((node.textBox || node.textArea || node.pickerEditor) && focus) {
+				node.caret = textIndexAtPoint(node, point);
+				node.selectionAnchor = node.caret;
+				m_textSelectDrag = index;
+			}
+		}
+		if (target && (target->textBox || target->textArea || target->pickerEditor) && !target->disabled &&
+			!target->readOnly) {
+			const auto now = std::chrono::steady_clock::now();
+			const bool repeated =
+				m_textClickNode == targetIndex && now - m_textClickTime <= std::chrono::milliseconds(500) &&
+				std::abs(point.x - m_textClickPoint.x) <= 4.f && std::abs(point.y - m_textClickPoint.y) <= 4.f;
+			m_textClickCount = repeated ? static_cast<u8>(m_textClickCount % 3 + 1) : 1;
+			m_textClickNode = targetIndex;
+			m_textClickTime = now;
+			m_textClickPoint = point;
+			if (m_textClickCount == 2 && !target->text.empty()) {
+				auto wordByte = [&](std::size_t offset) {
+					const u8 c = static_cast<u8>(target->text[offset]);
+					return c >= 0x80 || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+						   c == '_';
+				};
+				std::size_t at = std::min(target->caret, target->text.size());
+				if (at == target->text.size() && at)
+					at = previousUtf8(target->text, at);
+				if (at < target->text.size() && !wordByte(at) && at > 0) {
+					const std::size_t prev = previousUtf8(target->text, at);
+					if (wordByte(prev))
+						at = prev;
+				}
+				if (at < target->text.size() && wordByte(at)) {
+					std::size_t begin = at, end = nextUtf8(target->text, at);
+					while (begin) {
+						const std::size_t prev = previousUtf8(target->text, begin);
+						if (!wordByte(prev))
+							break;
+						begin = prev;
+					}
+					while (end < target->text.size() && wordByte(end))
+						end = nextUtf8(target->text, end);
+					target->caret = begin;
+					target->selectionAnchor = end;
+				}
+			} else if (m_textClickCount == 3) {
+				const std::size_t at = std::min(target->caret, target->text.size());
+				const std::size_t newlineBefore = at ? target->text.rfind('\n', at - 1) : std::string::npos;
+				const std::size_t begin = newlineBefore == std::string::npos ? 0 : newlineBefore + 1;
+				const std::size_t newlineAfter = target->text.find('\n', at);
+				target->caret = begin;
+				target->selectionAnchor = newlineAfter == std::string::npos ? target->text.size() : newlineAfter;
+			}
+			if (m_textClickCount > 1) {
+				m_textSelectDrag = 0xFFFFFFFFu;
+				addDamage(target->pickerEditor ? pickerEditorRect(*target) : m_layout.absRect(target->layout));
+			}
 		}
 		refreshTooltipTarget();
 		if (target && target->searchField && !target->text.empty() && !target->disabled && !target->readOnly) {
@@ -4369,10 +6011,11 @@ namespace xui {
 				return true;
 			}
 		}
-		if (target && target->radioGroup && !target->disabled && !target->options.empty()) {
+		if (target && target->radioGroup && !target->disabled && !payload(*target).options.empty()) {
 			const Rect rect = m_layout.absRect(target->layout);
-			const f32 rowHeight = rect.h / f32(target->options.size());
-			const u32 row = std::clamp<u32>(static_cast<u32>((point.y - rect.y) / std::max(1.f, rowHeight)), 0, static_cast<u32>(target->options.size() - 1));
+			const f32 rowHeight = rect.h / f32(payload(*target).options.size());
+			const u32 row = std::clamp<u32>(static_cast<u32>((point.y - rect.y) / std::max(1.f, rowHeight)), 0,
+											static_cast<u32>(payload(*target).options.size() - 1));
 			if (row != target->selectedOption) {
 				target->selectedOption = row;
 				changed = true;
@@ -4383,18 +6026,25 @@ namespace xui {
 		}
 		if (target && !target->disabled) {
 			const Rect rect = m_layout.absRect(target->layout);
-			if (target->segmented && !target->options.empty()) {
-				const u32 segment = std::clamp<u32>(static_cast<u32>((point.x - rect.x) / std::max(1.f, rect.w / f32(target->options.size()))), 0, static_cast<u32>(target->options.size()) - 1);
+			if (target->segmented && !payload(*target).options.empty()) {
+				const u32 segment = std::clamp<u32>(
+					static_cast<u32>((point.x - rect.x) / std::max(1.f, rect.w / f32(payload(*target).options.size()))),
+					0, static_cast<u32>(payload(*target).options.size()) - 1);
 				if (selectSegment(*target, segment, false) && target->pressHandler.v && m_eventFn)
 					m_eventFn(m_eventContext, m_strings->view(target->pressHandler));
 				return true;
 			}
-			if (target->breadcrumb && !target->options.empty()) {
+			if (target->breadcrumb && !payload(*target).options.empty()) {
 				const f32 fontSize = target->style.has(PropId::FontSize) ? number(target->style.get(PropId::FontSize), 0, 14) : 14.f;
 				f32 x = rect.x;
 				u32 chosen = 0xFFFFFFFFu;
-				for (u32 segment = 0; segment < target->options.size(); ++segment) {
-					const f32 width = m_text && target->font.valid() ? m_text->layout(target->font, target->options[segment], fontSize * m_dpiScale, 0.f).width / m_dpiScale : 0.f;
+				for (u32 segment = 0; segment < payload(*target).options.size(); ++segment) {
+					const f32 width = m_text && target->font.valid()
+										  ? m_text->layout(target->font, payload(*target).options[segment],
+														   fontSize * m_dpiScale, 0.f)
+													.width /
+												m_dpiScale
+										  : 0.f;
 					if (point.x < x + width + 10.f) { chosen = segment; break; }
 					x += width + 22.f;
 				}
@@ -4454,7 +6104,7 @@ namespace xui {
 				visibleTreeEntries(*target, m_treeRowsScratch);
 				const i32 row = static_cast<i32>((point.y - contentY) / rowHeight);
 				if (row >= 0 && static_cast<u32>(row) < m_treeRowsScratch.size()) {
-					auto& entry = target->treeEntries[m_treeRowsScratch[static_cast<u32>(row)]];
+					auto& entry = payload(*target).treeEntries[m_treeRowsScratch[static_cast<u32>(row)]];
 					const f32 disclosureRight = contentX + f32(entry.depth) * 16.f + 18.f;
 					if (entry.hasChildren && point.x < disclosureRight) {
 						entry.expanded = !entry.expanded;
@@ -4469,8 +6119,58 @@ namespace xui {
 				}
 				return true;
 			}
+			if (target->listView) {
+				const Rect rect = m_layout.absRect(target->layout);
+				const LayoutStyle& layout = m_layout.style(target->layout);
+				const f32 rowHeight = std::max(24.f, (target->style.has(PropId::FontSize)
+														  ? number(target->style.get(PropId::FontSize), 0, 14.f)
+														  : 14.f) *
+														 1.8f);
+				const f32 contentY = rect.y + layout.border.t + layout.padding.t - target->listScrollY;
+				const i32 row = static_cast<i32>(std::floor((point.y - contentY) / rowHeight));
+				if (row >= 0 && static_cast<u32>(row) < listItemCount(*target)) {
+					std::string selected;
+					if (!listItemText(*target, static_cast<u32>(row), selected))
+						return true;
+					target->listSelectedRow = row;
+					if (target->treeSelection != selected) {
+						target->treeSelection = selected;
+						addDamage(rect);
+						if (target->pressHandler.v && m_eventFn)
+							m_eventFn(m_eventContext, m_strings->view(target->pressHandler));
+					}
+				}
+				return true;
+			}
+			if (target->table) {
+				const Rect rect = m_layout.absRect(target->layout);
+				const LayoutStyle& layout = m_layout.style(target->layout);
+				const f32 left = rect.x + layout.border.l + layout.padding.l;
+				const f32 top = rect.y + layout.border.t + layout.padding.t;
+				f32 x = left;
+				for (u32 col = 0; col < payload(*target).tableColumnWidths.size(); ++col) {
+					x += payload(*target).tableColumnWidths[col];
+					if (point.y >= top && point.y < top + 30.f && std::abs(point.x - x) <= 5.f) {
+						target->tableResizeColumn = static_cast<i32>(col);
+						target->tableResizeStartX = point.x;
+						target->tableResizeStartWidth = payload(*target).tableColumnWidths[col];
+						target->pressed = true;
+						return true;
+					}
+				}
+				const i32 row = static_cast<i32>(std::floor((point.y - top - 30.f + target->tableScrollY) / 26.f));
+				if (row >= 0 && static_cast<u32>(row) < listItemCount(*target) && target->tableSelectedRow != row) {
+					target->tableSelectedRow = row;
+					addDamage(rect);
+					if (target->pressHandler.v && m_eventFn)
+						m_eventFn(m_eventContext, m_strings->view(target->pressHandler));
+				}
+				return true;
+			}
 			const bool shouldPress = target->button || target->checkItem || target->checkBox || target->slider ||
-				target->dropdown || target->colorPicker || target->textBox || target->textArea || target->switchToggle || target->toggleButton || target->datePicker;
+									 target->listView || target->table || target->dropdown || target->colorPicker ||
+									 target->textBox || target->textArea || target->switchToggle ||
+									 target->toggleButton || target->datePicker;
 			for (Node& node : m_nodes) if (&node != target && node.pressed) {
 				node.pressed = false;
 				addDamage(m_layout.absRect(node.layout));
@@ -4486,13 +6186,26 @@ namespace xui {
 					for (Node& node : m_nodes) if (&node != target && node.popupOpen) node.popupOpen = false;
 					target->popupOpen = true;
 					if (target->datePicker) { target->viewYear = target->dateYear; target->viewMonth = target->dateMonth; }
-					addDamage(popupBounds(m_layout.absRect(target->layout), target->dropdown, target->options.size(), m_lastLayoutHeight,
-						target->datePicker ? 224.f : target->pickerWidth, target->datePicker ? 208.f : target->pickerHeight));
+					addDamage(popupBounds(m_layout.absRect(target->layout), target->dropdown,
+										  payload(*target).options.size(), m_lastLayoutHeight,
+										  target->datePicker ? 224.f : target->pickerWidth,
+										  target->datePicker ? 208.f : target->pickerHeight));
 				}
 				if (target->slider) {
-					const f32 before = target->value;
+					if (target->rangeSlider) {
+						const Rect rangeRect = m_layout.absRect(target->layout);
+						const f32 span = std::max(.0001f, target->maxValue - target->minValue);
+						const f32 lowX = rangeRect.x + rangeRect.w * ((target->rangeLow - target->minValue) / span);
+						const f32 highX = rangeRect.x + rangeRect.w * ((target->rangeHigh - target->minValue) / span);
+						target->rangeDraggingHigh = std::abs(point.x - highX) < std::abs(point.x - lowX);
+					}
+					const f32 before = target->rangeSlider
+										   ? (target->rangeDraggingHigh ? target->rangeHigh : target->rangeLow)
+										   : target->value;
 					updateSlider(*target, point);
-					if (before != target->value) {
+					if (before != (target->rangeSlider
+									   ? (target->rangeDraggingHigh ? target->rangeHigh : target->rangeLow)
+									   : target->value)) {
 						addDamage(m_layout.absRect(target->layout));
 						if (target->pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(target->pressHandler));
 					}
@@ -4523,11 +6236,18 @@ namespace xui {
 			}
 		}
 		bool changed = false;
+		m_textSelectDrag = 0xFFFFFFFFu;
+		m_textAutoScrollVelocity = 0.f;
+		m_textAutoScrollDeadline = m_textAutoScrollLast = {};
 		for (u32 index : m_interactiveNodes) {
 			Node& node = m_nodes[index];
 			changed |= node.pressed;
 			if (node.pressed) addDamage(m_layout.absRect(node.layout));
 			node.pressed = false;
+			if (node.tableResizeColumn >= 0) {
+				node.tableResizeColumn = -1;
+				changed = true;
+			}
 			if (node.stepperZone) { node.stepperZone = 0; addDamage(m_layout.absRect(node.layout)); changed = true; }
 		}
 		if (activated && (activated->checkItem || activated->checkBox || activated->switchToggle || activated->toggleButton)) {
@@ -4545,6 +6265,9 @@ namespace xui {
 		}
 		m_splitDrag = {};
 		m_dragSplit = {};
+		m_textSelectDrag = 0xFFFFFFFFu;
+		m_textAutoScrollVelocity = 0.f;
+		m_textAutoScrollDeadline = m_textAutoScrollLast = {};
 		return changed || activated != nullptr;
 	}
 
@@ -4559,6 +6282,49 @@ namespace xui {
 			return true;
 		}
 		if (menuKeyDown(key)) return true;
+		const bool dockShortcut = (mods & static_cast<u8>(Mod::Shift)) != 0 &&
+								  (mods & (static_cast<u8>(Mod::Ctrl) | static_cast<u8>(Mod::Super))) != 0;
+		if (dockShortcut && (key == static_cast<Key>('F') || key == static_cast<Key>('D'))) {
+			u32 hostIndex = m_focusedDockHost < m_dockHosts.size() ? m_focusedDockHost : 0xFFFFFFFFu;
+			if (hostIndex == 0xFFFFFFFFu)
+				for (u32 i = 0; i < m_dockHosts.size(); ++i)
+					if (isNodeVisible(m_dockHosts[i].node)) {
+						hostIndex = i;
+						break;
+					}
+			if (hostIndex < m_dockHosts.size()) {
+				DockHostState& host = m_dockHosts[hostIndex];
+				u32 panel = m_keyboardDockPanel < m_nodes.size() && host.tree.contains(m_keyboardDockPanel)
+								? m_keyboardDockPanel
+								: 0xFFFFFFFFu;
+				if (panel == 0xFFFFFFFFu)
+					for (u32 candidate : host.panelNodes)
+						if (host.tree.contains(candidate) && host.tree.activePanel(candidate) == candidate) {
+							panel = candidate;
+							break;
+						}
+				if (panel < m_nodes.size()) {
+					bool changed = false;
+					if (key == static_cast<Key>('F') && !host.tree.floating(panel))
+						changed = host.tree.undock(panel, host.tree.panelBounds(panel));
+					else if (key == static_cast<Key>('D') && host.tree.floating(panel)) {
+						for (u32 target : host.panelNodes)
+							if (target != panel && host.tree.contains(target) && !host.tree.floating(target)) {
+								changed = host.tree.dock(panel, target, DockZone::Center);
+								break;
+							}
+					}
+					if (changed) {
+						m_keyboardDockPanel = panel;
+						updateDockHostLayout(host, true);
+						addDockDamage(host);
+						fireDockHandler(panel, host.tree.floating(panel) ? m_nodes[panel].undockHandler
+																		 : m_nodes[panel].dockHandler);
+						return true;
+					}
+				}
+			}
+		}
 		if (key == Key::F3) {
 			m_fpsEnabled = !m_fpsEnabled;
 			m_fpsElapsed = 0;
@@ -4574,13 +6340,46 @@ namespace xui {
 			for (const Node& node : m_nodes) if (node.fpsCounter) addDamage(m_layout.absRect(node.layout));
 			return true;
 		}
-		const bool control = (mods & static_cast<u8>(Mod::Ctrl)) != 0;
+		const bool control = (mods & (static_cast<u8>(Mod::Ctrl) | static_cast<u8>(Mod::Super))) != 0;
 		for (u32 index : m_interactiveNodes) {
 			Node& field = m_nodes[index];
-			if (!(field.textBox || field.textArea) || !field.focused || field.disabled) continue;
+			if (!(field.textBox || field.textArea || field.pickerEditor) || !field.focused || field.disabled)
+				continue;
 			const std::size_t selectionBegin = std::min(field.caret, field.selectionAnchor);
 			const std::size_t selectionEnd = std::max(field.caret, field.selectionAnchor);
 			const bool hasSelection = selectionBegin != selectionEnd;
+			auto rememberEdit = [&]() {
+				field.undoStack.push_back({field.text, field.caret, field.selectionAnchor});
+				if (field.undoStack.size() > 64)
+					field.undoStack.erase(field.undoStack.begin());
+				field.redoStack.clear();
+			};
+			if (control && (key == static_cast<Key>('Z') || key == static_cast<Key>('Y'))) {
+				auto& source = (key == static_cast<Key>('Y') || (mods & static_cast<u8>(Mod::Shift))) ? field.redoStack
+																									  : field.undoStack;
+				auto& destination = (&source == &field.redoStack) ? field.undoStack : field.redoStack;
+				if (source.empty() || field.readOnly)
+					return false;
+				if (!validateInput(field, source.back().text))
+					return true;
+				destination.push_back({field.text, field.caret, field.selectionAnchor});
+				const auto snapshot = std::move(source.back());
+				source.pop_back();
+				field.text = snapshot.text;
+				field.caret = snapshot.caret;
+				field.selectionAnchor = snapshot.anchor;
+				field.imePreedit.clear();
+				m_layout.markContentChanged(field.layout);
+				if (field.pickerEditor)
+					updatePickerFromEditor(field);
+				else if (field.numberField)
+					commitNumberText(field);
+				else if (field.pressHandler.v && m_eventFn)
+					m_eventFn(m_eventContext, m_strings->view(field.pressHandler));
+				resetCaretBlink();
+				addDamage(field.pickerEditor ? pickerEditorRect(field) : m_layout.absRect(field.layout));
+				return true;
+			}
 			if (control && key == Key::A) {
 				field.selectionAnchor = 0;
 				field.caret = field.text.size();
@@ -4591,42 +6390,71 @@ namespace xui {
 				if (hasSelection && platform) platform->setClipboardText(std::string_view(field.text).substr(selectionBegin, selectionEnd - selectionBegin));
 				if (key == static_cast<Key>('C') || field.readOnly || !hasSelection) return hasSelection;
 			}
-			if (control && key == static_cast<Key>('V') && platform && !field.readOnly) return textInput(platform->clipboardText());
-			if (control && key != static_cast<Key>('X')) break;
+			if (control && key == static_cast<Key>('V') && platform && !field.readOnly)
+				return textInput(platform->clipboardText());
 			const std::size_t oldCaret = field.caret;
 			const bool shift = (mods & static_cast<u8>(Mod::Shift)) != 0;
 			bool edited = false;
+			if (!field.readOnly &&
+				(key == Key::Backspace || key == Key::Delete || (control && key == static_cast<Key>('X')))) {
+				std::size_t eraseBegin = selectionBegin, eraseEnd = selectionEnd;
+				if (!hasSelection && key == Key::Backspace && field.caret)
+					eraseBegin =
+						control ? previousWord(field.text, field.caret) : previousUtf8(field.text, field.caret);
+				else if (!hasSelection && key == Key::Delete && field.caret < field.text.size())
+					eraseEnd = control ? nextWord(field.text, field.caret) : nextUtf8(field.text, field.caret);
+				if (eraseEnd > eraseBegin) {
+					std::string proposed = field.text;
+					proposed.erase(eraseBegin, eraseEnd - eraseBegin);
+					if (!validateInput(field, proposed))
+						return true;
+				}
+			}
 			if (!field.readOnly && ((key == Key::Backspace || key == Key::Delete) || (control && key == static_cast<Key>('X')))) {
 				if (hasSelection) {
+					rememberEdit();
 					field.text.erase(selectionBegin, selectionEnd - selectionBegin);
 					field.caret = field.selectionAnchor = selectionBegin;
 					edited = true;
 				}
 				else if (key == Key::Backspace && field.caret) {
-					const std::size_t start = previousUtf8(field.text, field.caret);
+					rememberEdit();
+					const std::size_t start =
+						control ? previousWord(field.text, field.caret) : previousUtf8(field.text, field.caret);
 					field.text.erase(start, field.caret - start); field.caret = field.selectionAnchor = start; edited = true;
 				}
 				else if ((key == Key::Delete || (control && key == static_cast<Key>('X'))) && field.caret < field.text.size()) {
-					const std::size_t end = nextUtf8(field.text, field.caret);
+					rememberEdit();
+					const std::size_t end = control && key == Key::Delete ? nextWord(field.text, field.caret)
+																		  : nextUtf8(field.text, field.caret);
 					field.text.erase(field.caret, end - field.caret); field.selectionAnchor = field.caret; edited = true;
 				}
 			}
 			else if (key == Key::Left && field.caret) {
-				field.caret = previousUtf8(field.text, field.caret);
+				field.caret = control ? previousWord(field.text, field.caret) : previousUtf8(field.text, field.caret);
 				if (!shift) field.selectionAnchor = field.caret;
 			}
 			else if (key == Key::Right && field.caret < field.text.size()) {
-				field.caret = nextUtf8(field.text, field.caret);
+				field.caret = control ? nextWord(field.text, field.caret) : nextUtf8(field.text, field.caret);
 				if (!shift) field.selectionAnchor = field.caret;
 			}
 			else if (key == Key::Home) {
-				const std::size_t lineBreak = field.textArea && field.caret ? field.text.rfind('\n', field.caret - 1) : std::string::npos;
-				field.caret = lineBreak == std::string::npos ? 0 : lineBreak + 1;
+				if (control)
+					field.caret = 0;
+				else {
+					const std::size_t lineBreak =
+						field.caret ? field.text.rfind('\n', field.caret - 1) : std::string::npos;
+					field.caret = lineBreak == std::string::npos ? 0 : lineBreak + 1;
+				}
 				if (!shift) field.selectionAnchor = field.caret;
 			}
 			else if (key == Key::End) {
-				const std::size_t end = field.text.find('\n', field.caret);
-				field.caret = end == std::string::npos ? field.text.size() : end;
+				if (control)
+					field.caret = field.text.size();
+				else {
+					const std::size_t end = field.text.find('\n', field.caret);
+					field.caret = end == std::string::npos ? field.text.size() : end;
+				}
 				if (!shift) field.selectionAnchor = field.caret;
 			}
 			else if (!field.readOnly && field.textArea && key == Key::Tab) {
@@ -4636,6 +6464,13 @@ namespace xui {
 				const u32 room = field.maxLength ? field.maxLength - std::min(field.maxLength, currentCount - selectedCount) : field.tabSize;
 				const u32 spaces = std::min(field.tabSize, room);
 				if (spaces) {
+					std::string proposed = field.text;
+					if (hasSelection)
+						proposed.erase(selectionBegin, selectionEnd - selectionBegin);
+					proposed.insert(selectionBegin, spaces, ' ');
+					if (!validateInput(field, proposed))
+						return true;
+					rememberEdit();
 					if (hasSelection) field.text.erase(selectionBegin, selectionEnd - selectionBegin);
 					field.text.insert(selectionBegin, spaces, ' ');
 					field.caret = field.selectionAnchor = selectionBegin + spaces;
@@ -4645,6 +6480,13 @@ namespace xui {
 			else if (!field.readOnly && field.textArea && key == Key::Enter) {
 				const std::size_t countAfterSelection = codepointCount(field.text) - (hasSelection ? codepointCount(std::string_view(field.text).substr(selectionBegin, selectionEnd - selectionBegin)) : 0u);
 				if (!field.maxLength || countAfterSelection < field.maxLength) {
+					std::string proposed = field.text;
+					if (hasSelection)
+						proposed.erase(selectionBegin, selectionEnd - selectionBegin);
+					proposed.insert(selectionBegin, 1, '\n');
+					if (!validateInput(field, proposed))
+						return true;
+					rememberEdit();
 					if (hasSelection) field.text.erase(selectionBegin, selectionEnd - selectionBegin);
 					field.text.insert(selectionBegin, 1, '\n');
 					field.caret = field.selectionAnchor = selectionBegin + 1;
@@ -4660,19 +6502,23 @@ namespace xui {
 				if (field.pickerEditor) updatePickerFromEditor(field);
 				else if (field.numberField) commitNumberText(field);
 				else if (field.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(field.pressHandler));
+				publishModelValue(field, field.text);
 			}
 			if (edited || oldCaret != field.caret) { resetCaretBlink(); addDamage(field.pickerEditor ? pickerEditorRect(field) : m_layout.absRect(field.layout)); return true; }
 			if (key == Key::Backspace || key == Key::Delete) return false;
 			break;
 		}
 		if (key == Key::Tab) {
+			const bool backwards = (mods & static_cast<u8>(Mod::Shift)) != 0;
 			std::size_t focusableCount = 0, current = static_cast<std::size_t>(-1);
 			for (u32 index : m_interactiveNodes) if (!m_nodes[index].disabled && isNodeVisible(index)) {
 				if (m_nodes[index].focused) current = focusableCount;
 				++focusableCount;
 			}
 			if (!focusableCount) return false;
-			const std::size_t next = current == static_cast<std::size_t>(-1) ? 0 : (current + 1) % focusableCount;
+			const std::size_t next = current == static_cast<std::size_t>(-1)
+										 ? (backwards ? focusableCount - 1 : 0)
+										 : (current + (backwards ? focusableCount - 1 : 1)) % focusableCount;
 			std::size_t ordinal = 0;
 			for (u32 index : m_interactiveNodes) if (!m_nodes[index].disabled && isNodeVisible(index)) {
 				Node& node = m_nodes[index]; const bool focus = ordinal++ == next;
@@ -4739,7 +6585,7 @@ namespace xui {
 				shiftDate(node.dateYear, node.dateMonth, node.dateDay, delta);
 				node.viewYear = node.dateYear;
 				node.viewMonth = node.dateMonth;
-				node.text = formatDateText(node.dateYear, node.dateMonth, node.dateDay);
+				node.text = formatDateText(node.dateYear, node.dateMonth, node.dateDay, m_locale);
 				m_layout.markContentChanged(node.layout);
 				addDamage(m_layout.absRect(node.layout));
 				addDamage(popupBounds(m_layout.absRect(node.layout), false, 0, m_lastLayoutHeight, 224.f, 208.f));
@@ -4751,8 +6597,8 @@ namespace xui {
 			for (u32 index : m_interactiveNodes) {
 				Node& node = m_nodes[index];
 				if (node.disabled || !node.focused) continue;
-				if (node.segmented && node.options.size() > 1) {
-					const i32 count = static_cast<i32>(node.options.size());
+				if (node.segmented && payload(node).options.size() > 1) {
+					const i32 count = static_cast<i32>(payload(node).options.size());
 					const i32 direction = key == Key::Right ? 1 : -1;
 					const i32 next = (static_cast<i32>(node.selectedOption) + count + direction) % count;
 					selectSegment(node, static_cast<u32>(next), true);
@@ -4810,20 +6656,96 @@ namespace xui {
 			return false;
 		}
 		if (key == Key::Down || key == Key::Up) {
-			for (Node& node : m_nodes) if (node.dropdown && node.focused && !node.options.empty()) {
-				const i32 direction = key == Key::Down ? 1 : -1;
-				node.selectedOption = static_cast<u32>(std::clamp<i32>(static_cast<i32>(node.selectedOption) + direction, 0, static_cast<i32>(node.options.size()) - 1));
-				node.text = node.options[node.selectedOption]; m_layout.markContentChanged(node.layout); addDamage(m_layout.absRect(node.layout));
-				if (node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
-				return true;
-			}
+			for (Node& node : m_nodes)
+				if (node.dropdown && node.focused && !payload(node).options.empty()) {
+					const i32 direction = key == Key::Down ? 1 : -1;
+					node.selectedOption =
+						static_cast<u32>(std::clamp<i32>(static_cast<i32>(node.selectedOption) + direction, 0,
+														 static_cast<i32>(payload(node).options.size()) - 1));
+					node.text = payload(node).options[node.selectedOption];
+					m_layout.markContentChanged(node.layout);
+					addDamage(m_layout.absRect(node.layout));
+					if (node.pressHandler.v && m_eventFn)
+						m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
+					return true;
+				}
 		}
 		if (key == Key::Down || key == Key::Up) {
 			for (u32 index : m_interactiveNodes) {
 				Node& node = m_nodes[index];
-				if (node.radioGroup && node.focused && !node.disabled && !node.options.empty()) {
+				if (node.table && node.focused && !node.disabled && listItemCount(node) > 0) {
+					const i32 next = std::clamp(node.tableSelectedRow + (key == Key::Down ? 1 : -1), 0,
+												static_cast<i32>(listItemCount(node)) - 1);
+					if (next == node.tableSelectedRow)
+						return false;
+					node.tableSelectedRow = next;
+					const f32 visibleHeight = std::max(26.f, m_layout.absRect(node.layout).h - 30.f);
+					const f32 rowTop = f32(next) * 26.f, rowBottom = rowTop + 26.f;
+					if (rowTop < node.tableScrollY)
+						node.tableScrollY = rowTop;
+					else if (rowBottom > node.tableScrollY + visibleHeight)
+						node.tableScrollY = rowBottom - visibleHeight;
+					addDamage(m_layout.absRect(node.layout));
+					if (node.pressHandler.v && m_eventFn)
+						m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
+					return true;
+				}
+				if (node.listView && node.focused && !node.disabled && listItemCount(node) > 0) {
+					const bool providerBacked = node.id.v && m_listItemProviders.contains(node.id);
+					i32 selected = node.listSelectedRow;
+					if (!providerBacked) {
+						auto found =
+							std::find(payload(node).options.begin(), payload(node).options.end(), node.treeSelection);
+						selected = found == payload(node).options.end()
+									   ? (key == Key::Down ? -1 : static_cast<i32>(payload(node).options.size()))
+									   : static_cast<i32>(found - payload(node).options.begin());
+					}
+					selected = std::clamp(selected + (key == Key::Down ? 1 : -1), 0,
+										  static_cast<i32>(listItemCount(node)) - 1);
+					std::string selectedText;
+					if (!listItemText(node, static_cast<u32>(selected), selectedText))
+						return false;
+					node.listSelectedRow = selected;
+					node.treeSelection = std::move(selectedText);
+					const Rect bounds = m_layout.absRect(node.layout);
+					const f32 fontSize =
+						node.style.has(PropId::FontSize) ? number(node.style.get(PropId::FontSize), 0, 14.f) : 14.f;
+					const f32 rowHeight = std::max(24.f, fontSize * 1.8f), rowTop = f32(selected) * rowHeight,
+							  rowBottom = rowTop + rowHeight;
+					if (rowTop < node.listScrollY)
+						node.listScrollY = rowTop;
+					else if (rowBottom > node.listScrollY + bounds.h)
+						node.listScrollY = rowBottom - bounds.h;
+					node.listScrollY = std::clamp(node.listScrollY, 0.f,
+												  std::max(0.f, rowHeight * f32(listItemCount(node)) - bounds.h));
+					addDamage(m_layout.absRect(node.layout));
+					if (node.pressHandler.v && m_eventFn)
+						m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
+					return true;
+				}
+				if (node.treeView && node.focused && !node.disabled) {
+					visibleTreeEntries(node, m_treeRowsScratch);
+					if (m_treeRowsScratch.empty())
+						return false;
+					auto current = std::find_if(m_treeRowsScratch.begin(), m_treeRowsScratch.end(), [&](u32 entry) {
+						return payload(node).treeEntries[entry].path == node.treeSelection;
+					});
+					i32 ordinal = current == m_treeRowsScratch.end()
+									  ? (key == Key::Down ? -1 : static_cast<i32>(m_treeRowsScratch.size()))
+									  : static_cast<i32>(current - m_treeRowsScratch.begin());
+					ordinal = std::clamp(ordinal + (key == Key::Down ? 1 : -1), 0,
+										 static_cast<i32>(m_treeRowsScratch.size()) - 1);
+					node.treeSelection = payload(node).treeEntries[m_treeRowsScratch[static_cast<u32>(ordinal)]].path;
+					addDamage(m_layout.absRect(node.layout));
+					if (node.pressHandler.v && m_eventFn)
+						m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
+					return true;
+				}
+				if (node.radioGroup && node.focused && !node.disabled && !payload(node).options.empty()) {
 					const i32 direction = key == Key::Down ? 1 : -1;
-					const u32 next = static_cast<u32>(std::clamp<i32>(static_cast<i32>(node.selectedOption) + direction, 0, static_cast<i32>(node.options.size()) - 1));
+					const u32 next =
+						static_cast<u32>(std::clamp<i32>(static_cast<i32>(node.selectedOption) + direction, 0,
+														 static_cast<i32>(payload(node).options.size()) - 1));
 					if (next == node.selectedOption) return false;
 					node.selectedOption = next;
 					addDamage(m_layout.absRect(node.layout));
@@ -4837,12 +6759,38 @@ namespace xui {
 				}
 			}
 		}
+		if (key == Key::Left || key == Key::Right) {
+			for (u32 index : m_interactiveNodes) {
+				Node& node = m_nodes[index];
+				if (!node.treeView || !node.focused || node.disabled)
+					continue;
+				auto& entries = payload(node).treeEntries;
+				auto selected = std::find_if(entries.begin(), entries.end(), [&](const Node::TreeEntry& entry) {
+					return entry.path == node.treeSelection;
+				});
+				if (selected == entries.end())
+					return false;
+				if (key == Key::Right && selected->hasChildren && !selected->expanded)
+					selected->expanded = true;
+				else if (key == Key::Left && selected->hasChildren && selected->expanded)
+					selected->expanded = false;
+				else if (key == Key::Left && selected->parent >= 0)
+					node.treeSelection = entries[static_cast<u32>(selected->parent)].path;
+				else
+					return false;
+				addDamage(m_layout.absRect(node.layout));
+				if (node.pressHandler.v && m_eventFn)
+					m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
+				return true;
+			}
+		}
 		if (key != Key::Enter && key != Key::Space) return false;
 		for (u32 index : m_interactiveNodes) {
 			Node& node = m_nodes[index];
 			if (!node.focused || node.disabled) continue;
 			if (node.checkItem || node.checkBox || node.switchToggle || node.toggleButton) node.checked = !node.checked;
-			if (node.dropdown || node.colorPicker) node.popupOpen = !node.popupOpen;
+			if (node.dropdown || node.colorPicker || node.datePicker)
+				node.popupOpen = !node.popupOpen;
 			addDamage(m_layout.absRect(node.layout));
 			if (!node.dropdown && !node.colorPicker && node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
 			if (node.checkItem && node.parentIndex < m_nodes.size()) {
@@ -4855,13 +6803,44 @@ namespace xui {
 		return false;
 	}
 
+	bool UiRuntime::validateInput(Node& field, std::string_view proposedText) {
+		Node* owner = &field;
+		if (field.pickerEditor && field.pickerOwner < m_nodes.size())
+			owner = &m_nodes[field.pickerOwner];
+		std::string error;
+		auto run = [&](StrId handler) {
+			if (!handler.v)
+				return true;
+			if (!m_inputValidationFn) {
+				error = "No input validation callback is registered";
+				return false;
+			}
+			return m_inputValidationFn(m_inputValidationContext, m_strings->view(handler), m_strings->view(owner->id),
+									   proposedText, error);
+		};
+		const bool accepted = run(owner->filterHandler) && run(owner->validateHandler);
+		const std::string message = accepted ? std::string{} : (error.empty() ? "Input rejected" : std::move(error));
+		const bool changed = owner->validationError != message || field.validationError != message;
+		owner->validationError = message;
+		field.validationError = message;
+		if (changed) {
+			addDamage(owner->pickerEditor ? pickerEditorRect(*owner) : m_layout.absRect(owner->layout));
+			if (owner != &field)
+				addDamage(pickerEditorRect(field));
+		}
+		return accepted;
+	}
+
 	bool UiRuntime::textInput(u32 codepoint) {
 		// Control characters are editing/navigation commands, never printable glyphs. Tab is
 		// handled by keyDown (which inserts the TextArea's configured indentation).
 		if (codepoint < 0x20u || codepoint == 0x7Fu) return false;
 		for (u32 index : m_interactiveNodes) {
 			Node& field = m_nodes[index];
-			if (!(field.textBox || field.textArea) || !field.focused || field.disabled || field.readOnly || !codepoint || codepoint == '\r' || codepoint == '\n') continue;
+			if (!(field.textBox || field.textArea || field.pickerEditor) || !field.focused || field.disabled ||
+				field.readOnly || !codepoint || codepoint == '\r' || codepoint == '\n')
+				continue;
+			field.imePreedit.clear();
 			if (field.numberField) {
 				const bool numeric = (codepoint >= '0' && codepoint <= '9') || codepoint == '.' || codepoint == '-' ||
 					codepoint == '+' || codepoint == ' ' || codepoint == 'e' || codepoint == 'E';
@@ -4872,6 +6851,16 @@ namespace xui {
 			const u32 selectedCount = codepointCount(std::string_view(field.text).substr(begin, end - begin));
 			if (field.maxLength && codepointCount(field.text) - selectedCount >= field.maxLength) return false;
 			std::string encoded; appendUtf8(encoded, codepoint);
+			std::string proposed = field.text;
+			if (end > begin)
+				proposed.erase(begin, end - begin);
+			proposed.insert(begin, encoded);
+			if (!validateInput(field, proposed))
+				return true;
+			field.undoStack.push_back({field.text, field.caret, field.selectionAnchor});
+			if (field.undoStack.size() > 64)
+				field.undoStack.erase(field.undoStack.begin());
+			field.redoStack.clear();
 			if (end > begin) field.text.erase(begin, end - begin);
 			field.text.insert(begin, encoded);
 			field.caret = field.selectionAnchor = begin + encoded.size();
@@ -4880,6 +6869,7 @@ namespace xui {
 			if (field.pickerEditor) updatePickerFromEditor(field);
 			else if (field.numberField) commitNumberText(field);
 			else if (field.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(field.pressHandler));
+			publishModelValue(field, field.text);
 			if (field.pickerEditor) addDamage(pickerEditorRect(field));
 			return true;
 		}
@@ -4887,7 +6877,7 @@ namespace xui {
 	}
 
 	bool UiRuntime::textInput(std::string_view utf8) {
-		bool changed = false;
+		std::string inserted;
 		for (std::size_t i = 0; i < utf8.size();) {
 			const u8 lead = static_cast<u8>(utf8[i]);
 			u32 codepoint = 0xFFFDu;
@@ -4911,17 +6901,165 @@ namespace xui {
 					codepoint = 0xFFFDu; length = 1;
 				}
 			}
-			changed |= textInput(codepoint);
+			if ((codepoint >= 0x20u && codepoint != 0x7Fu) || codepoint == '\n' || codepoint == '\t')
+				appendUtf8(inserted, codepoint);
 			i += length;
 		}
+		if (inserted.empty())
+			return false;
+		for (u32 index : m_interactiveNodes) {
+			Node& field = m_nodes[index];
+			if (!(field.textBox || field.textArea || field.pickerEditor) || !field.focused || field.disabled ||
+				field.readOnly)
+				continue;
+			std::string fieldInsertion = inserted;
+			if (!field.textArea) {
+				fieldInsertion.erase(std::remove_if(fieldInsertion.begin(), fieldInsertion.end(),
+													[](char c) { return c == '\n' || c == '\t'; }),
+									 fieldInsertion.end());
+			}
+			if (fieldInsertion.empty())
+				return false;
+			if (field.numberField) {
+				for (u8 byte : fieldInsertion)
+					if (!((byte >= '0' && byte <= '9') || byte == '.' || byte == '-' || byte == '+' || byte == ' ' ||
+						  byte == 'e' || byte == 'E'))
+						return false;
+			}
+			const std::size_t begin = std::min(field.caret, field.selectionAnchor);
+			const std::size_t end = std::max(field.caret, field.selectionAnchor);
+			const u32 currentCount = codepointCount(field.text);
+			const u32 selectedCount = codepointCount(std::string_view(field.text).substr(begin, end - begin));
+			const u32 retainedCount = currentCount - selectedCount;
+			if (field.maxLength) {
+				const u32 room = field.maxLength > retainedCount ? field.maxLength - retainedCount : 0u;
+				fieldInsertion = truncateUtf8(fieldInsertion, room);
+			}
+			if (fieldInsertion.empty())
+				return false;
+			std::string proposed = field.text;
+			proposed.erase(begin, end - begin);
+			proposed.insert(begin, fieldInsertion);
+			if (!validateInput(field, proposed))
+				return true;
+			field.undoStack.push_back({field.text, field.caret, field.selectionAnchor});
+			if (field.undoStack.size() > 64)
+				field.undoStack.erase(field.undoStack.begin());
+			field.redoStack.clear();
+			field.text = std::move(proposed);
+			field.caret = field.selectionAnchor = begin + fieldInsertion.size();
+			field.imePreedit.clear();
+			resetCaretBlink();
+			m_layout.markContentChanged(field.layout);
+			addDamage(field.pickerEditor ? pickerEditorRect(field) : m_layout.absRect(field.layout));
+			if (field.pickerEditor)
+				updatePickerFromEditor(field);
+			else if (field.numberField)
+				commitNumberText(field);
+			else if (field.pressHandler.v && m_eventFn)
+				m_eventFn(m_eventContext, m_strings->view(field.pressHandler));
+			publishModelValue(field, field.text);
+			return true;
+		}
+		return false;
+	}
+
+	bool UiRuntime::imeCompose(std::string_view utf8, i32 selectionStart, i32 selectionEnd) {
+		for (u32 index : m_interactiveNodes) {
+			Node& field = m_nodes[index];
+			if (!(field.textBox || field.textArea || field.pickerEditor) || !field.focused || field.disabled ||
+				field.readOnly)
+				continue;
+			field.imePreedit.assign(utf8);
+			field.imeSelectionStart = selectionStart;
+			field.imeSelectionEnd = selectionEnd;
+			addDamage(field.pickerEditor ? pickerEditorRect(field) : m_layout.absRect(field.layout));
+			return true;
+		}
+		return false;
+	}
+
+	bool UiRuntime::cancelImeComposition() {
+		bool changed = false;
+		for (Node& node : m_nodes) {
+			if (!node.focused && node.imePreedit.empty())
+				continue;
+			if (node.focused) {
+				node.focused = false;
+				addDamage(node.pickerEditor ? pickerEditorRect(node) : m_layout.absRect(node.layout));
+				changed = true;
+			}
+			if (!node.imePreedit.empty()) {
+				node.imePreedit.clear();
+				node.imeSelectionStart = node.imeSelectionEnd = -1;
+				addDamage(node.pickerEditor ? pickerEditorRect(node) : m_layout.absRect(node.layout));
+				changed = true;
+			}
+		}
+		m_textSelectDrag = 0xFFFFFFFFu;
+		m_textClickNode = 0xFFFFFFFFu;
+		m_textClickCount = 0;
 		return changed;
+	}
+
+	Rect UiRuntime::imeCursorRect() const {
+		if (!m_text)
+			return {};
+		for (u32 index : m_interactiveNodes) {
+			const Node& field = m_nodes[index];
+			if (!(field.textBox || field.textArea || field.pickerEditor) || !field.focused || field.disabled ||
+				field.readOnly || !field.font.valid())
+				continue;
+			const Rect rect = field.pickerEditor ? pickerEditorRect(field) : m_layout.absRect(field.layout);
+			const f32 dpi = m_dpiScale > 0.f ? m_dpiScale : 1.f;
+			const f32 size = field.style.has(PropId::FontSize)
+								 ? number(field.style.get(PropId::FontSize), 0, field.pickerEditor ? 12.f : 16.f)
+								 : (field.pickerEditor ? 12.f : 16.f);
+			const f32 raster = size * dpi;
+			const f32 border = field.style.has(PropId::Border) ? number(field.style.get(PropId::Border), 0) : 0.f;
+			const Edges padding =
+				field.pickerEditor	  ? Edges{3.f, 5.f, 3.f, 5.f}
+				: field.hasXuiPadding ? field.xuiPadding
+				: field.style.has(PropId::Pad)
+					? Edges{number(field.style.get(PropId::Pad), 3), number(field.style.get(PropId::Pad), 0),
+							number(field.style.get(PropId::Pad), 1), number(field.style.get(PropId::Pad), 2)}
+					: Edges{};
+			const f32 contentWidth = std::max(1.f, rect.w - padding.l - padding.r - 2.f * border);
+			const TextLayout& layout =
+				m_text->layout(field.font, field.text, raster, field.textArea ? contentWidth * dpi : 0.f);
+			const TextCaretStop caret = layout.caretAt(static_cast<u32>(field.caret));
+			f32 x = rect.x + padding.l + border + caret.x / dpi;
+			f32 y = rect.y + padding.t + border + caret.line * layout.lineHeight / dpi - field.textScrollY;
+			if (field.textArea)
+				y += std::max(0.f, (rect.h - padding.t - padding.b - 2.f * border - layout.height / dpi) * 0.5f);
+			if (field.textBox) {
+				const f32 viewport = std::max(0.f, rect.w - padding.l - padding.r - 2.f * border);
+				const f32 offset =
+					std::clamp(caret.x / dpi - viewport, 0.f, std::max(0.f, layout.advanceWidth / dpi - viewport));
+				x -= offset;
+				y += std::max(0.f, (rect.h - padding.t - padding.b - 2.f * border - layout.height / dpi) * 0.5f);
+			}
+			const f32 lineHeight = std::max(size, layout.lineHeight / dpi);
+			const Mat3& transform = field.paintTransform;
+			const Vec2 point{transform.a * x + transform.c * y + transform.tx,
+							 transform.b * x + transform.d * y + transform.ty};
+			return {point.x, point.y, 1.f, lineHeight};
+		}
+		return {};
 	}
 
 	void UiRuntime::updateSlider(Node& node, Vec2 point) {
 		const Rect rect = m_layout.absRect(node.layout);
 		if (rect.w <= 0 || node.maxValue <= node.minValue) return;
 		const f32 fraction = std::clamp((point.x - rect.x) / rect.w, 0.f, 1.f);
-		node.value = node.minValue + fraction * (node.maxValue - node.minValue);
+		const f32 next = node.minValue + fraction * (node.maxValue - node.minValue);
+		if (node.rangeSlider) {
+			if (node.rangeDraggingHigh)
+				node.rangeHigh = std::clamp(next, node.rangeLow, node.maxValue);
+			else
+				node.rangeLow = std::clamp(next, node.minValue, node.rangeHigh);
+		} else
+			node.value = next;
 	}
 
 	bool UiRuntime::updateColorPicker(Node& node, Vec2 point) {
@@ -4969,6 +7107,95 @@ namespace xui {
 		if (owner.pickerFormat == "hex") return editor.pickerSlot == 4 ? geometry.hexValue : Rect{};
 		if (editor.pickerSlot >= (owner.pickerAlpha ? 4u : 3u)) return {};
 		return geometry.channels[editor.pickerSlot];
+	}
+
+	std::size_t UiRuntime::textIndexAtPoint(const Node& node, Vec2 point) const {
+		if (!m_text || !node.font.valid())
+			return node.text.size();
+		point = inverseTransformPoint(node.paintTransform, point);
+		const Rect rect = node.pickerEditor ? pickerEditorRect(node) : m_layout.absRect(node.layout);
+		const f32 dpi = m_dpiScale > 0.f ? m_dpiScale : 1.f;
+		const f32 fontSize = node.style.has(PropId::FontSize)
+								 ? number(node.style.get(PropId::FontSize), 0, node.pickerEditor ? 12.f : 16.f)
+								 : (node.pickerEditor ? 12.f : 16.f);
+		const f32 rasterSize = fontSize * dpi;
+		const Edges padding =
+			node.pickerEditor	 ? Edges{3.f, 5.f, 3.f, 5.f}
+			: node.hasXuiPadding ? node.xuiPadding
+			: node.style.has(PropId::Pad)
+				? Edges{number(node.style.get(PropId::Pad), 3), number(node.style.get(PropId::Pad), 0),
+						number(node.style.get(PropId::Pad), 1), number(node.style.get(PropId::Pad), 2)}
+				: Edges{};
+		const f32 border = node.style.has(PropId::Border) ? number(node.style.get(PropId::Border), 0) : 0.f;
+		const f32 left = node.pickerEditor ? rect.x + 5.f : rect.x + padding.l + border;
+		const f32 top = rect.y + padding.t + border + (node.pickerEditor ? 3.f : 0.f);
+		const f32 contentW = std::max(1.f, rect.w - padding.l - padding.r - border * 2.f - 10.f);
+		const f32 wrap = node.textArea ? contentW * dpi : 0.f;
+		const Font* font = m_text->font(node.font);
+		const f32 lineHeight = font ? std::max(fontSize, font->lineHeight(rasterSize) / dpi) : fontSize;
+		const u32 targetLine =
+			node.textArea ? static_cast<u32>(std::max(
+								0.f, std::floor((point.y - top + node.textScrollY) / std::max(1.f, lineHeight))))
+						  : 0u;
+		const f32 targetX = std::max(0.f, point.x - left) * dpi;
+		const bool visualText = m_showWhitespace && (node.textBox || node.textArea) && !node.password;
+		const std::string display = visualText ? visualizeWhitespace(node.text) : std::string{};
+		const std::string_view layoutText = visualText ? std::string_view(display) : std::string_view(node.text);
+		const TextLayout& layout = m_text->layout(node.font, layoutText, rasterSize, wrap);
+		if (layout.caretStops.empty() || layout.visualCaretStops.empty())
+			return 0;
+		const u32 line =
+			std::min(targetLine, static_cast<u32>(layout.lineWidths.empty() ? 0 : layout.lineWidths.size() - 1));
+		// The stops are sorted by (line, x). Keep the hit-test range as indices so no
+		// iterator from a vector is ever decremented/dereferenced at a line boundary.
+		const auto& stops = layout.visualCaretStops;
+		std::size_t first = 0, last = stops.size();
+		while (first < last) {
+			const std::size_t middle = first + (last - first) / 2;
+			if (stops[middle].line < line)
+				first = middle + 1;
+			else
+				last = middle;
+		}
+		std::size_t after = first;
+		while (after < stops.size() && stops[after].line == line)
+			++after;
+		if (first >= after)
+			return layout.caretStops.back().byteOffset;
+		bool rtlLine = false;
+		for (const ShapedGlyph& glyph : layout.glyphs)
+			if (glyph.line == line && glyph.rtl) {
+				rtlLine = true;
+				break;
+			}
+		std::size_t best = first;
+		if (rtlLine) {
+			f32 bestDistance = std::abs(stops[best].x - targetX);
+			for (std::size_t stop = first + 1; stop < after; ++stop) {
+				const f32 distance = std::abs(stops[stop].x - targetX);
+				if (distance < bestDistance) {
+					best = stop;
+					bestDistance = distance;
+				}
+			}
+		} else {
+			std::size_t right = first, rightEnd = after;
+			while (right < rightEnd) {
+				const std::size_t middle = right + (rightEnd - right) / 2;
+				if (stops[middle].x < targetX)
+					right = middle + 1;
+				else
+					rightEnd = middle;
+			}
+			if (right >= after)
+				best = after - 1;
+			else {
+				best = right;
+				if (right > first && std::abs(stops[right - 1].x - targetX) <= std::abs(stops[right].x - targetX))
+					best = right - 1;
+			}
+		}
+		return visualText ? rawTextOffset(node.text, stops[best].byteOffset) : stops[best].byteOffset;
 	}
 
 	UiRuntime::PickerGeometry UiRuntime::pickerGeometry(const Node& node) const {
@@ -5074,7 +7301,8 @@ namespace xui {
 	}
 
 	bool UiRuntime::selectSegment(Node& node, u32 index, bool notify) {
-		if (index >= node.options.size()) return false;
+		if (index >= payload(node).options.size())
+			return false;
 		const bool changed = node.selectedOption != index;
 		node.selectedOption = index;
 		if (changed) {
@@ -5096,14 +7324,29 @@ namespace xui {
 		const f32 clamped = node.numberBounded ? std::clamp(stepped, std::min(node.minValue, node.maxValue), std::max(node.minValue, node.maxValue)) : stepped;
 		if (clamped == node.value) return;
 		node.value = clamped;
-		node.text = formatNumberText(clamped, node.numberPrecision) + (node.unit.empty() ? std::string{} : node.unit);
+		node.text =
+			formatNumberText(clamped, node.numberPrecision, m_locale) + (node.unit.empty() ? std::string{} : node.unit);
 		node.caret = node.selectionAnchor = node.text.size();
 		m_layout.markContentChanged(node.layout);
 		if (node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
 	}
 
 	bool UiRuntime::commitNumberText(Node& node) {
-		const char* text = node.text.c_str();
+		std::string normalized = node.text;
+		const bool commaDecimal = m_locale.rfind("fr", 0) == 0 || m_locale.rfind("de", 0) == 0 ||
+								  m_locale.rfind("es", 0) == 0 || m_locale.rfind("it", 0) == 0 ||
+								  m_locale.rfind("pt", 0) == 0 || m_locale.rfind("ru", 0) == 0;
+		if (commaDecimal) {
+			normalized.erase(std::remove(normalized.begin(), normalized.end(), '.'), normalized.end());
+			for (std::string_view separator : {std::string_view("\xC2\xA0"), std::string_view("\xE2\x80\xAF")}) {
+				for (std::size_t at = 0; (at = normalized.find(separator, at)) != std::string::npos;)
+					normalized.erase(at, separator.size());
+			}
+			std::replace(normalized.begin(), normalized.end(), ',', '.');
+		} else {
+			normalized.erase(std::remove(normalized.begin(), normalized.end(), ','), normalized.end());
+		}
+		const char* text = normalized.c_str();
 		char* end = nullptr;
 		const f32 parsed = std::strtof(text, &end);
 		if (end == text || !std::isfinite(parsed)) { node.inputInvalid = !node.text.empty(); return false; }
@@ -5120,26 +7363,112 @@ namespace xui {
 	u32 UiRuntime::hitTestNode(Vec2 point) const {
 		if (point.x < 0.f || point.y < 0.f || point.x >= m_lastLayoutWidth || point.y >= m_lastLayoutHeight)
 			return 0xFFFFFFFFu;
-		// Dock tabs and panel headers are chrome above the retained panel contents.
-		for (auto it = m_dockHosts.rbegin(); it != m_dockHosts.rend(); ++it) {
-			const DockHostState& host = *it;
-			if (host.node >= m_nodes.size() || !isNodeVisible(host.node)) continue;
+		if (m_hitVisibilityStamp.size() != m_nodes.size()) {
+			m_hitVisibilityStamp.assign(m_nodes.size(), 0);
+			m_hitScrollStamp.assign(m_nodes.size(), 0);
+			m_hitVisibilityValue.resize(m_nodes.size());
+			m_hitScrollValue.resize(m_nodes.size());
+			m_hitTestGeneration = 0;
+		}
+		if (++m_hitTestGeneration == 0) {
+			std::fill(m_hitVisibilityStamp.begin(), m_hitVisibilityStamp.end(), 0);
+			std::fill(m_hitScrollStamp.begin(), m_hitScrollStamp.end(), 0);
+			++m_hitTestGeneration;
+		}
+		const auto visible = [&](u32 index) {
+			if (index >= m_hitVisibilityStamp.size())
+				return false;
+			if (m_hitVisibilityStamp[index] != m_hitTestGeneration) {
+				m_hitVisibilityStamp[index] = m_hitTestGeneration;
+				m_hitVisibilityValue[index] = isNodeVisible(index) ? 1 : 0;
+			}
+			return m_hitVisibilityValue[index] != 0;
+		};
+		const auto scrollVisible = [&](u32 index) {
+			if (index >= m_hitScrollStamp.size())
+				return false;
+			if (m_hitScrollStamp[index] != m_hitTestGeneration) {
+				m_hitScrollStamp[index] = m_hitTestGeneration;
+				m_hitScrollValue[index] = pointInsideScrollAncestors(index, point) ? 1 : 0;
+			}
+			return m_hitScrollValue[index] != 0;
+		};
+		const std::size_t paintOrderCount = m_paintOrderScratch.empty() ? m_nodes.size() : m_paintOrderScratch.size();
+		const auto reversePaintNode = [&](std::size_t position) {
+			return m_paintOrderScratch.empty() ? static_cast<u32>(position - 1) : m_paintOrderScratch[position - 1];
+		};
+		const auto buttonOwner = [&](u32 index) {
+			for (u32 parent = index < m_nodes.size() ? m_nodes[index].parentIndex : 0xFFFFFFFFu;
+				 parent != 0xFFFFFFFFu && parent < m_nodes.size(); parent = m_nodes[parent].parentIndex)
+				if (m_nodes[parent].button)
+					return parent;
+			return index;
+		};
+		// Dock tabs and panel headers are chrome above the retained panel contents. A floating
+		// panel first claims the point so a docked header behind it cannot win the hit test.
+		u32 floatingHit = 0xFFFFFFFFu;
+		u32 floatingHitZ = 0;
+		for (const DockHostState& host : m_dockHosts) {
+			if (host.node >= m_nodes.size() || !visible(host.node))
+				continue;
 			const Rect hostRect = m_layout.absRect(m_nodes[host.node].layout);
 			const LayoutStyle& hostStyle = m_layout.style(m_nodes[host.node].layout);
-			const Vec2 origin{ hostRect.x + hostStyle.border.l + hostStyle.padding.l, hostRect.y + hostStyle.border.t + hostStyle.padding.t };
-			const Vec2 local{ point.x - origin.x, point.y - origin.y };
-			const u32 active = host.tree.panelAt(local);
-			if (active < m_nodes.size()) {
-				const Rect panel = host.tree.panelBounds(active);
-				if (point.y >= origin.y + panel.y && point.y < origin.y + panel.y + m_nodes[active].dockHeaderHeight)
-					return active;
+			const Vec2 local{point.x - (hostRect.x + hostStyle.border.l + hostStyle.padding.l),
+							 point.y - (hostRect.y + hostStyle.border.t + hostStyle.padding.t)};
+			for (const DockPanelLayout& panel : host.tree.panels()) {
+				if (!panel.floating || panel.bounds.empty() || !panel.bounds.contains(local))
+					continue;
+				if (floatingHit == 0xFFFFFFFFu || panel.zOrder > floatingHitZ) {
+					floatingHit = panel.panel;
+					floatingHitZ = panel.zOrder;
+				}
 			}
 		}
+		const bool floatingBodyCoversPoint = [&]() {
+			if (floatingHit >= m_nodes.size())
+				return false;
+			for (const DockHostState& host : m_dockHosts) {
+				if (!host.tree.contains(floatingHit) || !host.tree.floating(floatingHit))
+					continue;
+				const Rect hostRect = m_layout.absRect(m_nodes[host.node].layout);
+				const LayoutStyle& hostStyle = m_layout.style(m_nodes[host.node].layout);
+				const Vec2 local{point.x - (hostRect.x + hostStyle.border.l + hostStyle.padding.l),
+								 point.y - (hostRect.y + hostStyle.border.t + hostStyle.padding.t)};
+				const Rect bounds = host.tree.panelBounds(floatingHit);
+				if (!bounds.contains(local))
+					return false;
+				if (local.y < bounds.y + m_nodes[floatingHit].dockHeaderHeight)
+					return false;
+				return true;
+			}
+			return false;
+		}();
+		if (floatingHit < m_nodes.size() && !floatingBodyCoversPoint)
+			return floatingHit;
+		if (!floatingBodyCoversPoint)
+			for (auto it = m_dockHosts.rbegin(); it != m_dockHosts.rend(); ++it) {
+				const DockHostState& host = *it;
+				if (host.node >= m_nodes.size() || !visible(host.node))
+					continue;
+				const Rect hostRect = m_layout.absRect(m_nodes[host.node].layout);
+				const LayoutStyle& hostStyle = m_layout.style(m_nodes[host.node].layout);
+				const Vec2 origin{hostRect.x + hostStyle.border.l + hostStyle.padding.l,
+								  hostRect.y + hostStyle.border.t + hostStyle.padding.t};
+				const Vec2 local{point.x - origin.x, point.y - origin.y};
+				const u32 active = host.tree.panelAt(local);
+				if (active < m_nodes.size()) {
+					const Rect panel = host.tree.panelBounds(active);
+					if (point.y >= origin.y + panel.y &&
+						point.y < origin.y + panel.y + m_nodes[active].dockHeaderHeight)
+						return active;
+				}
+			}
 		// Picker editors are popup overlay controls and therefore sit above every authored node.
 		for (std::size_t i = m_nodes.size(); i > 0; --i) {
 			const u32 index = static_cast<u32>(i - 1);
 			const Node& editor = m_nodes[index];
-			if (editor.pickerEditor && !editor.disabled && isNodeVisible(index) && pickerEditorRect(editor).contains(point)) return index;
+			if (editor.pickerEditor && !editor.disabled && visible(index) && pickerEditorRect(editor).contains(point))
+				return index;
 		}
 		// In-app floating DockPanel subtrees form an interaction overlay matching
 		// their dedicated paint pass. Docked panels stay in ordinary retained-tree
@@ -5147,13 +7476,17 @@ namespace xui {
 		auto insidePanelScrollClips = [&](u32 index, u32 panel, Vec2 position) {
 			for (u32 parent = m_nodes[index].parentIndex; parent != 0xFFFFFFFFu && parent < m_nodes.size() && parent != panel;
 				parent = m_nodes[parent].parentIndex) {
-				if (m_nodes[parent].scrollView && !m_layout.absRect(m_nodes[parent].layout).contains(position)) return false;
+				if ((m_nodes[parent].scrollView || clipsOverflow(m_nodes[parent].style, *m_strings)) &&
+					!m_layout.absRect(m_nodes[parent].layout)
+						 .contains(inverseTransformPoint(m_nodes[parent].paintTransform, position)))
+					return false;
 			}
 			return true;
 		};
 		for (auto hostIt = m_dockHosts.rbegin(); hostIt != m_dockHosts.rend(); ++hostIt) {
 			const DockHostState& host = *hostIt;
-			if (host.node >= m_nodes.size() || !isNodeVisible(host.node)) continue;
+			if (host.node >= m_nodes.size() || !visible(host.node))
+				continue;
 			const Rect hostRect = m_layout.absRect(m_nodes[host.node].layout);
 			const LayoutStyle& hostStyle = m_layout.style(m_nodes[host.node].layout);
 			const Vec2 origin{ hostRect.x + hostStyle.border.l + hostStyle.padding.l,
@@ -5163,58 +7496,69 @@ namespace xui {
 			if (frontPanel >= m_nodes.size() || !host.tree.floating(frontPanel)) continue;
 			const Rect panelBounds = host.tree.panelBounds(frontPanel);
 			if (!panelBounds.contains(local)) continue;
-			for (std::size_t i = m_nodes.size(); i > 0; --i) {
-				const u32 index = static_cast<u32>(i - 1);
+			for (std::size_t i = paintOrderCount; i > 0; --i) {
+				const u32 index = reversePaintNode(i);
 				u32 ancestor = index;
 				while (ancestor != frontPanel && ancestor < m_nodes.size() && m_nodes[ancestor].parentIndex != 0xFFFFFFFFu)
 					ancestor = m_nodes[ancestor].parentIndex;
-				if (ancestor != frontPanel || !isNodeVisible(index) || !insidePanelScrollClips(index, frontPanel, point)) continue;
+				if (ancestor != frontPanel || !visible(index) || !insidePanelScrollClips(index, frontPanel, point))
+					continue;
 				const Node& node = m_nodes[index];
 				if (node.disabled || (node.fpsCounter && !m_fpsEnabled && !m_drawBatchCounterEnabled) || node.pickerEditor) continue;
 				const Rect rect = m_layout.absRect(node.layout);
 				if (rect.empty() || !rect.contains(inverseTransformPoint(node.paintTransform, point))) continue;
 				if (node.scrollView && (scrollBarRect(index, false).contains(point) || scrollBarRect(index, true).contains(point))) return index;
-				if (node.tabs && point.y < rect.y + 34.f) return index;
-				const bool interactive = node.button || node.checkItem || node.checkBox || node.slider || node.dropdown ||
-					node.colorPicker || node.textBox || node.textArea || node.tabs || node.treeView || node.switchToggle ||
-					node.toggleButton || node.radioGroup || node.segmented || node.stepper || node.rating || node.breadcrumb ||
-					node.keybindField || node.datePicker;
+				const Vec2 localPoint = inverseTransformPoint(node.paintTransform, point);
+				if (node.tabs && rect.contains(localPoint) && localPoint.y < rect.y + 34.f)
+					return index;
+				const bool interactive =
+					node.button || node.checkItem || node.checkBox || node.slider || node.listView || node.table ||
+					node.dropdown || node.colorPicker || node.textBox || node.textArea || node.tabs || node.treeView ||
+					node.switchToggle || node.toggleButton || node.radioGroup || node.segmented || node.stepper ||
+					node.rating || node.breadcrumb || node.keybindField || node.datePicker;
 				const bool structuralBlocker = typeIs(node.type, *m_strings, "Window") || typeIs(node.type, *m_strings, "Text") ||
 					typeIs(node.type, *m_strings, "Panel") || typeIs(node.type, *m_strings, "Split") ||
 					typeIs(node.type, *m_strings, "CheckList") || typeIs(node.type, *m_strings, "Tab") || node.progressBar ||
 					node.label || node.badge || node.spinner || node.image || node.iconWidget || node.treeView || node.dockHost || node.dockPanel;
-				if (interactive || structuralBlocker || node.style.has(PropId::Bg)) return index;
+				if (interactive || structuralBlocker || node.style.has(PropId::Bg))
+					return interactive ? index : buttonOwner(index);
 			}
 			return frontPanel;
 		}
 		// Tab headers paint as a retained-tree overlay, except when a floating panel
 		// already claimed the point above.
-		for (std::size_t i = m_nodes.size(); i > 0; --i) {
-			const u32 index = static_cast<u32>(i - 1);
+		for (std::size_t i = paintOrderCount; i > 0; --i) {
+			const u32 index = reversePaintNode(i);
 			const Node& tabs = m_nodes[index];
-			if (!tabs.tabs || tabs.disabled || !isNodeVisible(index)) continue;
+			if (!tabs.tabs || tabs.disabled || !visible(index))
+				continue;
 			const Rect rect = m_layout.absRect(tabs.layout);
-			if (rect.contains(point) && point.y < rect.y + 34.f) return index;
+			const Vec2 localPoint = inverseTransformPoint(tabs.paintTransform, point);
+			if (scrollVisible(index) && rect.contains(localPoint) && localPoint.y < rect.y + 34.f)
+				return index;
 		}
-		for (std::size_t i = m_nodes.size(); i > 0; --i) {
-			const u32 index = static_cast<u32>(i - 1);
+		for (std::size_t i = paintOrderCount; i > 0; --i) {
+			const u32 index = reversePaintNode(i);
 			const Node& node = m_nodes[index];
-			if (!node.scrollView || !isNodeVisible(index) || !pointInsideScrollAncestors(index, point)) continue;
+			if (!node.scrollView || !visible(index) || !scrollVisible(index))
+				continue;
 			if (scrollBarRect(index, false).contains(point) || scrollBarRect(index, true).contains(point)) return index;
 		}
-		for (std::size_t i = m_nodes.size(); i > 0; --i) {
-			const u32 index = static_cast<u32>(i - 1);
+		for (std::size_t i = paintOrderCount; i > 0; --i) {
+			const u32 index = reversePaintNode(i);
 			const Node& node = m_nodes[index];
-			if (!isNodeVisible(index) || !pointInsideScrollAncestors(index, point)) continue;
+			if (!visible(index) || !scrollVisible(index))
+				continue;
 			if (node.fpsCounter && !m_fpsEnabled && !m_drawBatchCounterEnabled) continue;
 			if (node.pickerEditor) continue;
 			const Rect rect = m_layout.absRect(node.layout);
 			if (rect.empty() || !rect.contains(inverseTransformPoint(node.paintTransform, point))) continue;
 
-			const bool interactive = node.button || node.checkItem || node.checkBox || node.slider || node.dropdown ||
-				node.colorPicker || node.textBox || node.textArea || node.tabs || node.treeView ||
-				node.switchToggle || node.toggleButton || node.radioGroup ||
-				node.segmented || node.stepper || node.rating || node.breadcrumb || node.keybindField || node.datePicker;
+			const bool interactive = node.button || node.checkItem || node.checkBox || node.slider || node.listView ||
+									 node.table || node.dropdown || node.colorPicker || node.textBox || node.textArea ||
+									 node.tabs || node.treeView || node.switchToggle || node.toggleButton ||
+									 node.radioGroup || node.segmented || node.stepper || node.rating ||
+									 node.breadcrumb || node.keybindField || node.datePicker;
 			const bool structuralBlocker = typeIs(node.type, *m_strings, "Window") || typeIs(node.type, *m_strings, "Text") ||
 				typeIs(node.type, *m_strings, "Panel") || typeIs(node.type, *m_strings, "Split") ||
 				typeIs(node.type, *m_strings, "CheckList") || typeIs(node.type, *m_strings, "Tab") ||
@@ -5223,7 +7567,8 @@ namespace xui {
 			// Node storage follows paint order: descendants and later siblings are on top.
 			// Transparent Row/Column containers pass input through; painted containers block
 			// controls behind them. Tooltip bubbles are deliberately pointer-transparent.
-			if (interactive || structuralBlocker || styledBlocker) return index;
+			if (interactive || structuralBlocker || styledBlocker)
+				return interactive ? index : buttonOwner(index);
 		}
 		return 0xFFFFFFFFu;
 	}
@@ -5244,11 +7589,13 @@ namespace xui {
 		if (node.pressed) states |= stateBit(State::Pressed);
 		if (node.focused) states |= stateBit(State::Focus);
 		if (node.checked) states |= stateBit(State::Checked) | stateBit(State::Selected);
-		if (node.treeView && !node.treeSelection.empty()) states |= stateBit(State::Selected);
+		if ((node.treeView || node.listView) && !node.treeSelection.empty())
+			states |= stateBit(State::Selected);
 		if (node.disabled) states |= stateBit(State::Disabled);
 		else states |= stateBit(State::Enabled);
 		if ((node.textBox || node.textArea) && node.readOnly) states |= stateBit(State::ReadOnly);
-		if (node.numberField && node.inputInvalid) states |= stateBit(State::Error);
+		if ((node.numberField && node.inputInvalid) || !node.validationError.empty())
+			states |= stateBit(State::Error);
 		if (node.popupOpen) states |= stateBit(State::Open);
 		if (node.tab && node.parentIndex < m_nodes.size() && m_nodes[node.parentIndex].tabs) {
 			const Node& tabs = m_nodes[node.parentIndex];
@@ -5270,19 +7617,25 @@ namespace xui {
 		return false;
 	}
 
-	bool UiRuntime::isNodeVisible(u32 index) const {
+	bool UiRuntime::isNodeVisible(u32 index, PaintScope scope) const {
 		if (index >= m_nodes.size()) return false;
-		if (m_paintDockPanelScope) {
+		if (!m_nodes[index].modelVisible)
+			return false;
+		if (scope.active()) {
 			bool insidePanel = false;
 			u32 current = index;
 			while (current != 0xFFFFFFFFu && current < m_nodes.size()) {
-				if (current == m_paintDockPanel) { insidePanel = true; break; }
+				if (current == scope.dockPanel) {
+					insidePanel = true;
+					break;
+				}
 				current = m_nodes[current].parentIndex;
 			}
 			if (!insidePanel) {
 				// Allow the owning host's own background and dock-header overlay to paint, but
 				// exclude the root window and all sibling panels from a tear-off surface.
-				const u32 parent = m_paintDockPanel < m_nodes.size() ? m_nodes[m_paintDockPanel].parentIndex : 0xFFFFFFFFu;
+				const u32 parent =
+					scope.dockPanel < m_nodes.size() ? m_nodes[scope.dockPanel].parentIndex : 0xFFFFFFFFu;
 				if (index != parent || !m_nodes[index].dockHost) return false;
 			}
 		}
@@ -5296,17 +7649,23 @@ namespace xui {
 		}
 		if (m_nodes[index].pickerEditor) {
 			const u32 owner = m_nodes[index].pickerOwner;
-			return owner < m_nodes.size() && m_nodes[owner].popupOpen && isNodeVisible(owner) &&
+			return owner < m_nodes.size() && m_nodes[owner].popupOpen && isNodeVisible(owner, scope) &&
 				(m_nodes[index].pickerSlot != 3 || m_nodes[owner].pickerAlpha);
 		}
 		u32 child = index;
 		while (m_nodes[child].parentIndex != 0xFFFFFFFFu) {
+			if (!m_nodes[child].modelVisible)
+				return false;
 			const u32 parent = m_nodes[child].parentIndex;
-			if (!m_paintDockPanelScope && m_nodes[parent].dockNativeSurface) return false;
-			if (m_paintDockPanelScope && parent == m_paintDockPanel) {
+			if (!m_nodes[parent].modelVisible)
+				return false;
+			if (!scope.active() && m_nodes[parent].dockNativeSurface)
+				return false;
+			if (scope.active() && parent == scope.dockPanel) {
 				// The requested panel itself is the scope root.
 			}
-			if (m_nodes[parent].dockPanel && !isNodeVisible(parent)) return false;
+			if (m_nodes[parent].dockPanel && !isNodeVisible(parent, scope))
+				return false;
 			if (m_nodes[parent].tabs && m_nodes[child].tab) {
 				u32 ordinal = 0;
 				for (NodeId page = m_layout.firstChild(m_nodes[parent].layout); page.valid(); page = m_layout.nextSibling(page), ++ordinal)
@@ -5346,16 +7705,114 @@ namespace xui {
 	bool UiRuntime::updateTimers(std::chrono::steady_clock::time_point now) {
 		if (m_animationsPaused) return false;
 		bool redraw = false;
+		if (m_textAutoScrollDeadline.time_since_epoch().count() != 0 && now >= m_textAutoScrollDeadline) {
+			if (m_textSelectDrag >= m_nodes.size() || !m_nodes[m_textSelectDrag].textArea ||
+				m_textAutoScrollVelocity == 0.f || !m_text || !m_nodes[m_textSelectDrag].font.valid()) {
+				m_textAutoScrollVelocity = 0.f;
+				m_textAutoScrollDeadline = m_textAutoScrollLast = {};
+			} else {
+				Node& field = m_nodes[m_textSelectDrag];
+				if (m_textAutoScrollLast.time_since_epoch().count() == 0)
+					m_textAutoScrollLast = now;
+				const f32 dt = std::clamp(std::chrono::duration<f32>(now - m_textAutoScrollLast).count(), 0.f, 0.05f);
+				m_textAutoScrollLast = now;
+				const Rect rect = m_layout.absRect(field.layout);
+				const f32 fontSize =
+					field.style.has(PropId::FontSize) ? number(field.style.get(PropId::FontSize), 0, 16.f) : 16.f;
+				const f32 border = field.style.has(PropId::Border) ? number(field.style.get(PropId::Border), 0) : 0.f;
+				const f32 pad = field.style.has(PropId::Pad) ? number(field.style.get(PropId::Pad), 0) : 0.f;
+				const f32 contentHeight = std::max(0.f, rect.h - 2.f * (pad + border));
+				const f32 contentWidth = std::max(1.f, rect.w - 2.f * (pad + border));
+				const TextLayout& layout =
+					m_text->layout(field.font, field.text, fontSize * m_dpiScale, contentWidth * m_dpiScale);
+				const f32 maxScroll = std::max(0.f, layout.height / m_dpiScale - contentHeight);
+				const f32 before = field.textScrollY;
+				field.textScrollY = std::clamp(before + m_textAutoScrollVelocity * dt, 0.f, maxScroll);
+				const std::size_t nextCaret = textIndexAtPoint(field, m_pointerPosition);
+				const bool caretChanged = nextCaret != field.caret;
+				if (caretChanged) {
+					field.caret = nextCaret;
+					resetCaretBlink();
+				}
+				if (field.textScrollY != before || caretChanged) {
+					addDamage(rect);
+					redraw = true;
+				}
+				if ((field.textScrollY == 0.f && m_textAutoScrollVelocity < 0.f) ||
+					(field.textScrollY == maxScroll && m_textAutoScrollVelocity > 0.f)) {
+					m_textAutoScrollVelocity = 0.f;
+					m_textAutoScrollDeadline = m_textAutoScrollLast = {};
+				} else {
+					m_textAutoScrollDeadline = now + std::chrono::milliseconds(16);
+				}
+			}
+		}
 		for (u32 i = 0; i < m_nodes.size(); ++i) {
 			Node& node = m_nodes[i];
-			if (!node.scrollView || !node.scrollAnimating) continue;
-			const Vec2 current = m_layout.scrollOffset(node.layout);
-			Vec2 next{ current.x + (node.scrollTarget.x - current.x) * 0.28f, current.y + (node.scrollTarget.y - current.y) * 0.28f };
-			if (std::fabs(node.scrollTarget.x - next.x) < 0.5f && std::fabs(node.scrollTarget.y - next.y) < 0.5f) { next = node.scrollTarget; node.scrollAnimating = false; }
-			m_layout.setScrollOffset(node.layout, next);
-			addDamage(m_layout.absRect(node.layout));
-			if (node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
-			redraw = true;
+			if (!node.scrollView)
+				continue;
+			if (node.scrollAnimating) {
+				const Vec2 current = m_layout.scrollOffset(node.layout);
+				Vec2 next{current.x + (node.scrollTarget.x - current.x) * 0.28f,
+						  current.y + (node.scrollTarget.y - current.y) * 0.28f};
+				if (std::fabs(node.scrollTarget.x - next.x) < 0.5f && std::fabs(node.scrollTarget.y - next.y) < 0.5f) {
+					next = node.scrollTarget;
+					node.scrollAnimating = false;
+				}
+				m_layout.setScrollOffset(node.layout, next);
+				addDamage(m_layout.absRect(node.layout));
+				if (node.pressHandler.v && m_eventFn)
+					m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
+				redraw = true;
+			}
+			if (node.scrollVelocity.x != 0.f || node.scrollVelocity.y != 0.f) {
+				if (node.scrollLastTick.time_since_epoch().count() == 0)
+					node.scrollLastTick = now;
+				const f32 dt = std::clamp(std::chrono::duration<f32>(now - node.scrollLastTick).count(), 0.f, 0.05f);
+				node.scrollLastTick = now;
+				const Vec2 current = m_layout.scrollOffset(node.layout);
+				const Vec2 content = m_layout.contentSize(node.layout);
+				const Rect view = m_layout.rect(node.layout);
+				Vec2 next{std::clamp(current.x + node.scrollVelocity.x * dt, 0.f, std::max(0.f, content.x - view.w)),
+						  std::clamp(current.y + node.scrollVelocity.y * dt, 0.f, std::max(0.f, content.y - view.h))};
+				if (next != current) {
+					m_layout.setScrollOffset(node.layout, next);
+					addDamage(m_layout.absRect(node.layout));
+					redraw = true;
+				}
+				if ((next.x == current.x && node.scrollVelocity.x * dt != 0.f) ||
+					std::fabs(node.scrollVelocity.x) < 4.f)
+					node.scrollVelocity.x = 0.f;
+				else
+					node.scrollVelocity.x *= std::exp(-7.f * dt);
+				if ((next.y == current.y && node.scrollVelocity.y * dt != 0.f) ||
+					std::fabs(node.scrollVelocity.y) < 4.f)
+					node.scrollVelocity.y = 0.f;
+				else
+					node.scrollVelocity.y *= std::exp(-7.f * dt);
+			}
+			if (node.scrollBarOpacity > 0.f && node.scrollBarVisibility == 0) {
+				bool underPointer = false;
+				for (bool horizontal : {false, true}) {
+					Rect track;
+					(void)scrollBarRect(i, horizontal, &track);
+					underPointer |= track.contains(m_pointerPosition);
+				}
+				if (!underPointer && node.scrollActivity.time_since_epoch().count() != 0 &&
+					now >= node.scrollActivity + std::chrono::milliseconds(650)) {
+					const f32 elapsed =
+						std::chrono::duration<f32>(now - (node.scrollActivity + std::chrono::milliseconds(650)))
+							.count();
+					const f32 opacity = std::clamp(1.f - elapsed / 0.35f, 0.f, 1.f);
+					if (opacity != node.scrollBarOpacity) {
+						node.scrollBarOpacity = opacity;
+						addDamage(m_layout.absRect(node.layout));
+						redraw = true;
+					}
+					if (opacity == 0.f)
+						node.scrollActivity = {};
+				}
+			}
 		}
 		if (m_tooltipOwner != 0xFFFFFFFFu && !m_tooltipVisible && now >= m_tooltipDeadline) {
 			m_tooltipVisible = true;
@@ -5376,8 +7833,13 @@ namespace xui {
 			redraw = true;
 		}
 		bool spinnerVisible = false;
-		for (u32 i = 0; i < m_nodes.size(); ++i)
-			if ((m_nodes[i].spinner || (m_nodes[i].progressBar && m_nodes[i].indeterminate)) && !m_nodes[i].disabled && isNodeVisible(i)) { spinnerVisible = true; break; }
+		if (!m_reducedMotion)
+			for (u32 i = 0; i < m_nodes.size(); ++i)
+				if ((m_nodes[i].spinner || (m_nodes[i].progressBar && m_nodes[i].indeterminate)) &&
+					!m_nodes[i].disabled && isNodeVisible(i)) {
+					spinnerVisible = true;
+					break;
+				}
 		if (spinnerVisible && (m_spinnerDeadline.time_since_epoch().count() == 0 || now >= m_spinnerDeadline)) {
 			for (u32 i = 0; i < m_nodes.size(); ++i)
 				if ((m_nodes[i].spinner || (m_nodes[i].progressBar && m_nodes[i].indeterminate)) && !m_nodes[i].disabled && isNodeVisible(i)) addDamage(m_layout.absRect(m_nodes[i].layout));
@@ -5427,6 +7889,11 @@ namespace xui {
 	f64 UiRuntime::nextTimerDelay(std::chrono::steady_clock::time_point now) const {
 		if (m_animationsPaused) return -1.0;
 		f64 delay = -1.0;
+		if (m_textAutoScrollDeadline.time_since_epoch().count() != 0) {
+			const f64 autoScrollDelay =
+				std::max(0.0, std::chrono::duration<f64>(m_textAutoScrollDeadline - now).count());
+			delay = autoScrollDelay;
+		}
 		if (m_tooltipOwner != 0xFFFFFFFFu && !m_tooltipVisible)
 			delay = std::max(0.0, std::chrono::duration<f64>(m_tooltipDeadline - now).count());
 		if (m_tooltipVisible && m_tooltipHideDeadline.time_since_epoch().count() != 0) {
@@ -5441,10 +7908,28 @@ namespace xui {
 			const f64 spinnerDelay = std::max(0.0, std::chrono::duration<f64>(m_spinnerDeadline - now).count());
 			delay = delay < 0.0 ? spinnerDelay : std::min(delay, spinnerDelay);
 		}
-		for (const Node& node : m_nodes) if (node.scrollAnimating) {
-			const f64 scrollDelay = 1.0 / 60.0;
-			delay = delay < 0.0 ? scrollDelay : std::min(delay, scrollDelay);
-			break;
+		for (u32 i = 0; i < m_nodes.size(); ++i) {
+			const Node& node = m_nodes[i];
+			f64 scrollDelay = (node.scrollAnimating || node.scrollVelocity.x != 0.f || node.scrollVelocity.y != 0.f)
+								  ? 1.0 / 60.0
+								  : -1.0;
+			if (node.scrollBarOpacity > 0.f && node.scrollBarVisibility == 0 &&
+				node.scrollActivity.time_since_epoch().count() != 0) {
+				bool underPointer = false;
+				for (bool horizontal : {false, true}) {
+					Rect track;
+					(void)scrollBarRect(i, horizontal, &track);
+					underPointer |= track.contains(m_pointerPosition);
+				}
+				if (!underPointer) {
+					const auto fadeStart = node.scrollActivity + std::chrono::milliseconds(650);
+					const f64 fadeDelay =
+						now < fadeStart ? std::chrono::duration<f64>(fadeStart - now).count() : 1.0 / 60.0;
+					scrollDelay = scrollDelay < 0.0 ? fadeDelay : std::min(scrollDelay, fadeDelay);
+				}
+			}
+			if (scrollDelay >= 0.0)
+				delay = delay < 0.0 ? scrollDelay : std::min(delay, scrollDelay);
 		}
 		if (m_caretBlinkDeadline.time_since_epoch().count() != 0 && caretEditableFocused()) {
 			const f64 caretDelay = std::max(0.0, std::chrono::duration<f64>(m_caretBlinkDeadline - now).count());
@@ -5492,20 +7977,49 @@ namespace xui {
 	}
 
 	std::string_view UiRuntime::controlText(std::string_view id) const {
-		for (const Node& node : m_nodes) if ((node.dropdown || node.colorPicker || node.textBox || node.textArea || typeIs(node.type, *m_strings, "Text") || node.label || node.badge || node.stepper || node.datePicker || node.keybindField) && node.id.v && m_strings->view(node.id) == id) return node.text;
-		for (const Node& node : m_nodes) if (node.treeView && node.id.v && m_strings->view(node.id) == id) return node.treeSelection;
-		for (const Node& node : m_nodes) if ((node.radioGroup || node.segmented || node.breadcrumb) && node.id.v && m_strings->view(node.id) == id && node.selectedOption < node.options.size()) return node.options[node.selectedOption];
+		for (const Node& node : m_nodes)
+			if ((node.dropdown || node.colorPicker || node.textBox || node.textArea ||
+				 typeIs(node.type, *m_strings, "Text") || node.label || node.badge || node.stepper || node.datePicker ||
+				 node.keybindField || node.fpsCounter) &&
+				node.id.v && m_strings->view(node.id) == id)
+				return node.text;
+		for (const Node& node : m_nodes)
+			if ((node.treeView || node.listView) && node.id.v && m_strings->view(node.id) == id)
+				return node.treeSelection;
+		for (const Node& node : m_nodes)
+			if ((node.radioGroup || node.segmented || node.breadcrumb) && node.id.v && m_strings->view(node.id) == id &&
+				node.selectedOption < payload(node).options.size())
+				return payload(node).options[node.selectedOption];
 		return {};
 	}
 
+	std::string_view UiRuntime::controlError(std::string_view id) const {
+		const StrId idKey = m_strings ? m_strings->find(id) : StrId{};
+		const auto found = m_nodeById.find(idKey);
+		if (found == m_nodeById.end() || found->second >= m_nodes.size())
+			return {};
+		const Node* node = &m_nodes[found->second];
+		if (!node->validationError.empty())
+			return node->validationError;
+		return node->inputInvalid ? std::string_view("Invalid value") : std::string_view{};
+	}
+
 	std::optional<UiValue> UiRuntime::value(std::string_view id) const {
-		for (const Node& node : m_nodes) {
-			if (!node.id.v || m_strings->view(node.id) != id) continue;
+		const StrId idKey = m_strings->find(id);
+		const auto found = m_nodeById.find(idKey);
+		if (found != m_nodeById.end()) {
+			const Node& node = m_nodes[found->second];
 			if (node.dockPanel) {
 				const DockHostState* host = dockHostForPanel(static_cast<u32>(&node - m_nodes.data()));
-				if (!host || !host->tree.contains(static_cast<u32>(&node - m_nodes.data()))) return std::nullopt;
+				if (!host)
+					return std::nullopt;
 				const u32 panelIndex = static_cast<u32>(&node - m_nodes.data());
 				DockPanelValue value;
+				value.closed = node.dockClosed;
+				if (node.dockClosed)
+					return UiValue{std::move(value)};
+				if (!host->tree.contains(panelIndex))
+					return std::nullopt;
 				value.region = host->tree.zone(panelIndex);
 				value.floating = host->tree.floating(panelIndex);
 				value.bounds = host->tree.panelBounds(panelIndex);
@@ -5518,7 +8032,11 @@ namespace xui {
 				return UiValue{ std::move(value) };
 			}
 			if (node.menu) return UiValue{ node.menuSelectedItem };
-			if (node.treeView) return UiValue{ node.treeSelection };
+			if (node.treeView || node.listView)
+				return UiValue{node.treeSelection};
+			if (node.table)
+				return UiValue{node.tableSelectedRow < 0 ? std::numeric_limits<u32>::max()
+														 : static_cast<u32>(node.tableSelectedRow)};
 			if (node.menuItem) return UiValue{ node.text };
 			if (node.checkList) {
 				CheckListValue selected;
@@ -5529,10 +8047,18 @@ namespace xui {
 				return UiValue{ std::move(selected) };
 			}
 			if (node.checkItem || node.checkBox || node.switchToggle || node.toggleButton) return UiValue{ node.checked };
+			if (node.rangeSlider)
+				return UiValue{Vec2{node.rangeLow, node.rangeHigh}};
 			if (node.slider || node.rating || node.progressBar) return UiValue{ static_cast<f64>(node.value) };
 			if (node.numberField || node.stepper) return UiValue{ static_cast<f64>(node.value) };
-			if (node.dropdown || node.textBox || node.textArea || typeIs(node.type, *m_strings, "Text") || node.label || node.badge || node.datePicker || node.keybindField) return UiValue{ node.text };
-			if (node.radioGroup || node.segmented || node.breadcrumb) return node.selectedOption < node.options.size() ? UiValue{ node.options[node.selectedOption] } : UiValue{ std::string{} };
+			if (node.dropdown || node.comboBox || node.textBox || node.textArea ||
+				typeIs(node.type, *m_strings, "Text") || node.label || node.badge || node.datePicker ||
+				node.keybindField)
+				return UiValue{node.text};
+			if (node.radioGroup || node.segmented || node.breadcrumb)
+				return node.selectedOption < payload(node).options.size()
+						   ? UiValue{payload(node).options[node.selectedOption]}
+						   : UiValue{std::string{}};
 			if (node.colorPicker) return UiValue{ node.pickerColor };
 			if (node.tabs) return UiValue{ node.selectedTab };
 			if (node.scrollView) return UiValue{ m_layout.scrollOffset(node.layout) };
@@ -5546,10 +8072,244 @@ namespace xui {
 		return ids;
 	}
 
+	std::string UiRuntime::dumpAccessibilityTree() const {
+		auto quote = [](std::string_view text) {
+			std::string result = "\"";
+			for (const unsigned char c : text) {
+				if (c == '\\' || c == '\"') {
+					result.push_back('\\');
+					result.push_back(static_cast<char>(c));
+				} else if (c == '\n')
+					result += "\\n";
+				else if (c == '\r')
+					result += "\\r";
+				else if (c == '\t')
+					result += "\\t";
+				else if (c < 0x20u) {
+					static constexpr char hex[] = "0123456789abcdef";
+					result += "\\u00";
+					result.push_back(hex[c >> 4]);
+					result.push_back(hex[c & 0x0Fu]);
+				} else
+					result.push_back(static_cast<char>(c));
+			}
+			result.push_back('\"');
+			return result;
+		};
+		std::vector<std::vector<u32>> children(m_authoredNodeCount);
+		for (u32 i = 0; i < m_authoredNodeCount && i < m_nodes.size(); ++i) {
+			const u32 parent = m_nodes[i].parentIndex;
+			if (parent < m_authoredNodeCount)
+				children[parent].push_back(i);
+		}
+		auto roleFor = [&](const Node& node) -> std::string_view {
+			if (node.button || node.menuItem || node.checkItem || node.toggleButton)
+				return "button";
+			if (node.textBox || node.textArea || node.numberField || node.searchField || node.keybindField)
+				return "textbox";
+			if (node.checkBox || node.switchToggle)
+				return "checkbox";
+			if (node.slider)
+				return "slider";
+			if (node.tabs)
+				return "tablist";
+			if (node.tab)
+				return "tab";
+			if (node.radioGroup || node.segmented)
+				return "radiogroup";
+			if (node.treeView || node.listView || node.checkList)
+				return "list";
+			if (node.menu)
+				return "menu";
+			if (node.dropdown || node.datePicker || node.colorPicker)
+				return "combobox";
+			if (node.progressBar)
+				return "progressbar";
+			if (node.image)
+				return "img";
+			if (node.separator)
+				return "separator";
+			if (node.dockPanel || node.dockHost)
+				return "region";
+			if (node.label || typeIs(node.type, *m_strings, "Text"))
+				return "text";
+			return "group";
+		};
+		std::ostringstream out;
+		out << "{\"version\":1,\"root\":0,\"nodes\":[";
+		bool first = true;
+		for (u32 i = 0; i < m_authoredNodeCount && i < m_nodes.size(); ++i) {
+			const Node& node = m_nodes[i];
+			if (node.pickerEditor)
+				continue;
+			const Rect bounds = m_layout.absRect(node.layout);
+			bool selectedTab = false;
+			if (node.tab && node.parentIndex < m_nodes.size() && m_nodes[node.parentIndex].tabs) {
+				u32 ordinal = 0;
+				for (NodeId tab = m_layout.firstChild(m_nodes[node.parentIndex].layout); tab.valid();
+					 tab = m_layout.nextSibling(tab), ++ordinal)
+					if (tab == node.layout) {
+						selectedTab = ordinal == m_nodes[node.parentIndex].selectedTab;
+						break;
+					}
+			}
+			std::string_view label = !node.text.empty() ? std::string_view(node.text) : std::string_view(node.tabTitle);
+			if (node.password)
+				label = node.placeholder;
+			if (label.empty() && node.id.v)
+				label = m_strings->view(node.id);
+			if (label.empty())
+				label = m_strings->view(node.type);
+			if (!first)
+				out << ',';
+			first = false;
+			out << "{\"index\":" << i << ",\"parent\":";
+			if (node.parentIndex < m_authoredNodeCount)
+				out << node.parentIndex;
+			else
+				out << "null";
+			out << ",\"children\":[";
+			for (u32 child = 0; child < children[i].size(); ++child) {
+				if (child)
+					out << ',';
+				out << children[i][child];
+			}
+			out << "],\"id\":" << quote(node.id.v ? m_strings->view(node.id) : std::string_view{})
+				<< ",\"role\":" << quote(roleFor(node)) << ",\"label\":" << quote(label)
+				<< ",\"visible\":" << (isNodeVisible(i) ? "true" : "false")
+				<< ",\"disabled\":" << (node.disabled ? "true" : "false")
+				<< ",\"focused\":" << (node.focused ? "true" : "false")
+				<< ",\"checked\":" << (node.checked ? "true" : "false") << ",\"selected\":"
+				<< ((selectedTab || ((node.treeView || node.listView) && !node.treeSelection.empty())) ? "true"
+																									   : "false")
+				<< ",\"bounds\":{\"x\":" << bounds.x << ",\"y\":" << bounds.y << ",\"width\":" << bounds.w
+				<< ",\"height\":" << bounds.h << "}";
+			if ((node.textBox || node.textArea || node.dropdown || node.datePicker || node.keybindField ||
+				 node.listView) &&
+				!node.password)
+				out << ",\"value\":"
+					<< quote(node.listView ? std::string_view(node.treeSelection) : std::string_view(node.text));
+			out << '}';
+		}
+		out << "]}";
+		return out.str();
+	}
+
+	std::string UiRuntime::dumpLayout() const {
+		auto quote = [](std::string_view text) {
+			std::string encoded = "\"";
+			for (char c : text) {
+				if (c == '\\' || c == '\"') {
+					encoded.push_back('\\');
+					encoded.push_back(c);
+				} else if (c == '\n')
+					encoded += "\\n";
+				else if (c == '\r')
+					encoded += "\\r";
+				else if (c == '\t')
+					encoded += "\\t";
+				else
+					encoded.push_back(c);
+			}
+			encoded.push_back('\"');
+			return encoded;
+		};
+		std::ostringstream out;
+		out << "{\"version\":1,\"panels\":[";
+		bool first = true;
+		for (u32 i = 0; i < m_nodes.size(); ++i) {
+			const Node& node = m_nodes[i];
+			if (!node.dockPanel || !node.id.v)
+				continue;
+			const auto state = value(m_strings->view(node.id));
+			if (!state || !std::holds_alternative<DockPanelValue>(*state))
+				continue;
+			const auto& panel = std::get<DockPanelValue>(*state);
+			const DockHostState* host = dockHostForPanel(i);
+			std::string target;
+			if (host && !panel.closed)
+				for (u32 candidate : host->panelNodes)
+					if (candidate != i && host->tree.contains(candidate)) {
+						target.assign(m_strings->view(m_nodes[candidate].id));
+						break;
+					}
+			if (!first)
+				out << ',';
+			first = false;
+			out << "{\"id\":" << quote(m_strings->view(node.id)) << ",\"host\":"
+				<< quote(host && m_nodes[host->node].id.v ? m_strings->view(m_nodes[host->node].id)
+														  : std::string_view{})
+				<< ",\"target\":" << quote(target) << ",\"region\":" << static_cast<u32>(panel.region)
+				<< ",\"order\":" << panel.order << ",\"floating\":" << (panel.floating ? "true" : "false")
+				<< ",\"closed\":" << (panel.closed ? "true" : "false")
+				<< ",\"active\":" << (panel.active ? "true" : "false") << ",\"x\":" << panel.bounds.x
+				<< ",\"y\":" << panel.bounds.y << ",\"w\":" << panel.bounds.w << ",\"h\":" << panel.bounds.h << '}';
+		}
+		out << "]}";
+		return out.str();
+	}
+
+	bool UiRuntime::loadLayout(std::string_view json) {
+		if (json.size() > 1'000'000 || json.find("\"version\":1") == std::string_view::npos)
+			return false;
+		const std::regex objectPattern("\\{[^{}]*\\}");
+		const std::regex panelPattern(
+			"\\\"id\\\"\\s*:\\s*\\\"([^\\\"]*)\\\".*?\\\"target\\\"\\s*:\\s*\\\"([^\\\"]*)\\\".*?\\\"region\\\"\\s*:"
+			"\\s*(\\d+).*?\\\"order\\\"\\s*:\\s*(\\d+).*?\\\"floating\\\"\\s*:\\s*(true|false).*?\\\"closed\\\"\\s*:"
+			"\\s*(true|false).*?\\\"active\\\"\\s*:\\s*(true|false).*?\\\"x\\\"\\s*:\\s*(-?[0-9.]+).*?\\\"y\\\"\\s*:"
+			"\\s*(-?[0-9.]+).*?\\\"w\\\"\\s*:\\s*(-?[0-9.]+).*?\\\"h\\\"\\s*:\\s*(-?[0-9.]+)");
+		const std::string source(json);
+		bool found = false;
+		for (std::sregex_iterator it(source.begin(), source.end(), objectPattern), end; it != end; ++it) {
+			std::smatch m;
+			const std::string object = it->str();
+			if (!std::regex_search(object, m, panelPattern))
+				continue;
+			found = true;
+			try {
+				const u32 zone = static_cast<u32>(std::stoul(m[3].str()));
+				if (zone > static_cast<u32>(DockZone::Floating))
+					return false;
+				DockPanelValue value;
+				value.targetPanel = m[2].str();
+				value.region = static_cast<DockZone>(zone);
+				value.order = static_cast<u32>(std::stoul(m[4].str()));
+				value.floating = m[5] == "true";
+				value.closed = m[6] == "true";
+				value.active = m[7] == "true";
+				value.bounds = {std::stof(m[8].str()), std::stof(m[9].str()), std::stof(m[10].str()),
+								std::stof(m[11].str())};
+				if (!setValue(m[1].str(), UiValue{value}))
+					return false;
+			} catch (...) {
+				return false;
+			}
+		}
+		return found || source.find("\"panels\":[]") != std::string::npos;
+	}
+
 	Rect UiRuntime::dockPanelRect(std::string_view id) const {
-		for (const Node& node : m_nodes)
-			if (node.dockPanel && node.id.v && m_strings->view(node.id) == id) return m_layout.absRect(node.layout);
+		const auto found = m_nodeById.find(m_strings->find(id));
+		if (found != m_nodeById.end()) {
+			const Node& node = m_nodes[found->second];
+			if (node.dockPanel)
+				return m_layout.absRect(node.layout);
+		}
 		return {};
+	}
+
+	f32 UiRuntime::dockPanelRadius(std::string_view id) const {
+		const auto found = m_nodeById.find(m_strings->find(id));
+		if (found != m_nodeById.end()) {
+			const Node& node = m_nodes[found->second];
+			if (node.dockPanel) {
+				if (!node.style.has(PropId::Radius))
+					return 0.f;
+				const StyleValue& radius = node.style.get(PropId::Radius);
+				return std::max({number(radius, 0), number(radius, 1), number(radius, 2), number(radius, 3)});
+			}
+		}
+		return 0.f;
 	}
 
 	f32 UiRuntime::dockPanelHeaderHeight(std::string_view id) const {
@@ -5559,8 +8319,9 @@ namespace xui {
 	}
 
 	std::string_view UiRuntime::dockPanelTitle(std::string_view id) const {
-		for (const Node& node : m_nodes)
-			if (node.dockPanel && node.id.v && m_strings->view(node.id) == id) return node.text;
+		const auto found = m_nodeById.find(m_strings->find(id));
+		if (found != m_nodeById.end() && m_nodes[found->second].dockPanel)
+			return m_nodes[found->second].text;
 		return id;
 	}
 
@@ -5724,17 +8485,36 @@ namespace xui {
 				}
 				return changed;
 			}
-			if (node.treeView) {
+			if (node.treeView || node.listView) {
 				const std::string* selectedPath = std::get_if<std::string>(&valueToSet);
 				if (!selectedPath) return false;
-				if (!selectedPath->empty() && std::none_of(node.treeEntries.begin(), node.treeEntries.end(),
-					[&](const Node::TreeEntry& entry) { return entry.path == *selectedPath; })) return false;
+				if (node.treeView && !selectedPath->empty() &&
+					std::none_of(payload(node).treeEntries.begin(), payload(node).treeEntries.end(),
+								 [&](const Node::TreeEntry& entry) { return entry.path == *selectedPath; }))
+					return false;
+				if (node.listView && !selectedPath->empty() &&
+					std::find(payload(node).options.begin(), payload(node).options.end(), *selectedPath) ==
+						payload(node).options.end())
+					return false;
 				changed = node.treeSelection != *selectedPath;
 				if (changed) {
 					node.treeSelection = *selectedPath;
 					addDamage(m_layout.absRect(node.layout));
 					if (notify && node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
 				}
+				return true;
+			}
+			if (node.table) {
+				const u32* selected = std::get_if<u32>(&valueToSet);
+				if (!selected)
+					return false;
+				if (*selected != std::numeric_limits<u32>::max() && *selected >= listItemCount(node))
+					return false;
+				const i32 next = *selected == std::numeric_limits<u32>::max() ? -1 : static_cast<i32>(*selected);
+				changed = node.tableSelectedRow != next;
+				node.tableSelectedRow = next;
+				if (changed)
+					addDamage(m_layout.absRect(node.layout));
 				return true;
 			}
 			if (node.menuItem) {
@@ -5752,7 +8532,22 @@ namespace xui {
 				const u32 panelIndex = static_cast<u32>(&node - m_nodes.data());
 				DockHostState* host = dockHostForPanel(panelIndex);
 				if (!host || !host->tree.contains(panelIndex)) return false;
+				if (requested->closed) {
+					if (!host->tree.close(panelIndex))
+						return node.dockClosed;
+					node.dockClosed = true;
+					updateDockHostLayout(*host, true);
+					addDockDamage(*host);
+					fireDockHandler(panelIndex, node.closeHandler);
+					return true;
+				}
 				const bool wasFloating = host->tree.floating(panelIndex);
+				// floatMode is a policy, not a dock structure: closing a native tear-off window
+				// writes osWindow=true|false through this API, and the facade reconciles surfaces
+				// against it. Keep it out of the dock handler notification below.
+				const bool policyChanged = requested->osWindow != node.dockOsWindow;
+				if (policyChanged)
+					node.dockOsWindow = requested->osWindow;
 				if (requested->floating) {
 					Rect floating = requested->bounds;
 					if (floating.w <= 0.f) floating.w = std::max(1.f, node.dockPreferredSize.x);
@@ -5771,10 +8566,12 @@ namespace xui {
 					changed |= host->tree.reorder(panelIndex, requested->order);
 					if (requested->active) changed |= host->tree.activate(panelIndex);
 				}
-				if (!changed) return true;
-				updateDockHostLayout(*host, true);
+				if (!changed && !policyChanged)
+					return true;
+				if (changed)
+					updateDockHostLayout(*host, true);
 				addDockDamage(*host);
-				if (notify) {
+				if (notify && changed) {
 					fireDockHandler(panelIndex, requested->floating ? node.undockHandler : node.dockHandler);
 					if (node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
 				}
@@ -5808,38 +8605,45 @@ namespace xui {
 			if (node.checkItem || node.checkBox) {
 				const bool* value = std::get_if<bool>(&valueToSet); if (!value) return false;
 				changed = node.checked != *value; node.checked = *value;
-			}
-			else if (node.slider || node.progressBar) {
+			} else if (node.rangeSlider) {
+				const Vec2* range = std::get_if<Vec2>(&valueToSet);
+				if (!range)
+					return false;
+				const f32 low = std::clamp(range->x, node.minValue, node.maxValue),
+						  high = std::clamp(range->y, low, node.maxValue);
+				changed = node.rangeLow != low || node.rangeHigh != high;
+				node.rangeLow = low;
+				node.rangeHigh = high;
+			} else if (node.slider || node.progressBar) {
 				const f64* value = std::get_if<f64>(&valueToSet); if (!value) return false;
 				const f32 clamped = std::clamp(static_cast<f32>(*value), node.minValue, node.maxValue);
 				changed = node.value != clamped; node.value = clamped;
-			}
-			else if (node.switchToggle || node.toggleButton) {
+			} else if (node.switchToggle || node.toggleButton) {
 				const bool* value = std::get_if<bool>(&valueToSet); if (!value) return false;
 				changed = node.checked != *value; node.checked = *value;
-			}
-			else if (node.radioGroup || node.segmented || node.breadcrumb) {
+			} else if (node.radioGroup || node.segmented || node.breadcrumb) {
 				const std::string* value = std::get_if<std::string>(&valueToSet); if (!value) return false;
-				const auto found = std::find(node.options.begin(), node.options.end(), *value); if (found == node.options.end()) return false;
-				const u32 selected = static_cast<u32>(found - node.options.begin());
+				const auto found = std::find(payload(node).options.begin(), payload(node).options.end(), *value);
+				if (found == payload(node).options.end())
+					return false;
+				const u32 selected = static_cast<u32>(found - payload(node).options.begin());
 				changed = node.selectedOption != selected; node.selectedOption = selected;
-			}
-			else if (node.datePicker) {
+			} else if (node.datePicker) {
 				const std::string* value = std::get_if<std::string>(&valueToSet); if (!value) return false;
 				i32 year = 0; u32 month = 0, day = 0;
 				if (!(std::sscanf(value->data(), "%4d-%2u-%2u", &year, &month, &day) == 3 && month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth(year, month))) return false;
 				changed = !(year == node.dateYear && month == node.dateMonth && day == node.dateDay);
 				node.dateYear = year; node.dateMonth = month; node.dateDay = day;
 				node.viewYear = year; node.viewMonth = month;
-				node.text = formatDateText(year, month, day);
+				node.text = formatDateText(year, month, day, m_locale);
 				if (changed) m_layout.markContentChanged(node.layout);
-			}
-			else if (node.numberField || node.stepper) {
+			} else if (node.numberField || node.stepper) {
 				if (const f64* number = std::get_if<f64>(&valueToSet)) {
 					const f32 clamped = node.numberBounded ? std::clamp(static_cast<f32>(*number), std::min(node.minValue, node.maxValue), std::max(node.minValue, node.maxValue)) : static_cast<f32>(*number);
 					changed = node.value != clamped;
 					node.value = clamped;
-					node.text = formatNumberText(clamped, node.numberPrecision) + (node.unit.empty() ? std::string{} : node.unit);
+					node.text = formatNumberText(clamped, node.numberPrecision, m_locale) +
+								(node.unit.empty() ? std::string{} : node.unit);
 					node.caret = node.selectionAnchor = node.text.size();
 					if (changed) m_layout.markContentChanged(node.layout);
 				}
@@ -5850,21 +8654,21 @@ namespace xui {
 					changed = commitNumberText(node);
 				}
 				else return false;
-			}
-			else if (node.dropdown) {
+			} else if (node.dropdown) {
 				const std::string* value = std::get_if<std::string>(&valueToSet); if (!value) return false;
-				const auto found = std::find(node.options.begin(), node.options.end(), *value); if (found == node.options.end()) return false;
-				const u32 selected = static_cast<u32>(found - node.options.begin());
+				const auto found = std::find(payload(node).options.begin(), payload(node).options.end(), *value);
+				if (found == payload(node).options.end())
+					return false;
+				const u32 selected = static_cast<u32>(found - payload(node).options.begin());
 				changed = node.selectedOption != selected; node.selectedOption = selected; node.text = *value;
 				if (changed) m_layout.markContentChanged(node.layout);
-			}
-			else if (node.textBox || node.textArea || typeIs(node.type, *m_strings, "Text") || node.label || node.badge || node.keybindField) {
+			} else if (node.textBox || node.textArea || typeIs(node.type, *m_strings, "Text") || node.label ||
+					   node.badge || node.keybindField) {
 				const std::string* value = std::get_if<std::string>(&valueToSet); if (!value) return false;
 				std::string next = truncateUtf8(*value, node.maxLength);
 				changed = node.text != next; node.text = std::move(next); node.caret = node.selectionAnchor = node.text.size();
 				if (changed) m_layout.markContentChanged(node.layout);
-			}
-			else if (node.colorPicker) {
+			} else if (node.colorPicker) {
 				Color next;
 				if (const Color* colorValue = std::get_if<Color>(&valueToSet)) next = *colorValue;
 				else if (const std::string* stringValue = std::get_if<std::string>(&valueToSet)) { if (!parseColorText(*stringValue, next)) return false; }
@@ -5873,18 +8677,16 @@ namespace xui {
 				changed = node.pickerColor != next; node.pickerColor = next; node.text = colorText(next, node.pickerFormat, node.pickerAlpha, node.pickerPrecision);
 				if (changed) syncPickerEditors(static_cast<u32>(&node - m_nodes.data()));
 				if (changed) m_layout.markContentChanged(node.layout);
-			}
-			else if (node.tabs) {
+			} else if (node.tabs) {
 				const u32* value = std::get_if<u32>(&valueToSet); if (!value) return false;
 				const u32 count = m_layout.childCount(node.layout); if (!count) return false;
 				const u32 selected = std::min(*value, count - 1); changed = node.selectedTab != selected; node.selectedTab = selected;
 				if (changed) for (u32 i = 0; i < m_nodes.size(); ++i) if (m_nodes[i].focused && !isNodeVisible(i)) m_nodes[i].focused = false;
-			}
-			else if (node.scrollView) {
+			} else if (node.scrollView) {
 				const Vec2* offset = std::get_if<Vec2>(&valueToSet); if (!offset) return false;
 				changed = setScrollOffset(static_cast<u32>(&node - m_nodes.data()), *offset, false);
-			}
-			else return false;
+			} else
+				return false;
 			if (changed) {
 				addDamage(m_layout.absRect(node.layout));
 				if (notify && node.pressHandler.v && m_eventFn) m_eventFn(m_eventContext, m_strings->view(node.pressHandler));
@@ -5939,10 +8741,14 @@ namespace xui {
 
 	void UiRuntime::visibleTreeEntries(const Node& tree, std::vector<u32>& rows) const {
 		rows.clear();
-		for (u32 i = 0; i < tree.treeEntries.size(); ++i) {
+		for (u32 i = 0; i < payload(tree).treeEntries.size(); ++i) {
 			bool visible = true;
-			for (i32 parent = tree.treeEntries[i].parent; parent >= 0; parent = tree.treeEntries[static_cast<u32>(parent)].parent)
-				if (!tree.treeEntries[static_cast<u32>(parent)].expanded) { visible = false; break; }
+			for (i32 parent = payload(tree).treeEntries[i].parent; parent >= 0;
+				 parent = payload(tree).treeEntries[static_cast<u32>(parent)].parent)
+				if (!payload(tree).treeEntries[static_cast<u32>(parent)].expanded) {
+					visible = false;
+					break;
+				}
 			if (visible) rows.push_back(i);
 		}
 	}
@@ -5984,11 +8790,22 @@ namespace xui {
 			const f32 rowHeight = std::max(22.f, fontSize * 1.65f);
 			f32 widest = 120.f;
 			if (m_text && runtimeNode->font.valid()) for (u32 index : rows) {
-				const Node::TreeEntry& item = runtimeNode->treeEntries[index];
-				const f32 textWidth = m_text->layout(runtimeNode->font, item.label, fontSize * dpiScale).width / dpiScale;
-				widest = std::max(widest, f32(item.depth) * 16.f + textWidth + 30.f);
+					const Node::TreeEntry& item = payload(*runtimeNode).treeEntries[index];
+					const f32 textWidth =
+						m_text->layout(runtimeNode->font, item.label, fontSize * dpiScale).width / dpiScale;
+					widest = std::max(widest, f32(item.depth) * 16.f + textWidth + 30.f);
 			}
 			return { widest, std::max(rowHeight, rowHeight * f32(rows.size())) };
+		}
+		if (runtimeNode->table) {
+			return {360.f, 30.f + 26.f * std::min(8u, listItemCount(*runtimeNode))};
+		}
+		if (runtimeNode->listView) {
+			const f32 fontSize = runtimeNode->style.has(PropId::FontSize)
+									 ? number(runtimeNode->style.get(PropId::FontSize), 0, 14.f)
+									 : 14.f;
+			const f32 rowHeight = std::max(24.f, fontSize * 1.8f);
+			return {180.f, std::max(rowHeight, rowHeight * std::min(8u, listItemCount(*runtimeNode)))};
 		}
 		// Empty controls still need a useful preferred size. Without these defaults, an auto-sized
 		// Slider/ProgressBar or an empty placeholder field measured to 0x0 until the app authored
@@ -6020,25 +8837,27 @@ namespace xui {
 			return { minWidth, minHeight };
 		}
 		if (runtimeNode->radioGroup) {
-			if (!m_text || !runtimeNode->font.valid() || runtimeNode->options.empty()) return { 160.f, 28.f };
+			if (!m_text || !runtimeNode->font.valid() || payload(*runtimeNode).options.empty())
+				return {160.f, 28.f};
 			const f32 fontSize = runtimeNode->style.has(PropId::FontSize) ? number(runtimeNode->style.get(PropId::FontSize), 0, 16) : 16.f;
 			f32 width = 0.f;
-			for (const std::string& option : runtimeNode->options)
+			for (const std::string& option : payload(*runtimeNode).options)
 				width = std::max(width, textLayout(option, fontSize, 0.f).width / dpiScale + 30.f);
-			return { width, f32(runtimeNode->options.size()) * 28.f };
+			return {width, f32(payload(*runtimeNode).options.size()) * 28.f};
 		}
 		if (runtimeNode->segmented || runtimeNode->breadcrumb) {
-			if (!m_text || !runtimeNode->font.valid() || runtimeNode->options.empty())
+			if (!m_text || !runtimeNode->font.valid() || payload(*runtimeNode).options.empty())
 				return runtimeNode->segmented ? Size{ 240.f, 28.f } : Size{ 220.f, 22.f };
 			const f32 fontSize = runtimeNode->style.has(PropId::FontSize) ? number(runtimeNode->style.get(PropId::FontSize), 0, 16) : 16.f;
 			f32 total = 0.f, widest = 0.f;
-			for (const std::string& option : runtimeNode->options) {
+			for (const std::string& option : payload(*runtimeNode).options) {
 				const f32 width = textLayout(option, fontSize, 0.f).width / dpiScale;
 				total += width;
 				widest = std::max(widest, width);
 			}
-			if (runtimeNode->segmented) return { widest * f32(runtimeNode->options.size()) + 16.f, 28.f };
-			return { total + f32(runtimeNode->options.size()) * 22.f, std::max(22.f, fontSize * 1.4f) };
+			if (runtimeNode->segmented)
+				return {widest * f32(payload(*runtimeNode).options.size()) + 16.f, 28.f};
+			return {total + f32(payload(*runtimeNode).options.size()) * 22.f, std::max(22.f, fontSize * 1.4f)};
 		}
 		if (runtimeNode->stepper || runtimeNode->keybindField || runtimeNode->datePicker) return { runtimeNode->datePicker ? 170.f : 180.f, 36.f };
 		if (runtimeNode->rating) return { std::clamp(runtimeNode->maxValue, 1.f, 10.f) * 26.f, 24.f };
@@ -6047,7 +8866,8 @@ namespace xui {
 		const f32 wrapWidth = constraint.fw ? constraint.w : 0.f;
 		const TextLayout& run = textLayout(runtimeNode->text, fontSize, wrapWidth);
 		const f32 spacing = runtimeNode->style.has(PropId::LetterSpacing) ? number(runtimeNode->style.get(PropId::LetterSpacing), 0) : 0.f;
-		const f32 contentWidth = run.width / dpiScale + spacing * static_cast<f32>(run.glyphs.size() > 0 ? run.glyphs.size() - 1 : 0);
+		const f32 contentWidth =
+			run.width / dpiScale + spacing * static_cast<f32>(!run.glyphs.empty() ? run.glyphs.size() - 1 : 0);
 		if (runtimeNode->button || runtimeNode->toggleButton) return { std::max(96.f, contentWidth), std::max(36.f, run.height / dpiScale) };
 		return { contentWidth, run.height / dpiScale };
 	}
@@ -6137,6 +8957,24 @@ namespace xui {
 			}
 		}
 		return resolved;
+	}
+
+	void UiRuntime::updateNodeFont(Node& node) const {
+		const f32 weight = node.style.has(PropId::FontWeight)
+							   ? std::clamp(number(node.style.get(PropId::FontWeight), 0, 400.f), 100.f, 900.f)
+							   : 400.f;
+		StrId family = m_strings ? m_strings->find("default") : StrId{};
+		if (node.style.has(PropId::Font)) {
+			const Atom& atom = node.style.get(PropId::Font).atoms[0];
+			if ((atom.kind == AtomKind::String || atom.kind == AtomKind::Ident) && m_strings)
+				family = atom.str();
+		}
+		if (node.fontSelectionCached && node.fontSelectionFamily == family && node.fontSelectionWeight == weight)
+			return;
+		node.font = selectFont(node.style);
+		node.fontSelectionFamily = family;
+		node.fontSelectionWeight = weight;
+		node.fontSelectionCached = true;
 	}
 
 } // namespace xui

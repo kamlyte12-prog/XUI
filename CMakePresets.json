@@ -1,0 +1,81 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "dev",
+      "displayName": "Debug with tests, benchmarks, fuzzers, and examples",
+      "description": "Ninja-based developer build. Requires Ninja on PATH.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/dev",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "XUI_BUILD_TESTS": "ON",
+        "XUI_BUILD_BENCHMARKS": "ON",
+        "XUI_BUILD_FUZZERS": "ON",
+        "XUI_BUILD_EXAMPLES": "ON",
+        "XUI_BUILD_GLFW_EXAMPLE": "ON"
+      }
+    },
+    {
+      "name": "release",
+      "inherits": "dev",
+      "displayName": "Release with tests, benchmarks, fuzzers, and examples",
+      "binaryDir": "${sourceDir}/build/release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "minimal",
+      "displayName": "Minimal Release library build",
+      "description": "No tests, examples, benchmarks, fuzzers, backends, or image support.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/minimal",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "XUI_BUILD_TESTS": "OFF",
+        "XUI_BUILD_BENCHMARKS": "OFF",
+        "XUI_BUILD_FUZZERS": "OFF",
+        "XUI_BUILD_EXAMPLES": "OFF",
+        "XUI_BUILD_GLFW_EXAMPLE": "OFF",
+        "XUI_BUILD_GLFW_BACKEND": "OFF",
+        "XUI_ENABLE_IMAGE_SUPPORT": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "dev",
+      "configurePreset": "dev"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "minimal",
+      "configurePreset": "minimal"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "dev",
+      "configurePreset": "dev",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

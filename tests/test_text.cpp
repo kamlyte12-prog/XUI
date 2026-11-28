@@ -160,7 +160,7 @@ TEST(variable_font_gpos_kerning_and_advances_follow_each_weight) {
 	std::cout << "SKIP Roboto GPOS regression: XUI_EXAMPLE_DIR is not configured\n";
 	return;
 #else
-	const std::filesystem::path path = std::filesystem::path(XUI_EXAMPLE_DIR) / "layout" / "Roboto.ttf";
+	const std::filesystem::path path = std::filesystem::path(XUI_EXAMPLE_DIR) / "assets" / "Roboto.ttf";
 	std::ifstream file(path, std::ios::binary);
 	if (!file) { std::cout << "SKIP Roboto GPOS regression: Roboto.ttf is missing\n"; return; }
 	const std::string bytes{ std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>() };
@@ -366,7 +366,55 @@ TEST(text_shaping_matches_pen_advance_sum) {
 	CHECK(&l == &l2);
 	CHECK_EQ(ts.cacheCount(), 1u);
 	CHECK_EQ(ts.rasterCount(), 0u);      // shaping is independent from glyph rasterisation
+	// A text box measured from its own ink width must not wrap because the wrap width is
+	// quantized down: adjacent narrow glyphs ("11") are the common exact-fit case.
+	const TextLayout ones = ts.layout(fh, "11", 16);
+	const TextLayout exactFit = ts.layout(fh, "11", 16, ones.width);
+	CHECK_EQ(exactFit.glyphs.size(), 2u);
+	CHECK_EQ(exactFit.lineStarts.size(), 1u);
 	nr.shutdown();
+}
+
+TEST(text_layout_caches_utf8_caret_stops_for_wrapped_runs) {
+	FontFixture fx;
+	if (!fx.have())
+		return;
+	TextSystem text;
+	const FontHandle font = text.loadFont(fx.bytes);
+	CHECK(font.valid());
+	if (!font.valid())
+		return;
+	const std::string input = "A\xC3\xA9 B";
+	const TextLayout& layout = text.layout(font, input, 16.f, 14.f);
+	const std::size_t expectedOffsets[] = {0, 1, 3, 4, 5};
+	CHECK_EQ(layout.caretStops.size(), std::size(expectedOffsets));
+	for (std::size_t i = 0; i < std::size(expectedOffsets); ++i) {
+		CHECK_EQ(layout.caretStops[i].byteOffset, expectedOffsets[i]);
+		CHECK_EQ(layout.caretAt(static_cast<u32>(expectedOffsets[i])).byteOffset, expectedOffsets[i]);
+	}
+	CHECK(layout.lineStarts.size() > 1);
+	const TextLayout& ligatureText = text.layout(font, "office", 16.f);
+	CHECK_EQ(ligatureText.caretStops.size(), 7u);
+	for (const TextCaretStop& stop : ligatureText.caretStops)
+		CHECK(std::isfinite(stop.x));
+	const std::string arabic = "\xD8\xB3\xD9\x84\xD8\xA7\xD9\x85"; // سلام
+	const TextLayout& rtl = text.layout(font, arabic, 16.f);
+	CHECK(!rtl.glyphs.empty());
+	CHECK(rtl.glyphs.front().rtl);
+	CHECK_EQ(rtl.caretStops.size(), 5u);
+	const TextLayout& wrappedRtl = text.layout(font, arabic + " " + arabic + " " + arabic, 16.f, 34.f);
+	CHECK(wrappedRtl.lineStarts.size() > 1);
+	CHECK_EQ(wrappedRtl.visualCaretStops.size(), wrappedRtl.caretStops.size());
+	for (std::size_t i = 1; i < wrappedRtl.visualCaretStops.size(); ++i) {
+		const TextCaretStop& previous = wrappedRtl.visualCaretStops[i - 1];
+		const TextCaretStop& current = wrappedRtl.visualCaretStops[i];
+		CHECK(previous.line < current.line || (previous.line == current.line && previous.x <= current.x));
+	}
+	const FontHandle fallback = text.loadFont(fx.bytes);
+	const u32 fallbackGeneration = text.fallbackGeneration();
+	CHECK(text.addFallbackFont(font, fallback));
+	CHECK_EQ(text.fallbackGeneration(), fallbackGeneration + 1);
+	CHECK_EQ(text.layout(font, "office", 16.f).glyphs.front().font, font);
 }
 
 TEST(text_frame_stats_count_cache_shaping_and_atlas_work) {
@@ -374,7 +422,7 @@ TEST(text_frame_stats_count_cache_shaping_and_atlas_work) {
 	std::cout << "SKIP text frame counters: XUI_EXAMPLE_DIR is not configured\n";
 	return;
 #else
-	const std::filesystem::path path = std::filesystem::path(XUI_EXAMPLE_DIR) / "layout" / "Roboto.ttf";
+	const std::filesystem::path path = std::filesystem::path(XUI_EXAMPLE_DIR) / "assets" / "Roboto.ttf";
 	std::ifstream file(path, std::ios::binary);
 	if (!file) { std::cout << "SKIP text frame counters: Roboto.ttf is missing\n"; return; }
 	const std::string bytes{ std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>() };
@@ -412,7 +460,7 @@ TEST(text_layout_cache_rehash_preserves_all_entries) {
 	std::cout << "SKIP text cache rehash: XUI_EXAMPLE_DIR is not configured\n";
 	return;
 #else
-	const std::filesystem::path path = std::filesystem::path(XUI_EXAMPLE_DIR) / "layout" / "Roboto.ttf";
+	const std::filesystem::path path = std::filesystem::path(XUI_EXAMPLE_DIR) / "assets" / "Roboto.ttf";
 	std::ifstream file(path, std::ios::binary);
 	if (!file) { std::cout << "SKIP text cache rehash: Roboto.ttf is missing\n"; return; }
 	const std::string bytes{ std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>() };

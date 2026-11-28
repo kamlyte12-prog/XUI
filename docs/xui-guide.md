@@ -54,6 +54,7 @@ Comments support `// line comments` and `/* block comments */`. Strings support 
 - `class: "primary compact"` adds space-separated class names.
 - `part: "title"` marks a styleable internal part of a component definition. It is consumed during component expansion and is not a runtime widget property; see the [component guide](components.md#styling-component-parts).
 - Bracket properties are written as `[name: value]`; the parser validates them against the schema.
+- Schema validation reports source-located warnings for values that are accepted for forward compatibility but not implemented by the standard runtime. Successful `validate()` results expose these in `XuiValidationReport::warnings`; `Xui::validationWarnings()` and `UiAssetBundle::validationWarnings` expose them from the higher-level load paths. Warnings do not fail validation by default. Pass `XuiValidationOptions{ .warningsAsErrors = true }` to `validate()` / `loadUiAssets()`, or set `XuiOptions::warningsAsErrors`, to opt into strict validation.
 - Event properties use `eventName: handlerName`, for example `press: onSave` or `change: onColorChange`.
 
 The parser recognizes `press`, `release`, `click`, `doubleClick`, `change`, `submit`, `focus`, `blur`, `hover`, `scroll`, `drag`, `drop`, `key`, `resize`, and `close`. The current runtime wires `press` on buttons and `change` on slider/dropdown/color-picker/scroll-view controls to the same callback mechanism. It passes the handler name, not a value payload. Slider changes are reported immediately for each distinct pointer or keyboard value. Read a ScrollView's offset as a `Vec2` through `UiRuntime::value(id)` or `scrollOffset(id)` inside its callback. Read a dropdown or color value through `value(id)`, `controlText(id)`, or `controlColor(id)`; color picker format/options are described in the [widget guide](widgets.md#popup-controls). Other parser event names are not dispatched by this runtime.
@@ -76,7 +77,7 @@ ScrollView[id: "results", vertical: true, horizontal: false, scrollSpeed: 42,
 
 Use `ui.runtime().scrollTo("results", {0, 120})` for direct positioning or `scrollIntoView("target", true)` to reveal a descendant. See the [ScrollView widget reference](widgets.md#scrollview) for nested input routing, clipping, keyboard behavior, and current limitations.
 
-The common validator accepts generic names including `id`, `class`, `key`, `slot`, `part`, `grow`, `shrink`, `gridColumn`, `gridRow`, `columnSpan`, `rowSpan`, `visible`, `disabled`, `tooltip`, `tooltipShowDelay`, `tooltipHideDelay`, `tooltipTrigger`, `tooltipHideOnClick`, `tooltipDisabled`, `align`, `justify`, `pad`, `margin`, `size`, `minSize`, `maxSize`, `width`, `height`, `minWidth`, `maxWidth`, `minHeight`, `maxHeight`, and `opacity`. `part` is valid only inside a component definition. Tooltip timing/trigger are behavior properties in `.xui`; bubble appearance belongs to `.xss`. The runtime applies structural geometry properties from `.xui`; Row/Column also accept a named `gap` constructor argument, Grid accepts track templates and cell placement, and CheckList accepts `gap` as a property. `.xui` values override the same `.xss` layout defaults. `visible` and `.xui opacity` are still not implemented as runtime state/paint behavior; use `.xss opacity` for visual opacity.
+The common validator accepts generic names including `id`, `class`, `key`, `slot`, `part`, `grow`, `shrink`, `gridColumn`, `gridRow`, `columnSpan`, `rowSpan`, `visible`, `disabled`, `tooltip`, `tooltipShowDelay`, `tooltipHideDelay`, `tooltipTrigger`, `tooltipHideOnClick`, `tooltipDisabled`, `tooltipFollowCursor`, `align`, `justify`, `pad`, `margin`, `size`, `minSize`, `maxSize`, `width`, `height`, `minWidth`, `maxWidth`, `minHeight`, `maxHeight`, and `opacity`. `part` is valid only inside a component definition. Tooltip timing/trigger are behavior properties in `.xui`; bubble appearance belongs to `.xss`. The runtime applies structural geometry properties from `.xui`; Row/Column also accept a named `gap` constructor argument, Grid accepts track templates and cell placement, and CheckList accepts `gap` as a property. `.xui` values override the same `.xss` layout defaults. `visible` and `.xui opacity` are still not implemented as runtime state/paint behavior; use `.xss opacity` for visual opacity.
 
 ## Supported layout containers
 
@@ -112,7 +113,7 @@ Grid("120px|1fr|2fr")[rows: "auto|40px", gap: 8px, pad: 10px] {
 }
 ```
 
-Track templates and cell placement are structural layout in `.xui`. Use `.xss gap`, `pad`, `min-size`, `max-size`, and other ordinary layout style properties for reusable defaults; an authored `.xui` value takes precedence. The explicit track limit is eight per axis. See the [Grid widget reference](widgets.md#grid) and the [showcase layout page](../examples/showcase.xui).
+Track templates and cell placement are structural layout in `.xui`. Use `.xss gap`, `pad`, `min-size`, `max-size`, and other ordinary layout style properties for reusable defaults; an authored `.xui` value takes precedence. The explicit track limit is eight per axis. See the [Grid widget reference](widgets.md#grid) and the [showcase layout page](../examples/showcase/showcase.xui).
 
 ### Stack overlays
 
@@ -173,6 +174,8 @@ On Windows 11, a root `Window` `.xss` `radius` is also passed to the GLFW platfo
 
 The Window property `platformTopMenu` is the exception: `Window(...) [platformTopMenu: false]` is read from the document itself, before the native window exists. With `false` the facade creates a borderless window and a [`TitleBar`](widgets.md#titlebar) widget must provide the draggable top menu (see the [widget reference](widgets.md#titlebar) for the behavior matrix and per-platform fallbacks).
 
+Applications can optionally call `Xui::setKeyHandler()` to consume key-down events before widget navigation. The callback receives the normalized `Key` and modifier bits and returns `true` when the application handled the event; unconsumed keys continue through the normal runtime path. The [Calculator example](../examples/calculator/README.md) uses this for digit and operator shortcuts.
+
 Root-window defaults can be authored in `.xss`:
 
 ```xss
@@ -211,7 +214,42 @@ component PageTitle(text) {
 }
 ```
 
-`xui::Xui::loadXui(path)` resolves imports and schema-validates the loaded program. The facade's runtime build expands declared components, substitutes literal parameters and handler names, and routes caller children into default or named slots. See the [component guide](components.md) for the complete behavior and limits. The runtime still does not evaluate arbitrary bindings/interpolation or execute `if` / `for`.
+`xui::Xui::loadXui(path)` resolves imports and schema-validates the loaded program. The facade's runtime build expands declared components, substitutes literal parameters and handler names, and routes caller children into default or named slots. See the [component guide](components.md) for the complete behavior and limits.
+
+### Model bindings and UI-thread updates
+
+The retained runtime accepts scalar model values through `Xui::setModelValue(path, value)`. Paths use object members separated by dots; bindings are evaluated initially and again when an overlapping model path changes. Interpolated text supports expressions such as `Text(value: "Hello, {user.name}")`; a single expression in braces preserves its boolean/number value, so it can drive `visible` and other supported dynamic properties. `bind:value` on text editors is two-way: edits publish the new string back to the model.
+
+```xui
+Window {
+  Column {
+    Text(value: "Welcome, {user.name}")
+    Text(value: "No results")[if: !hasItems]
+    TextBox[id: "name", bind: user.name]
+  }
+}
+```
+
+```cpp
+ui.setModelValue("user.name", xui::ModelValue("Ada"));
+ui.setModelValue("hasItems", xui::ModelValue(false));
+ui.beginUpdate();
+ui.setModelValue("user.name", xui::ModelValue("Grace"));
+ui.setModelValue("hasItems", xui::ModelValue(true));
+ui.endUpdate();
+```
+
+`if:` evaluates at build and when its dependencies change; a false condition removes the node's layout footprint until it becomes true again. `for:` expands an array or inclusive numeric range at build time (`for: item in items`, optionally `item, index in items`). Seed a collection before `loadXui()` when the initial repeated nodes must be present. It currently does not reconcile an already-built repeated subtree when the source collection changes; use a provider-backed ListView/Table for live data collections. Expression calls are not evaluated. `beginUpdate()/endUpdate()` coalesce damage and wake the facade once at the outer batch boundary. `Xui::invoke(fn)` posts application work to the UI thread; worker threads should use it for all runtime/model mutations and should be joined before shutdown.
+
+`Xui::localization()` provides locale-keyed strings with fallback plus simple one/other and male/female/neutral forms. `Xui::setLocale()` also changes NumberField and DatePicker display formats. String-table results can be placed into the observable model and used by ordinary bindings. Right-to-left text shaping is supported by the text engine, but automatic RTL mirroring of layout and compound widget geometry remains incomplete.
+
+```cpp
+ui.localization().set("en", "empty", "No items");
+ui.localization().setForms("en", "files", {.one = "{count} file", .other = "{count} files"});
+ui.setLocale("en");
+ui.setModelValue("emptyText", ui.localization().text("empty"));
+ui.setModelValue("fileCountText", ui.localization().text("files", 3));
+```
 
 Component calls may mix positional arguments before named arguments, but not after them. Use `Component::part` in `.xss` to style a marked internal part. The part selector follows the ordinary class cascade; see the [stylesheet selector guide](xss-guide.md#selectors-and-precedence).
 
@@ -222,4 +260,4 @@ Component calls may mix positional arguments before named arguments, but not aft
 - Add stable IDs only when app code needs to read a control value or target a unique style.
 - Keep long body copy in `Text`; it wraps to its measured width and clips to its widget bounds. Give its parent a width constraint and enough vertical space.
 - Check widget support in the [object reference](widgets.md) before relying on a parser-accepted name.
-- Start from the [cross-platform fixture](../tests/fixtures/cross_platform.xui) and its [stylesheet](../tests/fixtures/cross_platform.xss), or the [full showcase](../examples/showcase.xui).
+- Start from the [cross-platform fixture](../tests/fixtures/cross_platform.xui) and its [stylesheet](../tests/fixtures/cross_platform.xss), or the [full showcase](../examples/showcase/showcase.xui).

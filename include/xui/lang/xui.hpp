@@ -106,6 +106,12 @@ namespace xui {
 		std::vector<DiagnosticList> lists;      ///< one per file that had problems
 		std::string format() const;
 	};
+	struct XuiValidationOptions {
+		bool warningsAsErrors = false; ///< Promote schema warnings to errors when explicitly requested.
+	};
+	struct XuiValidationReport {
+		std::vector<DiagnosticList> warnings; ///< Source-located warnings grouped by source file.
+	};
 	/// Load @p entryPath and everything it `@import`s (paths resolve relative to the importing file).
 	/// Detects import cycles, missing files and duplicate component names.
 	Result<Program, XuiError> loadXui(std::string_view entryPath, ReadFileFn read, void* ctx, StringInterner& in);
@@ -119,10 +125,15 @@ namespace xui {
 	/// themselves here; withCoreWidgets() pre-registers the standard library's core subset.
 	class XuiSchema {
 	public:
-		struct Widget { std::vector<std::string> ctor, props; };
+		struct Widget {
+			std::vector<std::string> ctor, props, unimplemented;
+			bool runtimeImplemented = true;
+		};
 		/// @param ctor  positional constructor parameters, in order (also accepted by name)
 		/// @param props additional named properties
-		void addWidget(std::string type, std::vector<std::string> ctor = {}, std::vector<std::string> props = {});
+		/// @param unimplemented accepted parameters that produce validation warnings until runtime support exists
+		void addWidget(std::string type, std::vector<std::string> ctor = {}, std::vector<std::string> props = {},
+					   std::vector<std::string> unimplemented = {}, bool runtimeImplemented = true);
 		const Widget* find(std::string_view type) const;
 		static const std::vector<std::string_view>& genericProps();   ///< id class key grow shrink ... valid on every node
 		static XuiSchema withCoreWidgets();
@@ -130,6 +141,8 @@ namespace xui {
 	private:
 		std::unordered_map<std::string, Widget> m_widgets;
 	};
-	/// Check types, argument counts and property names (with did-you-mean). Returns one list per file with problems.
-	Result<void, XuiError> validate(const Program& prog, const XuiSchema& schema, const StringInterner& in);
+	/// Check argument/property names and report accepted-but-unimplemented values as warnings.
+	/// Warnings are returned in the successful report; warnings-as-errors is opt-in.
+	Result<XuiValidationReport, XuiError> validate(const Program& prog, const XuiSchema& schema,
+												   const StringInterner& in, XuiValidationOptions options = {});
 }

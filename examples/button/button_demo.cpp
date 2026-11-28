@@ -8,9 +8,7 @@ int main() {
 	GlfwPlatform platform;
 	xui::Xui ui;
 
-	if (!ui.loadFont("C:/Windows/Fonts/comic.ttf", "comic") ||
-		!ui.loadXui("button.xui") ||
-		!ui.loadXss("button.xss")) {
+	if (!ui.loadFont("Roboto.ttf", "Roboto") || !ui.loadXui("button.xui") || !ui.loadXss("button.xss")) {
 		std::print("{}\n", ui.lastError());
 		return 1;
 	}

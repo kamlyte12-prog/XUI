@@ -5,6 +5,7 @@
 #include <xui/core/math.hpp>
 #include <xui/core/types.hpp>
 #include <cstdint>
+#include <array>
 #include <cstring>
 #include <string>
 #include <string_view>
@@ -106,6 +107,9 @@ namespace xui {
 			u32 glyph = 0;
 			f32 xAdvance = 0, xOffset = 0, yOffset = 0; // font units; y offset is positive upward
 			u32 cluster = 0;                              // UTF-8 byte index in the shaped input
+			std::array<f32, 8> ligatureCarets{};
+			u8 ligatureCaretCount = 0;
+			bool rtl = false;
 		};
 		bool shapeText(std::string_view utf8, std::vector<ShapedGlyph>& glyphs) const;
 		u32 tableOffset(std::string_view tag) const;

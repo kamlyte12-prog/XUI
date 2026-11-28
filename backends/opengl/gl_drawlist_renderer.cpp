@@ -38,6 +38,9 @@ uniform int hasTex;
 varying vec2 P,U,H,A; 
 varying vec4 C0,C1,C2,C3,R;
 varying float B,T,F;
+uniform int clipCount;
+uniform vec4 clipRect[4];
+uniform vec4 clipRadii[4];
 float cov(float d){
 	return clamp(.5-d,0.0,1.0);
 }
@@ -103,10 +106,32 @@ void main(){
 		c=mod(F,2.0)>.5?mix(C0,C1,t):C0;a=c.a*cov(dist);
 		rgb=c.rgb*a;
 	}
-	gl_FragColor=vec4(rgb,a);
+	// Rounded parent clips: coverage multiplies the premultiplied sample so children never paint past a
+	// rounded boundary. clipCount is 0 for rectangular-only clips, leaving the common path unchanged.
+	float cc=1.0;
+	for(int i=0;i<4;i++){
+		if(i>=clipCount)break;
+		cc*=cov(rr(P-clipRect[i].xy,clipRect[i].zw,clipRadii[i]));
+	}
+	// A rounded widget can exactly coincide with an inherited rounded clip (for example,
+	// an overlay panel filling its rounded parent). Multiplying both edge coverages squares
+	// the same AA ramp and makes that shared edge visibly darker/jagged. For round-rect
+	// primitives use the intersection coverage once; textured glyphs/images still multiply
+	// by the clip so their own alpha is preserved.
+	if(T<.5){
+		// Borders use C1 (C0 is intentionally transparent), so the shape's
+		// coverage must be capped by whichever round-rect color is actually visible.
+		float clipped=min(a,max(C0.a,C1.a)*cc);
+		float scale=a>0.0?clipped/a:0.0;
+		gl_FragColor=vec4(rgb*scale,clipped);
+	}else gl_FragColor=vec4(rgb,a)*cc;
 })GLSL";
 }
 bool GlDrawListRenderer::loadFunctions() {
+	// Array-uniform upload is optional on GL 2.1-era drivers; the clip path degrades to no rounding
+	// without it, so it is loaded separately from the required chain below.
+	if (!load(m_uniform4fv, "glUniform4fv"))
+		m_uniform4fv = nullptr;
 	return
 		load(m_createShader, "glCreateShader") &&
 		load(m_shaderSource, "glShaderSource") &&
@@ -161,7 +186,9 @@ bool GlDrawListRenderer::createProgram() {
 	GLuint a = compile(GL_VERTEX_SHADER, vs), b = compile(GL_FRAGMENT_SHADER, fs);
 	if (!a || !b) {
 		if (a)m_deleteShader(a);
-		if (b)m_deleteShader(b);return false;
+		if (b)
+			m_deleteShader(b);
+		return false;
 	}
 	m_program = m_createProgram();m_attachShader(m_program, a);m_attachShader(m_program, b);
 	const char* names[] = { "p","uv","c0","c1","halfSize","radii","aux","border","prim","flags","c2","c3" };
@@ -186,7 +213,21 @@ bool GlDrawListRenderer::createProgram() {
 	}
 	m_viewportLoc = m_getUniformLocation(m_program, "viewport");
 	m_textureLoc = m_getUniformLocation(m_program, "tex");
-	m_hasTextureLoc = m_getUniformLocation(m_program, "hasTex");return true;
+	m_hasTextureLoc = m_getUniformLocation(m_program, "hasTex");
+	// Array uniforms: query element [0], which every driver resolves to the base of the array.
+	m_clipCountLoc = m_getUniformLocation(m_program, "clipCount");
+	m_clipRectLoc = m_getUniformLocation(m_program, "clipRect[0]");
+	m_clipRadiiLoc = m_getUniformLocation(m_program, "clipRadii[0]");
+	return true;
+}
+void GlDrawListRenderer::applyContextState() {
+	// A freshly created native window has a default GL state: blending OFF, unpack alignment 4. Shared
+	// contexts share objects, not state, so every surface switch must restore what the draw list needs.
+	glDisable(GL_DEPTH_TEST);
+	glDisable(GL_CULL_FACE);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 }
 bool GlDrawListRenderer::init(const RendererDesc& d) {
 	m_error.clear();
@@ -198,11 +239,7 @@ bool GlDrawListRenderer::init(const RendererDesc& d) {
 	m_currentSurface = 0;
 	m_genBuffers(1, &m_vertexBuffer);
 	m_genBuffers(1, &m_indexBuffer);
-	glDisable(GL_DEPTH_TEST);
-	glDisable(GL_CULL_FACE);
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+	applyContextState();
 	if (!m_vertexBuffer || !m_indexBuffer) {
 		m_error = "Could not allocate the OpenGL draw-list buffers.";
 		shutdown();
@@ -251,6 +288,7 @@ bool GlDrawListRenderer::makeSurfaceCurrent(RenderSurfaceHandle h) {
 	if (!surface.alive || surface.generation != h.gen || !surface.nativeWindow) return false;
 	glfwMakeContextCurrent(static_cast<GLFWwindow*>(surface.nativeWindow));
 	m_currentSurface = h.index; m_width = surface.width; m_height = surface.height;
+	applyContextState();
 	glViewport(0, 0, GLsizei(m_width), GLsizei(m_height));
 	return true;
 }
@@ -272,12 +310,16 @@ TextureHandle GlDrawListRenderer::createTexture(const TextureDesc& d) {
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	GLint fmt = d.format == TextureFormat::A8 ? GL_ALPHA : GL_RGBA;
 	glTexImage2D(GL_TEXTURE_2D, 0, fmt, GLsizei(d.width), GLsizei(d.height), 0, fmt, GL_UNSIGNED_BYTE, d.pixels);
-	for (u32 i = 0;i < m_textures.size();++i)if (!m_textures[i].alive) {
-		auto& t = m_textures[i];t.name = name;
-		t.alive = true;t.format = d.format;
-		return{ i,t.generation };
-	}m_textures.push_back({ name,1,true,d.format });
-	return{ u32(m_textures.size() - 1),1 };
+	for (u32 i = 0; i < m_textures.size(); ++i)
+		if (!m_textures[i].alive) {
+			auto& t = m_textures[i];
+			t.name = name;
+			t.alive = true;
+			t.format = d.format;
+			return {i, t.generation};
+		}
+	m_textures.push_back({name, 1, true, d.format});
+	return {u32(m_textures.size() - 1), 1};
 }
 GlDrawListRenderer::Texture* GlDrawListRenderer::texture(TextureHandle h) {
 	return h.index < m_textures.size() && m_textures[h.index].alive &&
@@ -342,6 +384,26 @@ void GlDrawListRenderer::submit(const DrawList& dl) {
 		auto* t = texture(c.tex);bool has = t != nullptr;
 		if (has)glBindTexture(GL_TEXTURE_2D, t->name);
 		m_uniform1i(m_hasTextureLoc, has ? 1 : 0);
+		// Rounded clip shapes are per command: upload only when the command actually carries one.
+		const ClipShape* shape = c.clipShape < dl.nClipShapes ? &dl.clipShapes[c.clipShape] : nullptr;
+		GLint roundCount = shape ? GLint(shape->count) : 0;
+		if (roundCount && !m_uniform4fv)
+			roundCount = 0;
+		if (roundCount) {
+			GLfloat rects[ClipShape::kMaxRounds * 4], radii[ClipShape::kMaxRounds * 4];
+			for (GLint k = 0; k < roundCount; ++k) {
+				const ClipRound& round = shape->rounds[k];
+				rects[k * 4 + 0] = round.cx;
+				rects[k * 4 + 1] = round.cy;
+				rects[k * 4 + 2] = round.hx;
+				rects[k * 4 + 3] = round.hy;
+				for (u32 corner = 0; corner < 4; ++corner)
+					radii[k * 4 + corner] = round.r[corner];
+			}
+			m_uniform4fv(m_clipRectLoc, roundCount, rects);
+			m_uniform4fv(m_clipRadiiLoc, roundCount, radii);
+		}
+		m_uniform1i(m_clipCountLoc, roundCount);
 		glDrawElements(GL_TRIANGLES, GLsizei(c.idxCount),
 			GL_UNSIGNED_INT, reinterpret_cast<const void*>(size_t(c.idxOffset) * sizeof(u32)));
 	}

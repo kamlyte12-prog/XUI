@@ -34,7 +34,7 @@ namespace xui {
 	private:
 		struct Tex { u32 w = 0, h = 0; TextureFormat fmt = TextureFormat::RGBA8; std::vector<u8> data; bool alive = false; u32 gen = 1; };
 		const Tex* find(TextureHandle h) const;
-		void drawQuad(const Vertex& tl, const Vertex& br, const Recti& clip, const Tex* tex);
+		void drawQuad(const Vertex& tl, const Vertex& br, const Recti& clip, const Tex* tex, const ClipShape* shape);
 		u32 m_w = 0, m_h = 0; f32 m_dpi = 1.f;
 		bool m_forceFullClear = true;
 		std::vector<u8> m_fb;                       // premultiplied RGBA8

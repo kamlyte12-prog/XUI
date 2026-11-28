@@ -23,6 +23,8 @@ namespace xui {
 		Vec2 windowSizeLogical(WindowHandle h) const override { return sizeLogical(h); }
 		Vec2i windowSizePixels(WindowHandle h) const override { return sizePixels(h); }
 		f32 dpiScale(WindowHandle) const override;
+		bool windowVisible(WindowHandle) const override;
+		void setWindowVisible(WindowHandle, bool) override;
 
 		bool pumpEvents(Event& out) override;
 		void waitEvents(f64) override {}               // headless: nothing to wait for
@@ -61,6 +63,20 @@ namespace xui {
 
 		f32 lastResizeInset() const { return m_resizeInset; }
 		f32 lastCornerRadius() const { return m_cornerRadius; }
+		u32 lastChromeBorderColor() const { return m_chromeBorderColor; }
+		/// Windows created but not yet destroyed (the main window plus any native tear-off surfaces).
+		u32 liveWindowCount() const;
+		/// Windows requested through createWindow() with WindowDesc::visible == false.
+		u32 hiddenCreateCount() const {
+			return m_hiddenCreates;
+		}
+		/// Times a window was made visible through setWindowVisible().
+		u32 showCount() const {
+			return m_showCount;
+		}
+		WindowHandle lastCreatedWindow() const {
+			return m_lastCreated;
+		}
 
 		bool lastDecorated() const { return m_lastDecorated; }
 		u32 setDecoratedCount() const { return m_setDecoratedCount; }
@@ -81,7 +97,13 @@ namespace xui {
 		void typeText(std::string_view utf8);
 
 	private:
-		struct Win { std::string title; u32 w = 0, h = 0; bool alive = false; u32 gen = 1; };
+		struct Win {
+			std::string title;
+			u32 w = 0, h = 0;
+			bool alive = false;
+			bool visible = true;
+			u32 gen = 1;
+		};
 		Win* find(WindowHandle h);
 		const Win* find(WindowHandle h) const { return const_cast<NullPlatform*>(this)->find(h); }
 		Vec2 sizeLogical(WindowHandle h) const;
@@ -94,12 +116,15 @@ namespace xui {
 		f32 m_dpi = 1.f;
 		f64 m_time = 0;
 		u32 m_cursorCount = 0, m_clipboardWrites = 0, m_pendingTicks = 0;
+		u32 m_hiddenCreates = 0, m_showCount = 0;
+		WindowHandle m_lastCreated;
 		// custom chrome recording
 		bool m_lastDecorated = true;
 		WindowEdge m_lastResizeEdge = WindowEdge::Left;
 		bool m_maximized = false;
 		f32 m_resizeInset = 0.f;
 		f32 m_cornerRadius = 0.f;
+		u32 m_chromeBorderColor = 0;
 		u32 m_setDecoratedCount = 0, m_systemMoveCount = 0, m_systemResizeCount = 0;
 		u32 m_minimizeCount = 0, m_maximizeToggleCount = 0, m_closeCount = 0;
 	};

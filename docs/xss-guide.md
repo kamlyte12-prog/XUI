@@ -66,6 +66,8 @@ The compiler starts with these palette tokens, which the stylesheet can override
 
 The parser/compiler supports `@theme` token sets. The standard facade/runtime can select one by name: call `ui.setTheme("dark")` after `loadXss()`; the choice may be made before or after `attach()`. This changes palette-backed paint and text styles, including generated popup/editor nodes. Layout-affecting theme tokens are not reapplied after the `.xui`/`.xss` layout merge yet; use themes for colors and typography while keeping dimensions, padding, margins, and gaps invariant.
 
+`Xui::attach()` asks the platform for its reduced-motion preference. The GLFW backend currently reads the Windows client-area animation preference; backends without a native preference query default to motion enabled. When reduced motion is active, style transitions, keyframe animation, smooth scrolling, and wheel momentum are suppressed. Lower-level `UiRuntime` users can set the preference with `setReducedMotion(bool)`.
+
 ## Styling versus layout
 
 The `.xss` language carries both visual paint rules and layout defaults. In the runtime, `size`, `min-size`, `max-size`, `min-width`, `max-width`, `min-height`, `max-height`, `pad`, `margin`, `gap`, `grow`, `shrink`, `align`, and `justify` feed `LayoutTree`. Background, foreground, border, radius, shadow, opacity, and text properties feed painting. Layout stays in logical pixels; the painter and text atlas handle output DPI. Percent dimensions resolve against the parent content box after its border and padding; min/max clamps apply to the resolved size.

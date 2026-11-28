@@ -112,8 +112,12 @@ namespace xui {
 						return false;
 					}
 					const std::string current(m_strings.view(expression.name));
+					std::string classes = current;
+					if (!classes.empty())
+						classes += ' ';
+					classes += marker;
 					expression.kind = XExprKind::String;
-					expression.name = m_strings.intern(current.empty() ? marker : current + " " + marker);
+					expression.name = m_strings.intern(classes);
 					return true;
 				}
 				XExpr expression; expression.kind = XExprKind::String; expression.name = m_strings.intern(marker);

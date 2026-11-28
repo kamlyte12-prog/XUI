@@ -4,13 +4,19 @@
 #include <xui/render/renderer.hpp>
 #include <xui/text/text_layout.hpp>
 #include <xui/ui/runtime.hpp>
+#include <xui/ui/localization.hpp>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 #include <chrono>
+#include <functional>
+#include <mutex>
+#include <deque>
+#include <atomic>
 
 namespace xui {
+	using XuiKeyHandler = bool (*)(void* context, Key key, u8 modifiers);
 
 	struct XuiOptions {
 		std::string appName = "xui-app"; ///< Application identity passed to the platform when supported.
@@ -18,6 +24,7 @@ namespace xui {
 		u32 width = 720, height = 440; ///< Fallback initial client size in logical pixels.
 		u32 minWidth = 128, minHeight = 96; ///< Native minimum client dimensions in logical pixels.
 		bool resizable = true; ///< Allow platform window resizing.
+		bool warningsAsErrors = false; ///< Fail `.xui` loading when schema validation reports unsupported properties.
 		bool visible = true; ///< Show the created window immediately.
 		bool glContext = true; ///< Request a graphics context from platforms that use one.
 		bool vsync = false; ///< Request vertical synchronization from the renderer.
@@ -63,6 +70,33 @@ namespace xui {
 		bool setTheme(std::string_view name);
 		/// Replace window/run options. Call before `attach()` for deterministic startup configuration.
 		void setWindowOptions(XuiOptions options) { m_options = std::move(options); }
+		/// Post work to the UI thread. Safe from worker threads while the facade is attached and
+		/// running; stop/join workers before shutdown. The callback should group model changes with
+		/// beginUpdate()/endUpdate(). A platform must implement wakeEventLoop() to wake an idle loop.
+		void invoke(std::function<void()> work);
+		/// Coalesce runtime invalidation while applying a group of changes on the UI thread.
+		void beginUpdate() {
+			m_runtime.beginUpdate();
+		}
+		void endUpdate();
+		/// Set an application model path and reevaluate dependent .xui bindings on the UI thread.
+		bool setModelValue(std::string_view path, ModelValue value) {
+			return m_runtime.setModelValue(path, std::move(value));
+		}
+		ModelValue modelValue(std::string_view path) const {
+			return m_runtime.modelValue(path);
+		}
+		/// Locale string table for labels and plural/gender-aware application text.
+		Localization& localization() {
+			return m_localization;
+		}
+		const Localization& localization() const {
+			return m_localization;
+		}
+		void setLocale(std::string locale) {
+			m_localization.setLocale(locale);
+			m_runtime.setLocale(locale);
+		}
 
 		/// Initializes the platform, creates its window, initializes the renderer and connects the UI.
 		/// Both referenced objects remain application-owned and must outlive `shutdown()` or this facade.
@@ -74,6 +108,13 @@ namespace xui {
 
 		/// Set the callback used by `.xui` event properties; callbacks receive the authored handler name.
 		void setEventHandler(UiEventFn handler, void* context);
+		/// Set the synchronous filter/validator callback for editable text and value fields.
+		void setInputValidationHandler(UiInputValidationFn handler, void* context);
+		/// Set an optional app-level key handler. Return true to consume a key before widgets see it.
+		void setKeyHandler(XuiKeyHandler handler, void* context) {
+			m_keyHandler = handler;
+			m_keyContext = context;
+		}
 		/// Schedule an application update on the event loop. A zero interval disables it; hidden windows pause it.
 		/// The callback runs on the UI thread and receives actual elapsed seconds since its previous call.
 		void setTickHandler(XuiTickFn handler, void* context, u32 intervalMs);
@@ -92,6 +133,10 @@ namespace xui {
 		WindowHandle window() const { return m_window; }
 		/// Diagnostic from the last failed load, attach, or run operation.
 		const std::string& lastError() const { return m_error; }
+		/// Warnings from the most recently loaded `.xui` document (empty when none were reported).
+		const std::vector<DiagnosticList>& validationWarnings() const {
+			return m_assets.validationWarnings;
+		}
 		/// Frame and elapsed-time summary from the most recent `run()` call.
 		const XuiRunStats& lastRunStats() const { return m_stats; }
 
@@ -104,12 +149,17 @@ namespace xui {
 		void renderFrame();
 		void reconcileFloatingPanels();
 		void destroyFloatingPanel(std::size_t index);
+		bool drainInvocations();
 		static void renderFrameThunk(void* context) { static_cast<Xui*>(context)->renderFrame(); }
 		struct FloatingPanelSurface {
 			std::string id;
 			WindowHandle window;
 			RenderSurfaceHandle surface;
 			bool dragging = false;
+			/// False until the first frame has been drawn into this native window. New tear-off
+			/// windows are created hidden and revealed after their first present so the client
+			/// area never flashes an unpainted (black) surface.
+			bool shown = false;
 			Vec2 dragOffset{};
 		};
 
@@ -119,6 +169,7 @@ namespace xui {
 		UiAssetBundle m_assets;
 		TextSystem m_text;
 		UiRuntime m_runtime;
+		Localization m_localization;
 		Painter m_painter;
 		std::vector<FontFace> m_fonts;
 		Renderer* m_renderer = nullptr;
@@ -129,11 +180,18 @@ namespace xui {
 		std::string m_draggingFloatingPanel;
 		UiEventFn m_eventHandler = nullptr;
 		void* m_eventContext = nullptr;
+		UiInputValidationFn m_inputValidationHandler = nullptr;
+		void* m_inputValidationContext = nullptr;
+		XuiKeyHandler m_keyHandler = nullptr;
+		void* m_keyContext = nullptr;
 		XuiTickFn m_tickHandler = nullptr;
 		void* m_tickContext = nullptr;
 		u32 m_tickIntervalMs = 0;
 		std::chrono::steady_clock::time_point m_tickDeadline{}, m_lastTick{};
 		XuiRunStats m_stats;
+		std::mutex m_invocationMutex;
+		std::deque<std::function<void()>> m_invocations;
+		std::atomic<bool> m_externalRedraw{false};
 		std::string m_error;
 		std::string m_themeName;
 		std::string m_assetDirectory;

@@ -88,6 +88,10 @@ namespace xui {
 		/// Preferred client-chrome corner radius in logical pixels. Backends may apply a native
 		/// rounded-window hint when supported; it does not alter the backend-neutral layout.
 		f32 cornerRadius = 0.f;
+		/// Opaque RGBA colour for the native frame border that DWM draws over the outer client
+		/// pixel. 0 keeps the OS default. Apps that round an undecorated client set this to their
+		/// own background so the OS's 1px frame line does not step along the arc at fractional DPI.
+		u32 chromeBorderColor = 0;
 	};
 
 	struct PlatformDesc {
@@ -108,9 +112,20 @@ namespace xui {
 		virtual Vec2 windowSizeLogical(WindowHandle) const = 0;  ///< logical px
 		virtual Vec2i windowSizePixels(WindowHandle) const = 0;  ///< physical px (framebuffer)
 		virtual f32 dpiScale(WindowHandle) const = 0;
+		/// Report the operating system's reduced-motion preference when available.
+		/// Backends without a native preference API return false.
+		virtual bool prefersReducedMotion() const {
+			return false;
+		}
 		/// Whether a window can currently be seen. Minimized/hidden windows may pause visual timers.
 		/// Platforms without visibility state can keep the default and report true.
 		virtual bool windowVisible(WindowHandle) const { return true; }
+		/// Show or hide a top-level window without destroying it. Used to create native floating
+		/// panels hidden and reveal them only after their first frame is drawn, so a newly torn-off
+		/// panel never flashes an unpainted (black) client area. Defaults to a no-op.
+		virtual void setWindowVisible(WindowHandle, bool visible) {
+			(void)visible;
+		}
 		/// Screen-space client origin and position/size controls for native floating windows.
 		/// Defaults keep older backends source-compatible and report unsupported geometry.
 		virtual Vec2 windowClientScreenOrigin(WindowHandle) const { return {}; }
@@ -124,6 +139,9 @@ namespace xui {
 		virtual bool pumpEvents(Event& out) = 0;
 		/// Sleep until an event arrives or @p timeoutSec passes (0 = wait indefinitely). No busy waiting.
 		virtual void waitEvents(f64 timeoutSec) = 0;
+		/// Thread-safe wake for work posted to the UI loop. Backends that block in waitEvents()
+		/// should override this (GLFW uses glfwPostEmptyEvent); the default has no effect.
+		virtual void wakeEventLoop() {}
 		virtual f64 time() const = 0;      ///< seconds on a monotonic clock
 
 		virtual void* nativeWindowHandle(WindowHandle) = 0;   ///< HWND / GLFWwindow* / nullptr
@@ -140,6 +158,8 @@ namespace xui {
 		/// Such backends invoke this hook from their size callback to render each live step.
 		/// Default no-op keeps headless and non-modal backends unchanged.
 		virtual void setLiveResizeHook(WindowHandle, void (*)(void*), void*) {}
+		/// Position the native IME composition/candidate UI near an editor caret. Logical client pixels.
+		virtual void setImeCursorRect(WindowHandle, Rect) {}
 
 		// ---- client-drawn window chrome (TitleBar support) ---------------------------------------
 		// All defaults are conservative no-ops: a backend without custom-chrome support simply

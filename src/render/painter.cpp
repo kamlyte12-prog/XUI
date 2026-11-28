@@ -10,7 +10,9 @@ namespace xui {
 	void Painter::begin(u32 w, u32 h, f32 dpi) {
 		m_dpi = dpi > 0 ? dpi : 1.f; m_w = w; m_h = h; m_layer = 0; m_nextCustom = 1;
 		m_cellsX = (w + (1u << kCellShift) - 1) >> kCellShift; m_cellsY = (h + (1u << kCellShift) - 1) >> kCellShift;
-		m_clips.clear(); m_clips.push_back({ 0, 0, static_cast<i32>(w), static_cast<i32>(h) });
+		m_clips.clear();
+		m_clips.push_back({{0, 0, static_cast<i32>(w), static_cast<i32>(h)}, 0, {}});
+		m_clipShapes.clear();
 		m_transforms.clear(); m_transforms.push_back({});
 		m_opacity.clear(); m_verts.clear(); m_prims.clear(); m_indices.clear(); m_cmds.clear();
 		for (Layer& l : m_layers) {
@@ -19,7 +21,7 @@ namespace xui {
 		m_stats = {};
 	}
 	void Painter::setLayer(u32 l) { m_layer = std::min(l, kMaxLayers - 1); }
-	void Painter::pushClip(Rect r) {
+	void Painter::pushClip(Rect r, CornerRadii radius) {
 		const Mat3& transform = m_transforms.back();
 		const Vec2 corners[] = { transform.apply({r.x, r.y}), transform.apply({r.right(), r.y}),
 			transform.apply({r.right(), r.bottom()}), transform.apply({r.x, r.bottom()}) };
@@ -27,10 +29,57 @@ namespace xui {
 		for (const Vec2 p : corners) { x0 = std::min(x0, p.x); x1 = std::max(x1, p.x); y0 = std::min(y0, p.y); y1 = std::max(y1, p.y); }
 		ClipI c{ static_cast<i32>(std::floor(x0 * m_dpi)), static_cast<i32>(std::floor(y0 * m_dpi)),
 				static_cast<i32>(std::ceil(x1 * m_dpi)), static_cast<i32>(std::ceil(y1 * m_dpi)) };
-		const ClipI& t = m_clips.back();
-		c = { std::max(c.x0, t.x0), std::max(c.y0, t.y0), std::min(c.x1, t.x1), std::min(c.y1, t.y1) };
-		if (c.empty()) c = { t.x0, t.y0, t.x0, t.y0 };          // canonical empty clip: everything inside is culled
-		m_clips.push_back(c);
+		const ClipState& parent = m_clips.back();
+		c = {std::max(c.x0, parent.rect.x0), std::max(c.y0, parent.rect.y0), std::min(c.x1, parent.rect.x1),
+			 std::min(c.y1, parent.rect.y1)};
+		if (c.empty())
+			c = {parent.rect.x0, parent.rect.y0, parent.rect.x0,
+				 parent.rect.y0}; // canonical empty clip: everything inside is culled
+		ClipState state;
+		state.rect = c;
+		state.roundCount = parent.roundCount;
+		for (u32 i = 0; i < parent.roundCount; ++i)
+			state.rounds[i] = parent.rounds[i];
+		// Rounded clipping is only meaningful while the current transform preserves rectangle/circle geometry.
+		// A rotation or skew falls back to the conservative scissor so content is never clipped in the wrong place.
+		if (!c.empty() && radius.any() && std::fabs(transform.b) < 1e-6f && std::fabs(transform.c) < 1e-6f) {
+			const f32 scale = std::max(std::fabs(transform.a), std::fabs(transform.d)) * m_dpi;
+			ClipRound round;
+			round.cx = (x0 + x1) * 0.5f * m_dpi;
+			round.cy = (y0 + y1) * 0.5f * m_dpi;
+			round.hx = (x1 - x0) * 0.5f * m_dpi;
+			round.hy = (y1 - y0) * 0.5f * m_dpi;
+			const f32 maxR = std::min(round.hx, round.hy);
+			const f32 rr[4] = {radius.tl, radius.tr, radius.br, radius.bl};
+			bool anyRadius = false;
+			for (u32 i = 0; i < 4; ++i) {
+				round.r[i] = std::min(std::max(0.f, rr[i]) * scale, maxR);
+				anyRadius |= round.r[i] > 0;
+			}
+			const bool duplicate = std::any_of(state.rounds, state.rounds + state.roundCount,
+											   [&](const ClipRound& existing) { return existing == round; });
+			if (anyRadius && !duplicate) {
+				if (state.roundCount == ClipShape::kMaxRounds) {
+					++m_stats.clipShapeCapFallbacks;
+					// At capacity, keep the most restrictive (smallest) enclosing shapes. Ancestor
+					// walks may push inner-to-outer, so position is not a reliable proxy; the
+					// conservative scissor still bounds whatever is dropped.
+					u32 widest = 0;
+					f32 widestArea = state.rounds[0].hx * state.rounds[0].hy;
+					for (u32 i = 1; i < ClipShape::kMaxRounds; ++i) {
+						const f32 area = state.rounds[i].hx * state.rounds[i].hy;
+						if (area > widestArea) {
+							widestArea = area;
+							widest = i;
+						}
+					}
+					if (round.hx * round.hy < widestArea)
+						state.rounds[widest] = round;
+				} else
+					state.rounds[state.roundCount++] = round;
+			}
+		}
+		m_clips.push_back(state);
 	}
 	void Painter::popClip() { if (m_clips.size() > 1) m_clips.pop_back(); }
 	void Painter::pushTransform(Mat3 logical) { m_transforms.push_back(m_transforms.back() * logical); }
@@ -48,10 +97,44 @@ namespace xui {
 			transform.apply({x1 / m_dpi, y1 / m_dpi}), transform.apply({x0 / m_dpi, y1 / m_dpi}) };
 		x0 = x1 = corners[0].x * m_dpi; y0 = y1 = corners[0].y * m_dpi;
 		for (const Vec2 p : corners) { x0 = std::min(x0, p.x * m_dpi); x1 = std::max(x1, p.x * m_dpi); y0 = std::min(y0, p.y * m_dpi); y1 = std::max(y1, p.y * m_dpi); }
-		const ClipI& c = m_clips.back();
+		const ClipI& c = m_clips.back().rect;
 		b = { std::max(c.x0, static_cast<i32>(std::floor(x0))), std::max(c.y0, static_cast<i32>(std::floor(y0))),
 			 std::min(c.x1, static_cast<i32>(std::ceil(x1))), std::min(c.y1, static_cast<i32>(std::ceil(y1))) };
 		return !b.empty();
+	}
+
+	u32 Painter::clipShapeFor(f32 x0, f32 y0, f32 x1, f32 y1) {
+		const ClipState& state = m_clips.back();
+		if (!state.roundCount)
+			return kNoClipShape;
+		ClipShape shape;
+		for (u32 i = 0; i < state.roundCount; ++i) {
+			const ClipRound& round = state.rounds[i];
+			const f32 l = round.cx - round.hx, t = round.cy - round.hy;
+			const f32 r = round.cx + round.hx, b = round.cy + round.hy;
+			// A rounded rect differs from its rect only inside the four r*r corner squares. When the primitive
+			// cannot touch one of them, the shape is a no-op for it and can be omitted from the batch key.
+			auto hits = [&](f32 ax0, f32 ay0, f32 ax1, f32 ay1) {
+				return ax0 < x1 && x0 < ax1 && ay0 < y1 && y0 < ay1;
+			};
+			const bool touches = (round.r[0] > 0 && hits(l, t, l + round.r[0], t + round.r[0])) ||
+								 (round.r[1] > 0 && hits(r - round.r[1], t, r, t + round.r[1])) ||
+								 (round.r[2] > 0 && hits(r - round.r[2], b - round.r[2], r, b)) ||
+								 (round.r[3] > 0 && hits(l, b - round.r[3], l + round.r[3], b));
+			if (touches)
+				shape.rounds[shape.count++] = round;
+		}
+		if (!shape.count)
+			return kNoClipShape;
+		for (u32 i = 0; i < m_clipShapes.size(); ++i)
+			if (m_clipShapes[i] == shape)
+				return i;
+		m_clipShapes.push_back(shape);
+		return static_cast<u32>(m_clipShapes.size() - 1);
+	}
+
+	Painter::Key Painter::keyFor(TextureHandle tex, u32 custom, f32 x0, f32 y0, f32 x1, f32 y1) {
+		return Key{tex, m_clips.back().rect, clipShapeFor(x0, y0, x1, y1), custom};
 	}
 
 	// Place a primitive (already written to m_verts at firstVert) into a batch.
@@ -147,7 +230,7 @@ namespace xui {
 		}
 		const u32 first = static_cast<u32>(m_verts.size());
 		quad(t, x0 - bm, y0 - bm, x1 + bm, y1 + bm, x0 - bm - cx, y0 - bm - cy, x1 + bm - cx, y1 + bm - cy);   // geometry == declared bounds
-		commit(Key{ TextureHandle{}, {m_clips.back()}, 0 }, b, first, 1);
+		commit(keyFor(TextureHandle{}, 0, x0 - bm, y0 - bm, x1 + bm, y1 + bm), b, first, 1);
 	}
 
 	void Painter::shadow(Rect r, const ShadowStyle& s) {
@@ -169,7 +252,7 @@ namespace xui {
 		if (s.inner) { t.flags |= FlagInner; t.aux0 = s.offset.x * m_dpi; t.aux1 = s.offset.y * m_dpi; }
 		const u32 first = static_cast<u32>(m_verts.size());
 		quad(t, x0 - margin, y0 - margin, x1 + margin, y1 + margin, x0 - margin - cx, y0 - margin - cy, x1 + margin - cx, y1 + margin - cy);
-		commit(Key{ TextureHandle{}, {m_clips.back()}, 0 }, b, first, 1);
+		commit(keyFor(TextureHandle{}, 0, x0 - margin, y0 - margin, x1 + margin, y1 + margin), b, first, 1);
 	}
 
 	void Painter::glyphRun(TextureHandle atlas, const GlyphQuad* q, u32 n, Vec2 origin, Color c) {
@@ -186,7 +269,7 @@ namespace xui {
 		}
 		ClipI b;
 		if (!admit(bx0, by0, bx1, by1, b)) { m_verts.resize(first); ++m_stats.culled; return; }
-		commit(Key{ atlas, {m_clips.back()}, 0 }, b, first, n);
+		commit(keyFor(atlas, 0, bx0, by0, bx1, by1), b, first, n);
 	}
 
 	void Painter::image(TextureHandle tex, Rect dst, Rect uv, Color tint, CornerRadii radius) {
@@ -203,13 +286,33 @@ namespace xui {
 		const f32 sx = (x1 - x0) > 0 ? uv.w / (x1 - x0) : 0.f, sy = (y1 - y0) > 0 ? uv.h / (y1 - y0) : 0.f;   // texcoords for the 1px margin
 		const u32 first = static_cast<u32>(m_verts.size());
 		quad(t, x0 - bmi, y0 - bmi, x1 + bmi, y1 + bmi, uv.x - sx * bmi, uv.y - sy * bmi, uv.x + uv.w + sx * bmi, uv.y + uv.h + sy * bmi);
-		commit(Key{ tex, {m_clips.back()}, 0 }, b, first, 1);
+		commit(keyFor(tex, 0, x0 - bmi, y0 - bmi, x1 + bmi, y1 + bmi), b, first, 1);
 	}
 
 	void Painter::capsule(Vec2 a, Vec2 b2, f32 width, Color c, Color c2, bool grad) {
 		++m_stats.prims;
 		if (c.a <= 0 && !(grad && c2.a > 0)) { ++m_stats.culled; return; }
-		const f32 ax = a.x * m_dpi, ay = a.y * m_dpi, bx = b2.x * m_dpi, by = b2.y * m_dpi, r = std::max(0.5f, width * m_dpi * 0.5f);
+		f32 ax = a.x * m_dpi, ay = a.y * m_dpi, bx = b2.x * m_dpi, by = b2.y * m_dpi;
+		f32 w = std::max(1.f, width * m_dpi);
+		if (m_opt.snap) {
+			// A stroke is only crisp when it covers a whole number of physical pixels.
+			// Rounding is a no-op for authored integer widths at 100/200% and prevents
+			// 1 dp separators from splitting into two half-alpha rows at fractional DPI.
+			w = std::max(1.f, std::round(w));
+			const f32 r = w * 0.5f;
+			// Axis-aligned strokes also snap their perpendicular centre so BOTH edges
+			// land on pixel boundaries. Diagonal strokes keep their authored geometry:
+			// moving them would distort the path, and analytic SDF coverage already AA's
+			// their sloped edges.
+			if (ay == by) {
+				const f32 center = std::round(ay - r) + r;
+				ay = by = center;
+			} else if (ax == bx) {
+				const f32 center = std::round(ax - r) + r;
+				ax = bx = center;
+			}
+		}
+		const f32 r = w * 0.5f;
 		const f32 x0 = std::min(ax, bx) - r - 1, y0 = std::min(ay, by) - r - 1, x1 = std::max(ax, bx) + r + 1, y1 = std::max(ay, by) + r + 1;
 		ClipI b;
 		if (!admit(x0, y0, x1, y1, b)) { ++m_stats.culled; return; }
@@ -218,7 +321,7 @@ namespace xui {
 		t.hx = (bx - ax) * 0.5f; t.hy = (by - ay) * 0.5f; t.rad[0] = q4(r); if (grad) t.flags |= FlagGradient;
 		const u32 first = static_cast<u32>(m_verts.size());
 		quad(t, x0, y0, x1, y1, x0 - mx, y0 - my, x1 - mx, y1 - my);
-		commit(Key{ TextureHandle{}, {m_clips.back()}, 0 }, b, first, 1);
+		commit(keyFor(TextureHandle{}, 0, x0, y0, x1, y1), b, first, 1);
 	}
 	void Painter::line(Vec2 a, Vec2 b, f32 w, Color c) { capsule(a, b, w, c, c, false); }
 	void Painter::line(Vec2 a, Vec2 b, f32 w, Color c, Color c2) { capsule(a, b, w, c, c2, true); }
@@ -241,8 +344,9 @@ namespace xui {
 		const f32 x0 = std::floor(r.x * m_dpi), y0 = std::floor(r.y * m_dpi), x1 = std::ceil((r.x + r.w) * m_dpi), y1 = std::ceil((r.y + r.h) * m_dpi);
 		ClipI b;
 		if (!admit(x0, y0, x1, y1, b)) { ++m_stats.culled; return; }
-		ClipI clip = b;                                   // the command's scissor is the visible part of the reserved rect
-		commit(Key{ TextureHandle{}, clip, (m_nextCustom++ << 16) | (id & 0xFFFFu) }, b, static_cast<u32>(m_verts.size()), 0);
+		Key key = keyFor(TextureHandle{}, (m_nextCustom++ << 16) | (id & 0xFFFFu), x0, y0, x1, y1);
+		key.clip = b; // the command's scissor is the visible part of the reserved rect
+		commit(key, b, static_cast<u32>(m_verts.size()), 0);
 	}
 
 	// ---- finish -----------------------------------------------------------------------------------------------
@@ -254,6 +358,7 @@ namespace xui {
 				++m_stats.batches;
 				DrawCmd cmd; cmd.tex = B.key.tex; cmd.idxOffset = static_cast<u32>(m_indices.size());
 				cmd.clip = { B.key.clip.x0, B.key.clip.y0, B.key.clip.x1 - B.key.clip.x0, B.key.clip.y1 - B.key.clip.y0 };
+				cmd.clipShape = B.key.clipShape;
 				if (B.key.custom) { cmd.kind = DrawCmd::Custom; cmd.customId = B.key.custom & 0xFFFFu; }
 				for (u32 p = B.head; p != kNil; p = m_prims[p].next)
 					for (u32 q = 0; q < m_prims[p].quads; ++q) {
@@ -270,6 +375,8 @@ namespace xui {
 		DrawList dl;
 		dl.verts = m_verts.data(); dl.nVerts = m_stats.vertices; dl.idx = m_indices.data(); dl.nIdx = m_stats.indices;
 		dl.cmds = m_cmds.data(); dl.nCmds = m_stats.drawCalls;
+		dl.clipShapes = m_clipShapes.data();
+		dl.nClipShapes = static_cast<u32>(m_clipShapes.size());
 		return dl;
 	}
 }

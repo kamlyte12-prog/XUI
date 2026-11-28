@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <cmath>
 #include <cctype>
+#include <exception>
 
 namespace xui {
 	namespace {
@@ -26,7 +27,7 @@ namespace xui {
 			return contents;
 		}
 
-		struct InitialWindowConfig { std::string title = "Xui"; u32 width = 720, height = 440; f32 cornerRadius = 0.f; };
+		struct InitialWindowConfig { std::string title = "Xui"; u32 width = 720, height = 440; f32 cornerRadius = 0.f; u32 borderColor = 0; };
 
 		std::string_view expressionString(const Document& document, const StringInterner& strings, u32 expression) {
 			if (expression >= document.exprs.size()) return {};
@@ -100,6 +101,12 @@ namespace xui {
 					(radius.atoms[0].unit == Unit::None || radius.atoms[0].unit == Unit::Px))
 					config.cornerRadius = std::clamp(radius.atoms[0].num, 0.f, 64.f);
 			}
+			// A rounded custom-chrome window needs its own background colour for the native
+			// frame border; otherwise DWM's default light line steps along the corner arc.
+			if (config.cornerRadius > 0.f && resolved.has(PropId::Bg)) {
+				const StyleValue& bg = resolved.get(PropId::Bg);
+				if (bg.count && bg.atoms[0].kind == AtomKind::Color) config.borderColor = bg.atoms[0].bits;
+			}
 			if (documentTitle) config.title = std::move(*documentTitle);
 			if (documentSize) { config.width = documentSize->first; config.height = documentSize->second; }
 			return config;
@@ -129,13 +136,15 @@ namespace xui {
 
 	bool Xui::loadXui(std::string_view path) {
 		if (m_attached) { setError("The UI document must be loaded before attach()."); return false; }
+		m_assets.validationWarnings.clear();
 		auto program = xui::loadXui(path, readImportedPath, nullptr, m_strings);
 		if (!program) { setError(program.error().format()); return false; }
-		auto valid = validate(*program, XuiSchema::withCoreWidgets(), m_strings);
+		auto valid = validate(*program, XuiSchema::withCoreWidgets(), m_strings, {m_options.warningsAsErrors});
 		if (!valid) { setError(valid.error().format()); return false; }
 		if (program->files.empty()) { setError("The .xui loader returned no documents."); return false; }
 		m_program = std::move(*program);
 		m_assets.document = m_program.files.front();
+		m_assets.validationWarnings = std::move(valid->warnings);
 		std::error_code pathError;
 		const std::filesystem::path absolutePath = std::filesystem::absolute(std::filesystem::path(path), pathError);
 		m_assetDirectory = (pathError ? std::filesystem::path(path) : absolutePath).parent_path().string();
@@ -193,6 +202,7 @@ namespace xui {
 		// the fallback through Platform::setDecorated.
 		windowDesc.decorations = !documentUsesClientChrome(m_assets.document, m_strings);
 		windowDesc.cornerRadius = initial.cornerRadius;
+		windowDesc.chromeBorderColor = initial.borderColor;
 		m_window = m_platform->createWindow(windowDesc);
 		if (!m_window.valid()) { setError("Could not create the application window."); shutdown(); return false; }
 		m_platform->makeGlCurrent(m_window);
@@ -232,6 +242,8 @@ namespace xui {
 			setError("Could not activate the requested .xss theme."); shutdown(); return false;
 		}
 		m_runtime.setEventHandler(m_eventHandler, m_eventContext);
+		m_runtime.setInputValidationHandler(m_inputValidationHandler, m_inputValidationContext);
+		m_runtime.setReducedMotion(m_platform->prefersReducedMotion());
 		m_attached = true;
 		m_primarySurface = m_renderer->primarySurface();
 		reconcileFloatingPanels();
@@ -256,6 +268,9 @@ namespace xui {
 			? start + std::chrono::milliseconds(m_tickIntervalMs) : Clock::time_point{};
 		m_stats = {};
 		while (running) {
+			if (m_externalRedraw.exchange(false, std::memory_order_acq_rel))
+				redraw = true;
+			redraw |= drainInvocations();
 			bool resized = false;
 			Event event;
 			while (m_platform->pumpEvents(event)) {
@@ -269,7 +284,10 @@ namespace xui {
 						const auto value = m_runtime.value(floating->id);
 						if (value) if (const auto* dock = std::get_if<DockPanelValue>(&*value)) {
 							DockPanelValue inApp = *dock;
-							inApp.floating = true;
+							inApp.closed = true;
+							// The OS window is going away: stop requesting one, otherwise reconciliation
+							// would immediately recreate it and the panel could never be closed.
+							inApp.osWindow = false;
 							m_runtime.setDockPanelNativeSurface(floating->id, false);
 							m_runtime.setValue(floating->id, inApp);
 						}
@@ -344,7 +362,9 @@ namespace xui {
 					redraw |= m_runtime.scrollWheel({ event.x, event.y }, { event.dx, event.dy });
 					break;
 				case EventType::KeyDown:
-					if (!((event.key == Key::F3 || event.key == Key::F4) && event.repeat))
+					if (m_keyHandler && m_keyHandler(m_keyContext, event.key, event.mods))
+						redraw = true;
+					else if (!((event.key == Key::F3 || event.key == Key::F4) && event.repeat))
 						redraw |= m_runtime.keyDown(event.key, event.mods, m_platform);
 					break;
 				case EventType::TextInput:
@@ -352,17 +372,32 @@ namespace xui {
 					else if (event.text && *event.text) redraw |= m_runtime.textInput(event.text);
 					break;
 				case EventType::ImeCommit:
+					m_runtime.imeCompose({});
 					if (event.text && *event.text) redraw |= m_runtime.textInput(event.text);
 					else redraw |= m_runtime.textInput(event.codepoint);
+					break;
+				case EventType::ImeCompose:
+					redraw |= m_runtime.imeCompose(event.text ? event.text : "", event.selStart, event.selEnd);
+					break;
+				case EventType::FocusLost:
+					redraw |= m_runtime.cancelImeComposition();
 					break;
 				case EventType::Resize:
 				case EventType::DpiChange: resized = true; redraw = true; break;
 				case EventType::Tick: redraw = true; break;
 				default: break;
 				}
+				if (m_platform) {
+					const Rect imeRect = m_runtime.imeCursorRect();
+					if (!imeRect.empty())
+						m_platform->setImeCursorRect(event.window.valid() ? event.window : m_window, imeRect);
+				}
 				reconcileFloatingPanels();
 			}
 			if (!running) break;
+			if (m_externalRedraw.exchange(false, std::memory_order_acq_rel))
+				redraw = true;
+			redraw |= drainInvocations();
 			const bool visible = anyWindowVisible();
 			if (visible != wasVisible) {
 				m_runtime.setAnimationsPaused(!visible);
@@ -396,6 +431,9 @@ namespace xui {
 				redraw = true;
 			}
 			if (visible && redraw) {
+				// Programmatic dock changes (startup profiles, value-API calls that float a panel)
+				// have no input event to trigger reconciliation; do it for every frame that draws.
+				reconcileFloatingPanels();
 				renderFrame();
 				redraw = false;
 			}
@@ -439,6 +477,7 @@ namespace xui {
 		const f32 dpi = m_platform->dpiScale(m_window);
 		m_text.beginFrame();
 		m_runtime.setDrawBatchCount(m_painter.stats().drawCalls);
+		m_runtime.setClipShapeCapFallbacks(m_painter.stats().clipShapeCapFallbacks);
 		bool presented = false;
 		if (pixels.x > 0 && pixels.y > 0) {
 			m_platform->makeGlCurrent(m_window);
@@ -465,7 +504,11 @@ namespace xui {
 			const Vec2 logicalSize = m_platform->windowSizeLogical(floating.window);
 			const Vec2i surfacePixels = m_platform->windowSizePixels(floating.window);
 			const f32 surfaceDpi = m_platform->dpiScale(floating.window);
-			if (!m_platform->windowVisible(floating.window) || logicalSize.x <= 0 || logicalSize.y <= 0 || surfacePixels.x <= 0 || surfacePixels.y <= 0) continue;
+			// A tear-off window is created hidden and painted once before it is revealed; after
+			// that, a hidden or minimized window pauses painting like the main window does.
+			if ((floating.shown && !m_platform->windowVisible(floating.window)) || logicalSize.x <= 0 ||
+				logicalSize.y <= 0 || surfacePixels.x <= 0 || surfacePixels.y <= 0)
+				continue;
 			m_platform->makeGlCurrent(floating.window);
 			if (!m_renderer->makeSurfaceCurrent(floating.surface)) continue;
 			m_renderer->resizeSurface(floating.surface, u32(surfacePixels.x), u32(surfacePixels.y), surfaceDpi);
@@ -478,6 +521,10 @@ namespace xui {
 			const DrawList panelDraw = m_painter.finish();
 			m_renderer->beginFrame({ u32(surfacePixels.x), u32(surfacePixels.y), surfaceDpi, Color{0.04f, 0.05f, 0.08f, 1}, m_stats.frames });
 			m_renderer->submit(panelDraw); m_renderer->endFrame(); m_renderer->present(); m_platform->swapBuffers(floating.window);
+			if (!floating.shown) { // first frame is in the back buffer: reveal without a blank flash
+				m_platform->setWindowVisible(floating.window, true);
+				floating.shown = true;
+			}
 			presented = true;
 		}
 		m_platform->makeGlCurrent(m_window);
@@ -504,8 +551,12 @@ namespace xui {
 			desc.title = m_runtime.dockPanelTitle(id); desc.width = std::max(160u, u32(std::lround(panelRect.w)));
 			desc.height = std::max(100u, u32(std::lround(panelRect.h)));
 			desc.minWidth = 120; desc.minHeight = 80; desc.glContext = m_options.glContext;
-			desc.shareContextWith = m_window; desc.visible = true;
+			desc.shareContextWith = m_window;
+			desc.visible = false;
 			desc.decorations = m_runtime.dockPanelUsesNativeTitleBar(id);
+			// Match the native window's corner treatment to the panel body so the surface does not
+			// show square corners around a rounded panel.
+			desc.cornerRadius = m_runtime.dockPanelRadius(id);
 			const WindowHandle secondary = m_platform->createWindow(desc);
 			if (!secondary.valid()) continue;
 			const Vec2 mainOrigin = m_platform->windowClientScreenOrigin(m_window);
@@ -547,6 +598,51 @@ namespace xui {
 		if (m_attached) m_runtime.setEventHandler(handler, context);
 	}
 
+	void Xui::invoke(std::function<void()> work) {
+		if (!work)
+			return;
+		{
+			std::lock_guard lock(m_invocationMutex);
+			m_invocations.push_back(std::move(work));
+		}
+		m_externalRedraw.store(true, std::memory_order_release);
+		if (m_platform && m_window.valid())
+			m_platform->wakeEventLoop();
+	}
+
+	void Xui::endUpdate() {
+		if (m_runtime.endUpdate()) {
+			m_externalRedraw.store(true, std::memory_order_release);
+			if (m_platform && m_window.valid())
+				m_platform->wakeEventLoop();
+		}
+	}
+
+	bool Xui::drainInvocations() {
+		std::deque<std::function<void()>> work;
+		{
+			std::lock_guard lock(m_invocationMutex);
+			work.swap(m_invocations);
+		}
+		for (auto& callback : work) {
+			try {
+				callback();
+			} catch (const std::exception& exception) {
+				setError(std::string("UI-thread invocation failed: ") + exception.what());
+			} catch (...) {
+				setError("UI-thread invocation failed with an unknown exception");
+			}
+		}
+		return !work.empty();
+	}
+
+	void Xui::setInputValidationHandler(UiInputValidationFn handler, void* context) {
+		m_inputValidationHandler = handler;
+		m_inputValidationContext = context;
+		if (m_attached)
+			m_runtime.setInputValidationHandler(handler, context);
+	}
+
 	void Xui::setTickHandler(XuiTickFn handler, void* context, u32 intervalMs) {
 		m_tickHandler = handler;
 		m_tickContext = context;
@@ -562,6 +658,11 @@ namespace xui {
 	}
 
 	void Xui::shutdown() {
+		{
+			std::lock_guard lock(m_invocationMutex);
+			m_invocations.clear();
+		}
+		m_externalRedraw.store(false, std::memory_order_release);
 		m_tickHandler = nullptr;
 		m_tickContext = nullptr;
 		m_tickIntervalMs = 0;

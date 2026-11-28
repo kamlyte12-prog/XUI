@@ -18,6 +18,11 @@ namespace xui {
 		DiagnosticList() = default;
 		DiagnosticList(std::string file, std::string source) : m_file(std::move(file)), m_source(std::move(source)) {}
 		void add(Severity s, u32 offset, u32 length, std::string message, std::string hint = {});
+		void promoteWarningsToErrors() {
+			for (Diagnostic& item : m_items)
+				if (item.severity == Severity::Warning)
+					item.severity = Severity::Error;
+		}
 		void error(u32 offset, u32 length, std::string message, std::string hint = {}) {
 			add(Severity::Error, offset, length, std::move(message), std::move(hint));
 		}

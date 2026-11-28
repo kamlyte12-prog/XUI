@@ -48,7 +48,41 @@ ctest --test-dir build -C Release --output-on-failure
 
 For GCC/Clang sanitizer checks, configure another build tree with `-DXUI_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug`, then build and run `ctest` there.
 
-Xui builds from source and does not currently export an installed CMake package. To consume it from another CMake project in the same build, add the source tree and link the facade target:
+Ninja-based CMake presets are available for the common configurations. `dev` enables tests, benchmarks, fuzzers, and examples; `release` does the same with `CMAKE_BUILD_TYPE=Release`; `minimal` builds only the library with optional features off.
+
+```sh
+cmake --preset dev
+cmake --build --preset dev
+ctest --preset dev
+```
+
+### Install and consume the package
+
+Xui can install its portable libraries, public headers, licenses, and a CMake package config:
+
+```sh
+cmake -S . -B build -DXUI_INSTALL=ON
+cmake --build build --config Release
+cmake --install build --config Release --prefix /path/to/prefix
+```
+
+Then consume the installed package from another CMake project:
+
+```cmake
+find_package(Xui 0.1 CONFIG REQUIRED)
+target_link_libraries(my_app PRIVATE xui::widgets)
+```
+
+Pass the install prefix through `CMAKE_PREFIX_PATH`. The package exports friendly targets (`xui::widgets`, `xui::core`, `xui::layout`, `xui::renderer`, `xui::text`, `xui::image`, `xui::platform`, `xui::assets`, `xui::freetype`, and `xui::harfbuzz`, plus `xui::lunasvg` when image support is enabled). Its config file loads the installed FreeType, HarfBuzz, and optional LunaSVG packages with `find_dependency`; those vendored dependencies install alongside Xui.
+
+The minimal consumer fixture in [`cmake/package-consumer/`](../cmake/package-consumer/CMakeLists.txt) is built in CI. To run it locally after installing:
+
+```sh
+cmake -S cmake/package-consumer -B build/consumer -DCMAKE_PREFIX_PATH=/path/to/prefix
+cmake --build build/consumer
+```
+
+The optional GLFW/OpenGL backends are not part of the installed package; applications that need them can compile those source targets themselves. To consume the source tree in the same build instead, add it and link the facade target:
 
 ```cmake
 add_subdirectory(path/to/xui)
@@ -68,7 +102,7 @@ cmake --build build/glfw --target xui_glfw_demo
 
 To build only the adapters for another application, set `-DXUI_BUILD_GLFW_BACKEND=ON -DXUI_BUILD_EXAMPLES=OFF`. The existing `XUI_BUILD_GLFW_EXAMPLE` option still builds the adapters when examples are enabled, preserving the prior default build behavior.
 
-The executable loads the copied showcase pair beside itself, independent of the working directory. Set `XUI_DEMO_FONT` to a TrueType font path if the demo's font search paths do not find one. A screenshot and the full example assets are linked from the [documentation index](README.md#examples-and-implementation-scope).
+The executable loads the copied showcase pair beside itself, independent of the working directory. Its Motion & Style page demonstrates animated outline/shadow/type transitions, z-index ordering, overflow clipping, and image tint alongside gradients, glow, and keyframes. Set `XUI_DEMO_FONT` to a TrueType font path if the demo's font search paths do not find one. A screenshot and the full example assets are linked from the [documentation index](README.md#examples-and-implementation-scope).
 
 ## Minimal application
 
@@ -105,7 +139,7 @@ Font, `.xui`, and `.xss` paths are interpreted from the process working director
 
 ## Fonts
 
-The loader supports TTF and OTF containers that use TrueType `glyf` outlines. A variable font with a `wght` axis can be loaded once; numeric `.xss font-weight` values create cached axis instances, clamped to the axis range. Other variation axes use their font defaults. For static fonts, or fonts without a `wght` axis, the runtime selects the nearest registered face. It does not synthesize bold or select system fallback fonts. Text runs use HarfBuzz for left-to-right OpenType positioning; ligature substitutions stay disabled so editable text retains a stable character-to-glyph relationship. CFF/CFF2-only OTF outlines, emoji color tables, right-to-left/bidirectional layout, and complex-script editing are not supported. See [font, transform, cursor, and animation details](animations-fonts-transforms.md).
+The loader supports TTF and OTF containers that use TrueType `glyf` outlines. A variable font with a `wght` axis can be loaded once; numeric `.xss font-weight` values create cached axis instances, clamped to the axis range. Other variation axes use their font defaults. For static fonts, or fonts without a `wght` axis, the runtime selects the nearest registered face. It does not synthesize bold or discover system fonts. HarfBuzz shapes script runs with ligatures enabled and cached cluster caret geometry; applications can register explicit per-family fallback faces with `TextSystem::addFallbackFont`. Basic Arabic/Hebrew RTL shaping is supported, but full Unicode bidi and complex-script editing remain incomplete. CFF/CFF2-only OTF outlines and emoji color tables are not supported. See [font, transform, cursor, and animation details](animations-fonts-transforms.md).
 
 To customize the window, construct `Xui` with `XuiOptions`:
 
@@ -208,7 +242,8 @@ Applications that need timed updates can call `ui.setTickHandler(callback, conte
 | CMake option | Purpose | Default |
 |---|---|---|
 | `XUI_BUILD_TESTS` | Build `xui_tests` | ON |
-| `XUI_BUILD_BENCHMARKS` | Build benchmarks and fuzz harnesses | ON |
+| `XUI_BUILD_BENCHMARKS` | Build benchmark executables | ON |
+| `XUI_BUILD_FUZZERS` | Build deterministic parser/layout/paint fuzz harnesses | ON |
 | `XUI_BUILD_EXAMPLES` | Build runnable examples | ON |
 | `XUI_BUILD_GLFW_EXAMPLE` | Build GLFW/OpenGL examples | ON |
 | `XUI_BUILD_GLFW_BACKEND` | Build GLFW/OpenGL adapters independently of examples | OFF |

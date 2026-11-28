@@ -1,0 +1,5 @@
+// Fixture for the native tear-off lifecycle test: the panel body's radius is what the
+// tear-off window passes to the platform as its corner radius.
+Window { resting: { pad: 0px } }
+DockHost { resting: { pad: 4px, bg: #0E192AFF, radius: 10px, border: 0px solid #00000000 } }
+DockPanel { resting: { bg: #101820FF, fg: #FFFFFFFF, radius: 12px, pad: 6px, border: 0px solid #00000000 } }

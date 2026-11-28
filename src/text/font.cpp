@@ -245,14 +245,10 @@ namespace xui {
 		hb_buffer_add_utf8(buffer, utf8.data(), static_cast<int>(utf8.size()), 0,
 			static_cast<int>(utf8.size()));
 		hb_buffer_guess_segment_properties(buffer);
-		// The current layout/caret model is left-to-right. Disable ligature substitutions so
-		// editable text retains a stable relationship between input characters and glyphs.
-		hb_buffer_set_direction(buffer, HB_DIRECTION_LTR);
-		const hb_feature_t features[]{
-			{ HB_TAG('l', 'i', 'g', 'a'), 0, HB_FEATURE_GLOBAL_START, HB_FEATURE_GLOBAL_END },
-			{ HB_TAG('c', 'l', 'i', 'g'), 0, HB_FEATURE_GLOBAL_START, HB_FEATURE_GLOBAL_END }
-		};
-		hb_shape(m_shaping->font, buffer, features, 2);
+		// Let HarfBuzz infer script and direction for this uninterrupted run. Ligatures remain
+		// enabled; GDEF caret positions are copied below for cluster-aware editor mapping.
+		const hb_direction_t direction = hb_buffer_get_direction(buffer);
+		hb_shape(m_shaping->font, buffer, nullptr, 0);
 		unsigned count = 0;
 		const hb_glyph_info_t* infos = hb_buffer_get_glyph_infos(buffer, &count);
 		const hb_glyph_position_t* positions = hb_buffer_get_glyph_positions(buffer, &count);
@@ -263,8 +259,20 @@ namespace xui {
 		glyphs.clear();
 		glyphs.reserve(count);
 		for (unsigned i = 0; i < count; ++i) {
-			glyphs.push_back({ infos[i].codepoint, static_cast<f32>(positions[i].x_advance),
-				static_cast<f32>(positions[i].x_offset), static_cast<f32>(positions[i].y_offset), infos[i].cluster });
+			ShapedGlyph shaped{infos[i].codepoint, static_cast<f32>(positions[i].x_advance),
+							   static_cast<f32>(positions[i].x_offset), static_cast<f32>(positions[i].y_offset),
+							   infos[i].cluster};
+			std::array<hb_position_t, 8> ligatureCarets{};
+			unsigned caretCount = static_cast<unsigned>(ligatureCarets.size());
+			const unsigned totalCarets = hb_ot_layout_get_ligature_carets(
+				m_shaping->font, direction, infos[i].codepoint, 0, &caretCount, ligatureCarets.data());
+			shaped.ligatureCaretCount =
+				static_cast<u8>(std::min<unsigned>(caretCount, static_cast<unsigned>(shaped.ligatureCarets.size())));
+			for (u8 caret = 0; caret < shaped.ligatureCaretCount; ++caret)
+				shaped.ligatureCarets[caret] = static_cast<f32>(ligatureCarets[caret]);
+			shaped.rtl = direction == HB_DIRECTION_RTL;
+			(void)totalCarets;
+			glyphs.push_back(shaped);
 		}
 		hb_buffer_destroy(buffer);
 		return true;

@@ -14,6 +14,7 @@ namespace xui {
 
 	WindowHandle NullPlatform::createWindow(const WindowDesc& d) {
 		m_cornerRadius = d.cornerRadius;
+		m_chromeBorderColor = d.chromeBorderColor;
 		if (!d.visible)
 			++m_hiddenCreates;
 		for (u32 i = 0; i < m_wins.size(); ++i)

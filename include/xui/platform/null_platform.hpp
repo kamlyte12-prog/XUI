@@ -63,6 +63,7 @@ namespace xui {
 
 		f32 lastResizeInset() const { return m_resizeInset; }
 		f32 lastCornerRadius() const { return m_cornerRadius; }
+		u32 lastChromeBorderColor() const { return m_chromeBorderColor; }
 		/// Windows created but not yet destroyed (the main window plus any native tear-off surfaces).
 		u32 liveWindowCount() const;
 		/// Windows requested through createWindow() with WindowDesc::visible == false.
@@ -123,6 +124,7 @@ namespace xui {
 		bool m_maximized = false;
 		f32 m_resizeInset = 0.f;
 		f32 m_cornerRadius = 0.f;
+		u32 m_chromeBorderColor = 0;
 		u32 m_setDecoratedCount = 0, m_systemMoveCount = 0, m_systemResizeCount = 0;
 		u32 m_minimizeCount = 0, m_maximizeToggleCount = 0, m_closeCount = 0;
 	};

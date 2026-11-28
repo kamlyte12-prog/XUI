@@ -27,7 +27,7 @@ namespace xui {
 			return contents;
 		}
 
-		struct InitialWindowConfig { std::string title = "Xui"; u32 width = 720, height = 440; f32 cornerRadius = 0.f; };
+		struct InitialWindowConfig { std::string title = "Xui"; u32 width = 720, height = 440; f32 cornerRadius = 0.f; u32 borderColor = 0; };
 
 		std::string_view expressionString(const Document& document, const StringInterner& strings, u32 expression) {
 			if (expression >= document.exprs.size()) return {};
@@ -100,6 +100,12 @@ namespace xui {
 				if (radius.count && radius.atoms[0].kind == AtomKind::Number &&
 					(radius.atoms[0].unit == Unit::None || radius.atoms[0].unit == Unit::Px))
 					config.cornerRadius = std::clamp(radius.atoms[0].num, 0.f, 64.f);
+			}
+			// A rounded custom-chrome window needs its own background colour for the native
+			// frame border; otherwise DWM's default light line steps along the corner arc.
+			if (config.cornerRadius > 0.f && resolved.has(PropId::Bg)) {
+				const StyleValue& bg = resolved.get(PropId::Bg);
+				if (bg.count && bg.atoms[0].kind == AtomKind::Color) config.borderColor = bg.atoms[0].bits;
 			}
 			if (documentTitle) config.title = std::move(*documentTitle);
 			if (documentSize) { config.width = documentSize->first; config.height = documentSize->second; }
@@ -196,6 +202,7 @@ namespace xui {
 		// the fallback through Platform::setDecorated.
 		windowDesc.decorations = !documentUsesClientChrome(m_assets.document, m_strings);
 		windowDesc.cornerRadius = initial.cornerRadius;
+		windowDesc.chromeBorderColor = initial.borderColor;
 		m_window = m_platform->createWindow(windowDesc);
 		if (!m_window.valid()) { setError("Could not create the application window."); shutdown(); return false; }
 		m_platform->makeGlCurrent(m_window);

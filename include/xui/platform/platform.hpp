@@ -88,6 +88,10 @@ namespace xui {
 		/// Preferred client-chrome corner radius in logical pixels. Backends may apply a native
 		/// rounded-window hint when supported; it does not alter the backend-neutral layout.
 		f32 cornerRadius = 0.f;
+		/// Opaque RGBA colour for the native frame border that DWM draws over the outer client
+		/// pixel. 0 keeps the OS default. Apps that round an undecorated client set this to their
+		/// own background so the OS's 1px frame line does not step along the arc at fractional DPI.
+		u32 chromeBorderColor = 0;
 	};
 
 	struct PlatformDesc {

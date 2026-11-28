@@ -57,6 +57,7 @@ public:
 	                void (*liveResizeFn)(void*) = nullptr; void* liveResizeContext = nullptr;
 	                bool customChrome = false; bool roundedCornersApplied = false; void* chromeState = nullptr; xui::f32 resizeInset = 0.f;
 					xui::f32 cornerRadius = 0.f;
+					xui::u32 chromeBorderColor = 0;
 					xui::f32 contentScale = 1.f;
 	};
 

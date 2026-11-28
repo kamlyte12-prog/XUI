@@ -10,6 +10,10 @@
 #include <windows.h>
 #include <dwmapi.h>
 #include <imm.h>
+// SDKs older than the Windows 11 border-colour attribute.
+#ifndef DWMWA_BORDER_COLOR
+#define DWMWA_BORDER_COLOR 34
+#endif
 #endif
 #include <glfw/glfw_platform.hpp>
 #ifdef _WIN32
@@ -102,6 +106,7 @@ WindowHandle GlfwPlatform::createWindow(const WindowDesc& d) {
 	const WindowHandle handle{ static_cast<u32>(m_windows.size()), 1 };
 	m_windows.push_back({ native, handle, this });
 	m_windows.back().cornerRadius = d.cornerRadius;
+	m_windows.back().chromeBorderColor = d.chromeBorderColor;
 	m_windows.back().contentScale = glfwScale(native).content.x;
 	glfwSetWindowUserPointer(native, &m_windows.back());
 	glfwSetWindowSizeCallback(native, onSize);
@@ -480,31 +485,76 @@ void GlfwPlatform::onMouse(GLFWwindow* w, int button, int action, int mods) {
 	push(w, e);
 }
 Key GlfwPlatform::mapKey(int k) {
-	if (k >= GLFW_KEY_A && k <= GLFW_KEY_Z) return static_cast<Key>('A' + k - GLFW_KEY_A);
-	if (k >= GLFW_KEY_0 && k <= GLFW_KEY_9) return static_cast<Key>('0' + k - GLFW_KEY_0);
+	// GLFW's printable-key codes are the ASCII uppercase values, matching the platform
+	// Key contract, so all of Space..Grave can be mapped directly.
+	if (k >= GLFW_KEY_SPACE && k <= GLFW_KEY_GRAVE_ACCENT) return static_cast<Key>(k);
 	switch (k) {
-	case GLFW_KEY_TAB: return Key::Tab;
-	case GLFW_KEY_ENTER: return Key::Enter;
-	case GLFW_KEY_SPACE: return Key::Space;
 	case GLFW_KEY_ESCAPE: return Key::Escape;
+	case GLFW_KEY_ENTER: return Key::Enter;
+	case GLFW_KEY_TAB: return Key::Tab;
 	case GLFW_KEY_BACKSPACE: return Key::Backspace;
-	case GLFW_KEY_DELETE: return Key::Delete;
 	case GLFW_KEY_INSERT: return Key::Insert;
+	case GLFW_KEY_DELETE: return Key::Delete;
+	case GLFW_KEY_RIGHT: return Key::Right;
+	case GLFW_KEY_LEFT: return Key::Left;
+	case GLFW_KEY_DOWN: return Key::Down;
+	case GLFW_KEY_UP: return Key::Up;
+	case GLFW_KEY_PAGE_UP: return Key::PageUp;
+	case GLFW_KEY_PAGE_DOWN: return Key::PageDown;
 	case GLFW_KEY_HOME: return Key::Home;
 	case GLFW_KEY_END: return Key::End;
-	case GLFW_KEY_LEFT: return Key::Left;
-	case GLFW_KEY_RIGHT: return Key::Right;
-	case GLFW_KEY_UP: return Key::Up;
-	case GLFW_KEY_DOWN: return Key::Down;
+	case GLFW_KEY_CAPS_LOCK: return Key::CapsLock;
+	case GLFW_KEY_SCROLL_LOCK: return Key::ScrollLock;
+	case GLFW_KEY_NUM_LOCK: return Key::NumLock;
+	case GLFW_KEY_PRINT_SCREEN: return Key::PrintScreen;
+	case GLFW_KEY_PAUSE: return Key::Pause;
+	case GLFW_KEY_F1: return Key::F1;
+	case GLFW_KEY_F2: return Key::F2;
 	case GLFW_KEY_F3: return Key::F3;
 	case GLFW_KEY_F4: return Key::F4;
+	case GLFW_KEY_F5: return Key::F5;
+	case GLFW_KEY_F6: return Key::F6;
+	case GLFW_KEY_F7: return Key::F7;
+	case GLFW_KEY_F8: return Key::F8;
+	case GLFW_KEY_F9: return Key::F9;
+	case GLFW_KEY_F10: return Key::F10;
+	case GLFW_KEY_F11: return Key::F11;
+	case GLFW_KEY_F12: return Key::F12;
+	case GLFW_KEY_KP_0: return Key::Kp0;
+	case GLFW_KEY_KP_1: return Key::Kp1;
+	case GLFW_KEY_KP_2: return Key::Kp2;
+	case GLFW_KEY_KP_3: return Key::Kp3;
+	case GLFW_KEY_KP_4: return Key::Kp4;
+	case GLFW_KEY_KP_5: return Key::Kp5;
+	case GLFW_KEY_KP_6: return Key::Kp6;
+	case GLFW_KEY_KP_7: return Key::Kp7;
+	case GLFW_KEY_KP_8: return Key::Kp8;
+	case GLFW_KEY_KP_9: return Key::Kp9;
+	case GLFW_KEY_KP_DECIMAL: return Key::KpDecimal;
+	case GLFW_KEY_KP_DIVIDE: return Key::KpDivide;
+	case GLFW_KEY_KP_MULTIPLY: return Key::KpMultiply;
+	case GLFW_KEY_KP_SUBTRACT: return Key::KpSubtract;
+	case GLFW_KEY_KP_ADD: return Key::KpAdd;
+	case GLFW_KEY_KP_ENTER: return Key::KpEnter;
+	case GLFW_KEY_KP_EQUAL: return Key::KpEqual;
+	case GLFW_KEY_LEFT_SHIFT: return Key::LeftShift;
+	case GLFW_KEY_LEFT_CONTROL: return Key::LeftCtrl;
+	case GLFW_KEY_LEFT_ALT: return Key::LeftAlt;
+	case GLFW_KEY_LEFT_SUPER: return Key::LeftSuper;
+	case GLFW_KEY_RIGHT_SHIFT: return Key::RightShift;
+	case GLFW_KEY_RIGHT_CONTROL: return Key::RightCtrl;
+	case GLFW_KEY_RIGHT_ALT: return Key::RightAlt;
+	case GLFW_KEY_RIGHT_SUPER: return Key::RightSuper;
+	case GLFW_KEY_MENU: return Key::Menu;
 	default: return Key::None;
 	}
 }
 void GlfwPlatform::onKey(GLFWwindow* w, int key, int, int action, int mods) {
 	if (action != GLFW_PRESS && action != GLFW_REPEAT && action != GLFW_RELEASE) return;
 	Event e{}; e.type = action == GLFW_RELEASE ? EventType::KeyUp : EventType::KeyDown; e.key = mapKey(key); e.repeat = action == GLFW_REPEAT;
-	e.mods = (mods & GLFW_MOD_SHIFT ? static_cast<u8>(Mod::Shift) : 0) | (mods & GLFW_MOD_CONTROL ? static_cast<u8>(Mod::Ctrl) : 0); push(w, e);
+	e.mods = (mods & GLFW_MOD_SHIFT ? static_cast<u8>(Mod::Shift) : 0) | (mods & GLFW_MOD_CONTROL ? static_cast<u8>(Mod::Ctrl) : 0) |
+		(mods & GLFW_MOD_ALT ? static_cast<u8>(Mod::Alt) : 0) | (mods & GLFW_MOD_SUPER ? static_cast<u8>(Mod::Super) : 0);
+	push(w, e);
 }
 void GlfwPlatform::onChar(GLFWwindow* w, unsigned int codepoint) {
 	Event e{}; e.type = EventType::TextInput; e.codepoint = codepoint; push(w, e);
@@ -635,6 +685,16 @@ void GlfwPlatform::installChrome(Window& window) {
 		const DWM_WINDOW_CORNER_PREFERENCE preference = DWMWCP_ROUND;
 		window.roundedCornersApplied = SUCCEEDED(DwmSetWindowAttribute(
 			hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &preference, sizeof(preference)));
+		// DWM's 1px frame border traces the rounded arc as hard pixel steps at fractional
+		// DPI, which reads as a pixelated corner. Repaint it in the app's own background so
+		// the arc keeps DWM's antialiased clip without the stepping frame line.
+		if (window.chromeBorderColor) {
+			const COLORREF border = RGB(
+				static_cast<BYTE>((window.chromeBorderColor >> 24) & 0xFF),
+				static_cast<BYTE>((window.chromeBorderColor >> 16) & 0xFF),
+				static_cast<BYTE>((window.chromeBorderColor >> 8) & 0xFF));
+			DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &border, sizeof(border));
+		}
 	}
 }
 

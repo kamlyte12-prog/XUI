@@ -1983,12 +1983,15 @@ TEST(xui_facade_resolves_window_defaults_with_fieldwise_precedence) {
 		CHECK_EQ(size.x, static_cast<f32>(expectedWidth));
 		CHECK_EQ(size.y, static_cast<f32>(expectedHeight));
 		CHECK_EQ(platform.lastCornerRadius(), 12.f);
+		// A rounded client uses its authored background for the native frame border so DWM's
+		// default light line cannot step along the corner arc.
+		CHECK_EQ(platform.lastChromeBorderColor(), 0x123456FFu);
 		CHECK_EQ(app.runtime().windowTitle(), std::string(expectedTitle));
 		app.shutdown();
 	};
 
 	constexpr std::string_view xssSource = R"(
-Window.surface { resting: { window-title: "Style title", size: 800px 600px, radius: 12px } }
+Window.surface { resting: { window-title: "Style title", size: 800px 600px, radius: 12px, bg: #123456 } }
 )";
 	runCase(R"(Window[class: "surface"] { Text("x") })", xssSource, {}, "Style title", 800, 600);
 	runCase(R"(Window(title: "Document title", size: 900x650)[class: "surface"] { Text("x") })",
@@ -3013,8 +3016,30 @@ TEST(calculator_example_assets_parse_validate_and_layout) {
 		std::cerr << error << '\n';
 		return;
 	}
-	ui.layout(400.f, 665.f);
+	ui.layout(320.f, 500.f);
 	CHECK(ui.bounds(ui.root()).w > 0.f);
+	// The demo mirrors the real Windows 11 Calculator geometry: a 320x500 client area and a
+	// 468px stage (48 toolbar + 23 expression + 44 result + 33 memory + 320 keypad). The 4x6
+	// keypad uses pad 3 and gap 2, so keys are 77 x 50.67 at the default size.
+	const Rect root = ui.bounds(ui.root());
+	const Rect key = UiRuntimeFontWeightProbe::bounds(ui, "key-7");
+	const Rect equals = UiRuntimeFontWeightProbe::bounds(ui, "key-equals");
+	const Rect display = UiRuntimeFontWeightProbe::bounds(ui, "display");
+	CHECK_NEAR(root.w, 320.f, 0.01f);
+	CHECK_NEAR(root.h, 500.f, 0.01f);
+	CHECK_NEAR(key.w, 77.f, 0.01f);
+	CHECK_NEAR(key.h, 304.f / 6.f, 0.01f);
+	CHECK_NEAR(display.h, 44.f, 0.01f);
+	CHECK(equals.y > key.y);
+	// The memory toolbar is a six-column Grid: pad 4 leaves 312px, so each text button is
+	// exactly 52px wide and the chevron shares the same track instead of being squeezed.
+	const Rect memoryFirst = UiRuntimeFontWeightProbe::bounds(ui, "memory-clear");
+	const Rect memoryLast = UiRuntimeFontWeightProbe::bounds(ui, "memory-panel");
+	CHECK_NEAR(memoryFirst.x, 4.f, 0.01f);
+	CHECK_NEAR(memoryFirst.w, 52.f, 0.01f);
+	CHECK_NEAR(memoryLast.w, 52.f, 0.01f);
+	CHECK_NEAR(memoryLast.right(), 316.f, 0.01f);
+	CHECK(memoryFirst.y >= display.y + display.h - 0.01f);
 	CHECK(ui.value("display").has_value());
 	CHECK(ui.nodeCount() >= 40u);
 }
